@@ -1,10 +1,18 @@
 {
   "name": "secure-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sistema ultra seguro con cifrado multicapa y seguridad operacional avanzada",
+  "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "node test_system.js",
+    "decrypt-message": "node scripts/decryptMessage.js",
+    "emergency-backup": "node scripts/emergencyRecovery.js backup",
+    "emergency-restore": "node scripts/emergencyRecovery.js restore",
+    "rotate-keys": "node -e \"require('./src/tasks/scheduleKeyRotation').executeManualRotation()\"",
+    "check-system": "node -e \"require('./src/middleware/serverCheck.middleware').performAsyncCheck()\"",
+    "security-audit": "node scripts/securityAudit.js"
   },
   "keywords": [],
   "author": "",

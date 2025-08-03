@@ -1,0 +1,291 @@
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const geoip = require('geoip-lite');
+const credentialBuilder = require('../config/credential-builder');
+
+class SecureAuthService {
+    constructor() {
+        this.suspiciousSessions = new Set();
+        this.deviceFingerprints = new Map();
+        this.failedAttempts = new Map();
+        this.setupSessionMonitoring();
+    }
+
+    async authenticateUser(username, password, deviceInfo) {
+        try {
+            // Verificar intentos fallidos previos
+            if (await this.isAccountLocked(username)) {
+                throw new Error('Cuenta temporalmente bloqueada por múltiples intentos fallidos');
+            }
+
+            // Validar credenciales básicas
+            const user = await this.validateCredentials(username, password);
+            if (!user) {
+                await this.recordFailedAttempt(username, deviceInfo);
+                throw new Error('Credenciales inválidas');
+            }
+
+            // Generar fingerprint del dispositivo
+            const deviceFingerprint = this.generateDeviceFingerprint(deviceInfo);
+
+            // Calcular nivel de riesgo
+            const riskLevel = await this.calculateRiskLevel(user, deviceInfo, deviceFingerprint);
+
+            // Crear sesión segura
+            const sessionData = {
+                userId: user.id,
+                username: user.username,
+                deviceFingerprint,
+                ipAddress: deviceInfo.ipAddress,
+                riskLevel,
+                createdAt: Date.now()
+            };
+
+            const token = await this.generateSecureToken(sessionData);
+            await this.createSecureSession(token, sessionData);
+
+            // Limpiar intentos fallidos exitosos
+            this.failedAttempts.delete(username);
+
+            return {
+                success: true,
+                token,
+                expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+                riskLevel,
+                requiresVerification: false
+            };
+
+        } catch (error) {
+            await this.logFailedAttempt(username, deviceInfo, error.message);
+            throw error;
+        }
+    }
+
+    async validateCredentials(username, password) {
+        const db = require('../config/database');
+        const tripleEncryptor = require('../crypto/tripleEncryptor');
+
+        try {
+            const [users] = await db.query(
+                'SELECT id, username, password_hash FROM users WHERE username = ?',
+                [username]
+            );
+
+            if (users.length === 0) {
+                return null;
+            }
+
+            const user = users[0];
+            const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+            if (!isValidPassword) {
+                return null;
+            }
+
+            return user;
+        } catch (error) {
+            console.error('❌ Error validating credentials:', error);
+            return null;
+        }
+    }
+
+    generateDeviceFingerprint(deviceInfo) {
+        const components = [
+            deviceInfo.userAgent || '',
+            deviceInfo.screenResolution || '',
+            deviceInfo.timezone || '',
+            deviceInfo.language || '',
+            deviceInfo.platform || '',
+            deviceInfo.colorDepth || '',
+            deviceInfo.pixelRatio || ''
+        ].join('|');
+
+        return crypto.createHash('sha256').update(components).digest('hex');
+    }
+
+    async calculateRiskLevel(user, deviceInfo, deviceFingerprint) {
+        let riskScore = 0;
+
+        // Factor 1: Dispositivo desconocido
+        const isKnownDevice = await this.isKnownDevice(user.id, deviceFingerprint);
+        if (!isKnownDevice) riskScore += 30;
+
+        // Factor 2: Nueva ubicación geográfica
+        const isNewLocation = await this.isNewLocation(user.id, deviceInfo.ipAddress);
+        if (isNewLocation) riskScore += 25;
+
+        // Factor 3: Horario inusual
+        if (this.isOffHours()) riskScore += 15;
+
+        // Factor 4: Intentos fallidos recientes
+        const recentFailures = await this.getRecentFailedAttempts(user.id);
+        if (recentFailures > 0) riskScore += (recentFailures * 10);
+
+        // Clasificar riesgo
+        if (riskScore >= 70) return 'high';
+        if (riskScore >= 40) return 'medium';
+        return 'low';
+    }
+
+    async generateSecureToken(sessionData) {
+        const jwtSecret = credentialBuilder.generateJWTSecret();
+
+        const payload = {
+            userId: sessionData.userId,
+            username: sessionData.username,
+            sessionId: crypto.randomUUID(),
+            deviceFingerprint: sessionData.deviceFingerprint,
+            riskLevel: sessionData.riskLevel,
+            iat: Math.floor(Date.now() / 1000)
+        };
+
+        return jwt.sign(payload, jwtSecret, { expiresIn: '5d' });
+    }
+
+    async createSecureSession(token, sessionData) {
+        const db = require('../config/database');
+        const geo = geoip.lookup(sessionData.ipAddress);
+
+        const tokenHash = this.hashToken(token);
+        const expiresAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+
+        await db.query(`
+            INSERT INTO user_sessions 
+            (user_id, jwt_token_hash, ip_address, user_agent, device_fingerprint, 
+             risk_level, location_country, expires_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            sessionData.userId,
+            tokenHash,
+            sessionData.ipAddress,
+            sessionData.userAgent || 'Unknown',
+            sessionData.deviceFingerprint,
+            sessionData.riskLevel,
+            geo ? geo.country : null,
+            expiresAt
+        ]);
+    }
+
+    async validateToken(token, currentIP) {
+        try {
+            const jwtSecret = credentialBuilder.generateJWTSecret();
+            const decoded = jwt.verify(token, jwtSecret);
+
+            // Verificar que la sesión existe
+            const db = require('../config/database');
+            const [sessions] = await db.query(
+                'SELECT * FROM user_sessions WHERE jwt_token_hash = ? AND expires_at > NOW()',
+                [this.hashToken(token)]
+            );
+
+            if (sessions.length === 0) {
+                throw new Error('Sesión inválida o expirada');
+            }
+
+            const session = sessions[0];
+
+            // Verificar si la sesión está marcada como sospechosa
+            if (session.is_suspicious) {
+                throw new Error('Sesión marcada como sospechosa');
+            }
+
+            return {
+                valid: true,
+                userId: decoded.userId,
+                username: decoded.username,
+                sessionId: session.id,
+                riskLevel: session.risk_level
+            };
+
+        } catch (error) {
+            return {
+                valid: false,
+                error: error.message
+            };
+        }
+    }
+
+    hashToken(token) {
+        return crypto.createHash('sha256').update(token).digest('hex');
+    }
+
+    async recordFailedAttempt(username, deviceInfo) {
+        const key = `${username}_${deviceInfo.ipAddress}`;
+        const attempts = this.failedAttempts.get(key) || [];
+
+        attempts.push(Date.now());
+        this.failedAttempts.set(key, attempts);
+
+        // Limpiar intentos antiguos (más de 1 hora)
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+        const recentAttempts = attempts.filter(timestamp => timestamp > oneHourAgo);
+        this.failedAttempts.set(key, recentAttempts);
+    }
+
+    async isAccountLocked(username) {
+        const attempts = this.failedAttempts.get(username) || [];
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+        const recentAttempts = attempts.filter(timestamp => timestamp > oneHourAgo);
+
+        return recentAttempts.length >= 5; // Bloquear después de 5 intentos fallidos
+    }
+
+    setupSessionMonitoring() {
+        // Auditoría de sesiones cada 5 minutos
+        setInterval(async () => {
+            await this.auditActiveSessions();
+        }, 5 * 60 * 1000);
+
+        // Limpiar datos antiguos cada hora
+        setInterval(() => {
+            this.cleanupOldData();
+        }, 60 * 60 * 1000);
+    }
+
+    async auditActiveSessions() {
+        // Implementar auditoría de sesiones activas
+        console.log('🔍 Auditando sesiones activas...');
+    }
+
+    cleanupOldData() {
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+        // Limpiar intentos fallidos antiguos
+        for (const [key, attempts] of this.failedAttempts.entries()) {
+            const recentAttempts = attempts.filter(timestamp => timestamp > oneHourAgo);
+            if (recentAttempts.length === 0) {
+                this.failedAttempts.delete(key);
+            } else {
+                this.failedAttempts.set(key, recentAttempts);
+            }
+        }
+
+        console.log('🧹 Limpieza de datos de autenticación completada');
+    }
+
+    async logFailedAttempt(username, deviceInfo, error) {
+        const db = require('../config/database');
+        const tripleEncryptor = require('../crypto/tripleEncryptor');
+
+        try {
+            const encryptedDetails = tripleEncryptor.encrypt(JSON.stringify({
+                username,
+                ipAddress: deviceInfo.ipAddress,
+                userAgent: deviceInfo.userAgent,
+                error,
+                timestamp: new Date().toISOString()
+            }));
+
+            await db.query(
+                `INSERT INTO security_logs (event_type, encrypted_details, ip_address, severity) 
+                    VALUES ('LOGIN_FAILED', ?, ?, 'medium')`,
+                [encryptedDetails, deviceInfo.ipAddress]
+            );
+        } catch (logError) {
+            console.error('❌ Error logging failed attempt:', logError);
+        }
+    }
+}
+
+module.exports = new SecureAuthService();
