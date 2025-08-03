@@ -1,0 +1,72 @@
+{
+  "timestamp": "2025-08-03T16:24:02.136Z",
+  "overallScore": 49,
+  "categories": {
+    "configuration": {
+      "score": 0,
+      "maxScore": 100,
+      "issues": [
+        "Variable de entorno faltante: BASE_SEED",
+        "Variable de entorno faltante: JWT_SEED",
+        "Variable de entorno faltante: ENCRYPTION_SEED",
+        "Variable de entorno faltante: DB_FRAGMENT_1",
+        "Variable de entorno faltante: DB_FRAGMENT_2",
+        "Variable de entorno faltante: DB_FRAGMENT_3",
+        "Variable de entorno faltante: NODE_ENV",
+        "Configuración de seguridad deshabilitada: INTEGRITY_MONITOR_ENABLED",
+        "Configuración de seguridad deshabilitada: AUTO_ROTATION_ENABLED",
+        "Configuración de seguridad deshabilitada: ANOMALY_DETECTION_ENABLED",
+        "Configuración de seguridad deshabilitada: AUTO_BLOCK_MALICIOUS_IPS",
+        "Sistema no está en modo producción",
+        "BASE_SEED tiene longitud insuficiente (recomendado: 64+ caracteres)"
+      ]
+    },
+    "database": {
+      "score": 0,
+      "maxScore": 100,
+      "issues": [
+        "Error durante auditoría: Variables de entorno faltantes: BASE_SEED, DB_FRAGMENT_1, DB_FRAGMENT_2, DB_FRAGMENT_3"
+      ]
+    },
+    "encryption": {
+      "score": 100,
+      "maxScore": 100,
+      "issues": []
+    },
+    "files": {
+      "score": 80,
+      "maxScore": 100,
+      "issues": [
+        "Permisos inseguros en .env: 666 (recomendado: 600)"
+      ]
+    },
+    "dependencies": {
+      "score": 80,
+      "maxScore": 100,
+      "issues": [
+        "Versión de Node.js no especificada en package.json"
+      ]
+    },
+    "logs": {
+      "score": 0,
+      "maxScore": 100,
+      "issues": [
+        "Error durante auditoría: Variables de entorno faltantes: BASE_SEED, DB_FRAGMENT_1, DB_FRAGMENT_2, DB_FRAGMENT_3"
+      ]
+    },
+    "integrity": {
+      "score": 80,
+      "maxScore": 100,
+      "issues": [
+        "No hay registro de verificaciones de integridad previas"
+      ]
+    }
+  },
+  "recommendations": [
+    "Puntuación general baja - revisar todas las categorías"
+  ],
+  "criticalIssues": [],
+  "warnings": [
+    "Ajustar permisos del archivo .env"
+  ]
+}

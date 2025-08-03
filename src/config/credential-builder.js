@@ -37,9 +37,11 @@ class CredentialBuilder {
         try {
             const userEnvVar = channel === 'primary' ? 'PRIMARY_EMAIL_USER' : 'BACKUP_EMAIL_USER';
             const domainEnvVar = channel === 'primary' ? 'EMAIL_DOMAIN_1' : 'EMAIL_DOMAIN_2';
+            const passwordEnvVar = channel === 'primary' ? 'PRIMARY_EMAIL_PASSWORD' : 'BACKUP_EMAIL_PASSWORD';
 
             const user = this.getEnvVariable(userEnvVar);
             const domain = this.getEnvVariable(domainEnvVar);
+            const password = this.getEnvVariable(passwordEnvVar);
 
             if (!user || !domain) {
                 throw new Error(`Credenciales de email ${channel} incompletas`);
@@ -47,7 +49,7 @@ class CredentialBuilder {
 
             return {
                 user: `${user}@${domain}`,
-                pass: this.generateEmailPassword(channel),
+                pass: password || this.generateEmailPassword(channel), // Usar contraseña real o generar una
                 service: domain.includes('gmail') ? 'gmail' : 'smtp'
             };
         } catch (error) {
@@ -85,15 +87,21 @@ class CredentialBuilder {
             'BASE_SEED',
             'DB_FRAGMENT_1',
             'DB_FRAGMENT_2',
-            'DB_FRAGMENT_3',
-            'PRIMARY_EMAIL_USER',
-            'EMAIL_DOMAIN_1'
+            'DB_FRAGMENT_3'
         ];
+
+        // Solo validar email si las variables están presentes
+        const primaryEmailUser = this.getEnvVariable('PRIMARY_EMAIL_USER');
+        const emailDomain = this.getEnvVariable('EMAIL_DOMAIN_1');
+
+        if (primaryEmailUser && emailDomain) {
+            required.push('PRIMARY_EMAIL_USER', 'EMAIL_DOMAIN_1');
+        }
 
         const missing = [];
 
         required.forEach(key => {
-            if (!this.getEnvVariable(key)) {
+            if (!process.env[key]) {
                 missing.push(key);
             }
         });

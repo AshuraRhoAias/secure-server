@@ -171,8 +171,8 @@ class SecureServer {
             }
         );
 
-        // Ruta 404
-        this.app.use('*', (req, res) => {
+        // Ruta 404 - corregida
+        this.app.use((req, res) => {
             res.status(404).json({
                 success: false,
                 message: 'Ruta no encontrada'

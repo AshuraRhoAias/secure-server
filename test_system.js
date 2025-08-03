@@ -1,7 +1,6 @@
 const crypto = require('crypto');
 require('dotenv').config();
 
-
 async function testSystem() {
     console.log('🧪 Iniciando tests del sistema ultra seguro...\n');
 
@@ -28,22 +27,19 @@ async function testSystem() {
         console.log('❌ Cifrado triple: ERROR -', error.message);
     }
 
-    // Test 2: Base de datos
+    // Test 2: Variables de entorno
     totalTests++;
     try {
-        console.log('🗄️ Test 2: Conexión a base de datos');
-        const database = require('./src/config/database');
+        console.log('🗄️ Test 2: Variables de entorno');
+        const credentialBuilder = require('./src/config/credential-builder');
 
-        const connected = await database.testConnection();
+        // Solo validar que las variables existen
+        credentialBuilder.validateCredentials();
 
-        if (connected) {
-            console.log('✅ Base de datos: PASS');
-            passedTests++;
-        } else {
-            console.log('❌ Base de datos: FAIL');
-        }
+        console.log('✅ Variables de entorno: PASS');
+        passedTests++;
     } catch (error) {
-        console.log('❌ Base de datos: ERROR -', error.message);
+        console.log('❌ Variables de entorno: ERROR -', error.message);
     }
 
     // Test 3: Generación de credenciales

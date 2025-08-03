@@ -1,34 +1,49 @@
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const credentialBuilder = require('../config/credential-builder');
 
 class SecureCommunications {
     constructor() {
         this.channels = new Map();
+        this.emailDisabled = process.env.DISABLE_EMAIL_NOTIFICATIONS === 'true';
+        this.notificationsDir = path.join(__dirname, '../notifications');
         this.setupChannels();
         this.messageQueue = [];
         this.retryAttempts = new Map();
+        this.ensureNotificationsDir();
+    }
+
+    ensureNotificationsDir() {
+        if (!fs.existsSync(this.notificationsDir)) {
+            fs.mkdirSync(this.notificationsDir, { recursive: true });
+        }
     }
 
     setupChannels() {
         try {
-            // Canal principal - Gmail
-            const primaryEmail = credentialBuilder.buildEmailCredentials('primary');
-            this.channels.set('primary_email', {
-                name: 'primary_email',
-                type: 'email',
-                transporter: nodemailer.createTransporter({
-                    service: 'gmail',
-                    auth: {
-                        user: primaryEmail.user,
-                        pass: primaryEmail.pass
-                    },
-                    secure: true,
-                    tls: { rejectUnauthorized: true }
-                }),
-                priority: 1,
-                maxRetries: 3
-            });
+            if (this.emailDisabled) {
+                console.log('📧 Notificaciones por email DESHABILITADAS - se guardarán como JSON');
+            } else {
+                // Canal principal - Gmail
+                const primaryEmail = credentialBuilder.buildEmailCredentials('primary');
+                this.channels.set('primary_email', {
+                    name: 'primary_email',
+                    type: 'email',
+                    transporter: nodemailer.createTransport({
+                        service: 'gmail',
+                        auth: {
+                            user: primaryEmail.user,
+                            pass: primaryEmail.pass
+                        },
+                        secure: true,
+                        tls: { rejectUnauthorized: false }
+                    }),
+                    priority: 1,
+                    maxRetries: 3
+                });
+            }
 
             // Canal de emergencia - Telegram (si está configurado)
             try {
@@ -47,10 +62,14 @@ class SecureCommunications {
                 console.log('ℹ️ Canal de Telegram no disponible');
             }
 
-            console.log(`✅ ${this.channels.size} canales de comunicación configurados`);
+            const activeChannels = this.emailDisabled ?
+                this.channels.size :
+                this.channels.size + 1; // +1 por JSON cuando email está deshabilitado
+
+            console.log(`✅ ${activeChannels} canales de comunicación configurados`);
 
         } catch (error) {
-            console.error('❌ Error configurando canales:', error);
+            console.error('❌ Error configurando canales:', error.message);
         }
     }
 
@@ -60,31 +79,38 @@ class SecureCommunications {
             const camouflageMessage = await this.createCamouflageMessage(alertData);
 
             const results = [];
-            const channelsToUse = this.selectChannels(priority);
 
-            // Enviar por los canales seleccionados
-            for (const channel of channelsToUse) {
-                try {
-                    const result = await this.sendViaChannel(channel, camouflageMessage);
-                    results.push({
-                        channel: channel.name,
-                        success: true,
-                        messageId: result.messageId || result.message_id
-                    });
+            // Si el email está deshabilitado, guardar como JSON
+            if (this.emailDisabled) {
+                const jsonResult = await this.saveAsJSON(camouflageMessage, alertData, priority);
+                results.push(jsonResult);
+            } else {
+                // Enviar por canales normales
+                const channelsToUse = this.selectChannels(priority);
 
-                    if (priority !== 'critical') break;
+                for (const channel of channelsToUse) {
+                    try {
+                        const result = await this.sendViaChannel(channel, camouflageMessage);
+                        results.push({
+                            channel: channel.name,
+                            success: true,
+                            messageId: result.messageId || result.message_id
+                        });
 
-                } catch (channelError) {
-                    console.error(`❌ Error en canal ${channel.name}:`, channelError.message);
-                    results.push({
-                        channel: channel.name,
-                        success: false,
-                        error: channelError.message
-                    });
+                        if (priority !== 'critical') break;
+
+                    } catch (channelError) {
+                        console.error(`❌ Error en canal ${channel.name}:`, channelError.message);
+                        results.push({
+                            channel: channel.name,
+                            success: false,
+                            error: channelError.message
+                        });
+                    }
                 }
             }
 
-            // Verificar que al menos un canal funcionó
+            // Verificar que al menos un "canal" funcionó
             const successfulChannels = results.filter(r => r.success);
             if (successfulChannels.length === 0) {
                 throw new Error('Todos los canales de comunicación fallaron');
@@ -96,17 +122,59 @@ class SecureCommunications {
                 alertType: alertData.type,
                 priority,
                 channels: results,
+                emailDisabled: this.emailDisabled,
                 timestamp: new Date().toISOString()
             });
 
             return {
                 success: true,
-                channelsUsed: results
+                channelsUsed: results,
+                emailDisabled: this.emailDisabled
             };
 
         } catch (error) {
             console.error('❌ Error enviando alerta segura:', error);
             throw error;
+        }
+    }
+
+    async saveAsJSON(message, alertData, priority) {
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `notification_${alertData.type}_${timestamp}.json`;
+            const filepath = path.join(this.notificationsDir, filename);
+
+            const notificationData = {
+                timestamp: new Date().toISOString(),
+                type: alertData.type,
+                severity: alertData.severity,
+                priority: priority,
+                subject: message.subject,
+                body: message.body,
+                originalData: alertData,
+                emailDisabled: true,
+                recipient: process.env.RECIPIENT_EMAIL || 'no-configured',
+                note: 'Esta notificación se guardó como JSON porque las notificaciones por email están deshabilitadas'
+            };
+
+            await fs.promises.writeFile(filepath, JSON.stringify(notificationData, null, 2));
+
+            console.log(`📄 Notificación guardada como JSON: ${filename}`);
+
+            return {
+                channel: 'json_file',
+                success: true,
+                messageId: filename,
+                filepath: filepath
+            };
+
+        } catch (error) {
+            console.error('❌ Error guardando notificación como JSON:', error);
+            return {
+                channel: 'json_file',
+                success: false,
+                error: error.message
+            };
         }
     }
 
@@ -150,7 +218,9 @@ class SecureCommunications {
             'KEY_ROTATION_FAILED': '⚠️ Mantenimiento del Sistema Requerido',
             'SERVER_INTEGRITY_BREACH': '🚨 Alerta Crítica del Sistema',
             'ANOMALY_DETECTED': '🔍 Reporte de Actividad del Sistema',
-            'EMERGENCY_ALERT': '🚨 Notificación Crítica Inmediata'
+            'EMERGENCY_ALERT': '🚨 Notificación Crítica Inmediata',
+            'SYSTEM_STARTUP': '🚀 Sistema Iniciado',
+            'SYSTEM_SHUTDOWN': '🛑 Sistema Apagado'
         };
 
         return subjects[alertType] || '📋 Reporte Automático del Sistema';
@@ -163,7 +233,9 @@ class SecureCommunications {
             'KEY_ROTATION_FAILED': 'high',
             'SECURITY_INCIDENT': 'high',
             'ANOMALY_DETECTED': 'normal',
-            'KEY_ROTATION_SUCCESS': 'normal'
+            'KEY_ROTATION_SUCCESS': 'normal',
+            'SYSTEM_STARTUP': 'normal',
+            'SYSTEM_SHUTDOWN': 'normal'
         };
 
         return priorityMap[alertType] || 'normal';
@@ -235,6 +307,36 @@ class SecureCommunications {
         console.log('🧪 Probando canales de comunicación...');
         const results = [];
 
+        if (this.emailDisabled) {
+            // Test del sistema JSON
+            try {
+                const testMessage = {
+                    subject: '🧪 Test de Conectividad del Sistema',
+                    body: `Test de conectividad del sistema JSON\nTiempo: ${new Date().toISOString()}\nEstado: Funcional`,
+                    priority: 'normal'
+                };
+
+                const result = await this.saveAsJSON(testMessage, {
+                    type: 'CONNECTIVITY_TEST',
+                    severity: 'info',
+                    details: 'Test de conectividad del sistema'
+                }, 'normal');
+
+                results.push({
+                    channel: 'json_file',
+                    status: result.success ? 'success' : 'error',
+                    message: result.success ? 'Sistema JSON funcional' : result.error
+                });
+
+            } catch (error) {
+                results.push({
+                    channel: 'json_file',
+                    status: 'error',
+                    message: error.message
+                });
+            }
+        }
+
         for (const [name, channel] of this.channels) {
             try {
                 const testMessage = {
@@ -275,11 +377,41 @@ class SecureCommunications {
 
     getStats() {
         return {
-            availableChannels: this.channels.size,
-            channelTypes: Array.from(this.channels.values()).map(c => c.type),
+            availableChannels: this.emailDisabled ? this.channels.size + 1 : this.channels.size,
+            channelTypes: this.emailDisabled ?
+                ['json_file', ...Array.from(this.channels.values()).map(c => c.type)] :
+                Array.from(this.channels.values()).map(c => c.type),
+            emailDisabled: this.emailDisabled,
             messageQueue: this.messageQueue.length,
-            retryAttempts: this.retryAttempts.size
+            retryAttempts: this.retryAttempts.size,
+            notificationsDir: this.notificationsDir
         };
+    }
+
+    // Método para leer notificaciones JSON guardadas
+    async getStoredNotifications(limit = 10) {
+        try {
+            const files = await fs.promises.readdir(this.notificationsDir);
+            const jsonFiles = files
+                .filter(file => file.endsWith('.json'))
+                .sort()
+                .slice(-limit);
+
+            const notifications = [];
+            for (const file of jsonFiles) {
+                const filepath = path.join(this.notificationsDir, file);
+                const content = await fs.promises.readFile(filepath, 'utf8');
+                notifications.push({
+                    filename: file,
+                    data: JSON.parse(content)
+                });
+            }
+
+            return notifications;
+        } catch (error) {
+            console.error('❌ Error leyendo notificaciones almacenadas:', error);
+            return [];
+        }
     }
 }
 
