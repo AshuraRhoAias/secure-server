@@ -1,4 +1,54 @@
-require('dotenv').config();
+// Cargar variables de entorno PRIMERO y validar
+const path = require('path');
+const fs = require('fs');
+
+// Verificar que el archivo .env existe
+const envPath = path.join(__dirname, '../.env');
+if (!fs.existsSync(envPath)) {
+    console.error('❌ ARCHIVO .env NO ENCONTRADO');
+    console.error(`   Ubicación esperada: ${envPath}`);
+    console.error('   Por favor, asegúrate de que el archivo .env esté en la raíz del proyecto');
+    process.exit(1);
+}
+
+// Cargar dotenv con configuración explícita
+const dotenvResult = require('dotenv').config({ 
+    path: envPath,
+    debug: process.env.DEBUG_DOTENV === 'true'
+});
+
+// Verificar si hubo errores cargando dotenv
+if (dotenvResult.error) {
+    console.error('❌ ERROR CARGANDO ARCHIVO .env:', dotenvResult.error.message);
+    process.exit(1);
+}
+
+// Validar variables críticas inmediatamente
+const criticalVars = [
+    'BASE_SEED',
+    'DB_FRAGMENT_1',
+    'DB_FRAGMENT_2',
+    'DB_FRAGMENT_3',
+    'NODE_ENV'
+];
+
+const missingVars = criticalVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+    console.error('❌ VARIABLES DE ENTORNO CRÍTICAS FALTANTES:');
+    missingVars.forEach(varName => {
+        console.error(`   - ${varName}`);
+    });
+    console.error('\n🔧 Soluciones posibles:');
+    console.error('   1. Verifica que el archivo .env esté en la raíz del proyecto');
+    console.error('   2. Verifica que no haya espacios extra en las líneas del .env');
+    console.error('   3. Ejecuta: npm run debug-env para más información');
+    process.exit(1);
+}
+
+console.log('✅ Variables de entorno cargadas correctamente');
+
+// Ahora continuar con el resto de imports
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -53,6 +103,13 @@ class SecureServer {
 
         } catch (error) {
             console.error('❌ Error iniciando servidor:', error);
+            
+            // Información adicional de debug
+            console.error('\n🔧 Información de debug:');
+            console.error(`   NODE_ENV: ${process.env.NODE_ENV || 'no definido'}`);
+            console.error(`   BASE_SEED definido: ${!!process.env.BASE_SEED}`);
+            console.error(`   DB_FRAGMENT_1 definido: ${!!process.env.DB_FRAGMENT_1}`);
+            
             process.exit(1);
         }
     }
@@ -61,13 +118,49 @@ class SecureServer {
         try {
             console.log('🔍 Validando configuración...');
 
-            // Validar credenciales
-            credentialBuilder.validateCredentials();
+            // Mostrar información de entorno
+            console.log(`   Entorno: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`   Puerto: ${this.port}`);
 
-            // Verificar conexión a base de datos
-            const dbConnected = await database.testConnection();
+            // Validar credenciales con mejor manejo de errores
+            try {
+                credentialBuilder.validateCredentials();
+                console.log('✅ Validación de credenciales exitosa');
+            } catch (credError) {
+                console.error('❌ Error en validación de credenciales:', credError.message);
+                throw credError;
+            }
+
+            // Verificar conexión a base de datos con reintentos
+            let dbConnected = false;
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (!dbConnected && attempts < maxAttempts) {
+                attempts++;
+                console.log(`   Intento de conexión DB ${attempts}/${maxAttempts}...`);
+                
+                try {
+                    dbConnected = await database.testConnection();
+                    if (dbConnected) {
+                        console.log('✅ Conexión a base de datos exitosa');
+                    } else {
+                        console.log(`   ⏳ Intento ${attempts} falló, reintentando...`);
+                        if (attempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2 segundos
+                        }
+                    }
+                } catch (dbError) {
+                    console.error(`   ❌ Error en intento ${attempts}:`, dbError.message);
+                    if (attempts === maxAttempts) {
+                        throw new Error(`No se pudo conectar a la base de datos después de ${maxAttempts} intentos`);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+
             if (!dbConnected) {
-                throw new Error('No se pudo conectar a la base de datos');
+                throw new Error('No se pudo establecer conexión con la base de datos');
             }
 
             console.log('✅ Configuración validada');
@@ -125,7 +218,9 @@ class SecureServer {
                     status: 'healthy',
                     timestamp: new Date().toISOString(),
                     uptime: process.uptime(),
-                    version: '1.0.0'
+                    version: '1.0.0',
+                    environment: process.env.NODE_ENV || 'development',
+                    envVarsLoaded: !!process.env.BASE_SEED
                 };
 
                 res.json(healthStatus);
@@ -136,6 +231,34 @@ class SecureServer {
                 });
             }
         });
+
+        // Ruta de diagnóstico de variables de entorno (solo para desarrollo)
+        if (process.env.NODE_ENV === 'development') {
+            this.app.get('/debug/env', (req, res) => {
+                const criticalVars = [
+                    'BASE_SEED',
+                    'DB_FRAGMENT_1',
+                    'DB_FRAGMENT_2',
+                    'DB_FRAGMENT_3',
+                    'PRIMARY_EMAIL_USER',
+                    'EMAIL_DOMAIN_1',
+                    'NODE_ENV'
+                ];
+
+                const envStatus = {};
+                criticalVars.forEach(varName => {
+                    envStatus[varName] = {
+                        defined: !!process.env[varName],
+                        length: process.env[varName] ? process.env[varName].length : 0
+                    };
+                });
+
+                res.json({
+                    envVarsStatus: envStatus,
+                    dotenvLoaded: dotenvResult.parsed ? Object.keys(dotenvResult.parsed).length : 0
+                });
+            });
+        }
 
         // Rutas de autenticación
         this.app.use('/api/auth', authRoutes);
@@ -149,7 +272,8 @@ class SecureServer {
                         server: {
                             uptime: process.uptime(),
                             nodeVersion: process.version,
-                            platform: process.platform
+                            platform: process.platform,
+                            environment: process.env.NODE_ENV || 'development'
                         },
                         security: {
                             integrityCheck: serverCheck.getStatus(),
@@ -171,7 +295,7 @@ class SecureServer {
             }
         );
 
-        // Ruta 404 - corregida
+        // Ruta 404
         this.app.use((req, res) => {
             res.status(404).json({
                 success: false,
@@ -252,6 +376,7 @@ class SecureServer {
             console.log(`⏰ Tiempo de inicio: ${new Date().toLocaleString('es-MX')}`);
             console.log('🔄 Rotación automática:', scheduleKeyRotation.getScheduleStatus().isEnabled ? 'ACTIVADA' : 'DESACTIVADA');
             console.log('📧 Canales de comunicación:', secureCommunications.getStats().availableChannels);
+            console.log('✅ Variables críticas cargadas correctamente');
             console.log('========================================\n');
 
             // Enviar notificación de inicio (si hay canales configurados)

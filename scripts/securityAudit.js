@@ -1,7 +1,53 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
+// ===== CARGAR VARIABLES DE ENTORNO PRIMERO =====
 const path = require('path');
+const fs = require('fs');
+
+// Verificar que el archivo .env existe
+const projectRoot = path.join(__dirname, '..');
+const envPath = path.join(projectRoot, '.env');
+
+if (!fs.existsSync(envPath)) {
+    console.error('❌ ARCHIVO .env NO ENCONTRADO');
+    console.error(`   Ubicación esperada: ${envPath}`);
+    process.exit(1);
+}
+
+// Cargar dotenv con configuración explícita
+const dotenvResult = require('dotenv').config({
+    path: envPath,
+    debug: process.env.DEBUG_DOTENV === 'true'
+});
+
+// Verificar si hubo errores cargando dotenv
+if (dotenvResult.error) {
+    console.error('❌ ERROR CARGANDO ARCHIVO .env:', dotenvResult.error.message);
+    process.exit(1);
+}
+
+// Validar variables críticas inmediatamente
+const criticalVars = [
+    'BASE_SEED',
+    'DB_FRAGMENT_1',
+    'DB_FRAGMENT_2',
+    'DB_FRAGMENT_3',
+    'NODE_ENV'
+];
+
+const missingVars = criticalVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+    console.error('❌ VARIABLES DE ENTORNO CRÍTICAS FALTANTES EN AUDITORÍA:');
+    missingVars.forEach(varName => {
+        console.error(`   - ${varName}`);
+    });
+    process.exit(1);
+}
+
+console.log('✅ Variables de entorno cargadas para auditoría');
+
+// ===== AHORA CARGAR EL RESTO DE DEPENDENCIAS =====
 const crypto = require('crypto');
 
 class SecurityAudit {
@@ -276,7 +322,8 @@ class SecurityAudit {
 
         let filesExist = 0;
         for (const file of criticalFiles) {
-            if (fs.existsSync(file)) {
+            const fullPath = path.join(projectRoot, file);
+            if (fs.existsSync(fullPath)) {
                 filesExist++;
             } else {
                 filesScore.issues.push(`Archivo crítico faltante: ${file}`);
@@ -287,7 +334,7 @@ class SecurityAudit {
 
         // Verificar permisos de archivos críticos
         try {
-            const envStats = fs.statSync('.env');
+            const envStats = fs.statSync(envPath);
             const envPerms = (envStats.mode & parseInt('777', 8)).toString(8);
 
             if (envPerms === '600' || envPerms === '644') {
@@ -301,8 +348,9 @@ class SecurityAudit {
         }
 
         // Verificar que no hay archivos sensibles en Git
-        if (fs.existsSync('.gitignore')) {
-            const gitignore = fs.readFileSync('.gitignore', 'utf8');
+        const gitignorePath = path.join(projectRoot, '.gitignore');
+        if (fs.existsSync(gitignorePath)) {
+            const gitignore = fs.readFileSync(gitignorePath, 'utf8');
             if (gitignore.includes('.env') && gitignore.includes('node_modules')) {
                 filesScore.score += 20;
             } else {
@@ -324,8 +372,9 @@ class SecurityAudit {
 
         try {
             // Verificar package.json
-            if (fs.existsSync('package.json')) {
-                const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const packagePath = path.join(projectRoot, 'package.json');
+            if (fs.existsSync(packagePath)) {
+                const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
 
                 // Verificar dependencias de seguridad críticas
                 const securityDeps = ['helmet', 'bcryptjs', 'jsonwebtoken', 'cors'];
@@ -521,10 +570,10 @@ class SecurityAudit {
     }
 
     async generateReport() {
-        const reportPath = path.join(__dirname, `../reports/security_audit_${Date.now()}.json`);
+        const reportsDir = path.join(projectRoot, 'reports');
+        const reportPath = path.join(reportsDir, `security_audit_${Date.now()}.json`);
 
         // Asegurar que el directorio existe
-        const reportsDir = path.dirname(reportPath);
         if (!fs.existsSync(reportsDir)) {
             fs.mkdirSync(reportsDir, { recursive: true });
         }

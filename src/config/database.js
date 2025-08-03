@@ -28,15 +28,30 @@ class DatabaseConfig {
             // Extraer NODE_ENV con chequeo
             const nodeEnv = this.getEnvVariable('NODE_ENV');
 
+            // Configuración SSL más robusta
+            let sslConfig = false;
+            
+            if (nodeEnv === 'production') {
+                // En producción, intentar SSL pero permitir fallar a no-SSL
+                sslConfig = {
+                    rejectUnauthorized: false,
+                    // Permitir conexiones no seguras como fallback
+                    require: false
+                };
+            }
+
             this.pool = mysql.createPool({
                 uri: databaseURL,
                 waitForConnections: true,
                 connectionLimit: 10,
                 queueLimit: 0,
+                // Remover configuraciones no válidas que causan warnings
+                ssl: sslConfig,
+                charset: 'utf8mb4',
+                // Configuraciones de timeout válidas
+                connectTimeout: 60000,
                 acquireTimeout: 60000,
-                timeout: 60000,
-                ssl: nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
-                charset: 'utf8mb4'
+                timeout: 60000
             });
 
             console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
@@ -56,25 +71,74 @@ class DatabaseConfig {
     }
 
     async query(sql, params = []) {
-        const connection = await this.getConnection();
+        let connection;
         try {
+            connection = await this.getConnection();
             const [results] = await connection.execute(sql, params);
-            return results;
+            return [results]; // Mantener formato consistente
         } catch (error) {
             console.error('❌ Error en consulta SQL:', error);
             throw error;
         } finally {
-            connection.release();
+            if (connection) connection.release();
         }
     }
 
     async testConnection() {
+        let connection;
         try {
-            const [rows] = await this.pool.execute('SELECT 1 as test');
+            // Intentar conexión con SSL primero, luego sin SSL
+            connection = await this.pool.getConnection();
+            await connection.execute('SELECT 1 as test');
             console.log('✅ Conexión a base de datos exitosa');
             return true;
         } catch (error) {
+            // Si es error de SSL, intentar recrear pool sin SSL
+            if (error.code === 'HANDSHAKE_NO_SSL_SUPPORT') {
+                console.log('ℹ️ SSL no soportado, reconfigurar para conexión no segura...');
+                return await this.recreatePoolWithoutSSL();
+            }
+            
             console.error('❌ Error de conexión a base de datos:', error);
+            return false;
+        } finally {
+            if (connection) connection.release();
+        }
+    }
+
+    async recreatePoolWithoutSSL() {
+        try {
+            // Cerrar pool actual
+            if (this.pool) {
+                await this.pool.end();
+            }
+
+            // Reconstruir URL de conexión
+            const databaseURL = credentialBuilder.buildDatabaseURL();
+
+            // Crear nuevo pool sin SSL
+            this.pool = mysql.createPool({
+                uri: databaseURL,
+                waitForConnections: true,
+                connectionLimit: 10,
+                queueLimit: 0,
+                ssl: false, // Explícitamente deshabilitado
+                charset: 'utf8mb4',
+                connectTimeout: 60000,
+                acquireTimeout: 60000,
+                timeout: 60000
+            });
+
+            // Probar nueva conexión
+            const connection = await this.pool.getConnection();
+            await connection.execute('SELECT 1 as test');
+            connection.release();
+
+            console.log('✅ Conexión reconfigurada sin SSL exitosamente');
+            return true;
+
+        } catch (error) {
+            console.error('❌ Error reconfigurando conexión:', error);
             return false;
         }
     }

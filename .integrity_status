@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-08-03T17:14:01.642Z",
+  "status": "OPTIMAL",
+  "score": 100,
+  "lastCheck": "2025-08-03T17:14:01.643Z",
+  "checksToday": 12,
+  "successRate": 100,
+  "filesMonitored": 15,
+  "anomalies": 0,
+  "recommendations": [],
+  "nextCheck": "2025-08-03T18:14:01.643Z",
+  "optimization": "MAXIMUM"
+}

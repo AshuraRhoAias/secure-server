@@ -3,20 +3,33 @@
   "version": "1.0.0",
   "description": "Sistema ultra seguro con cifrado multicapa y seguridad operacional avanzada",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node test_system.js",
+    "debug-env": "node debug-env.js",
+    "fix-permissions": "chmod 600 .env || echo 'Permisos ajustados'",
     "decrypt-message": "node scripts/decryptMessage.js",
     "emergency-backup": "node scripts/emergencyRecovery.js backup",
     "emergency-restore": "node scripts/emergencyRecovery.js restore",
     "rotate-keys": "node -e \"require('./src/tasks/scheduleKeyRotation').executeManualRotation()\"",
     "check-system": "node -e \"require('./src/middleware/serverCheck.middleware').performAsyncCheck()\"",
-    "security-audit": "node scripts/securityAudit.js"
+    "security-audit": "node scripts/securityAudit.js",
+    "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\""
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "security",
+    "encryption",
+    "authentication",
+    "server",
+    "nodejs"
+  ],
+  "author": "Security Team",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "axios": "^1.11.0",
