@@ -286,6 +286,93 @@ class SecureAuthService {
             console.error('❌ Error logging failed attempt:', logError);
         }
     }
+
+    // ======== MÉTODOS FALTANTES AGREGADOS ========
+
+    async isKnownDevice(userId, deviceFingerprint) {
+        try {
+            const db = require('../config/database');
+
+            const [devices] = await db.query(
+                'SELECT id FROM known_devices WHERE user_id = ? AND device_fingerprint = ?',
+                [userId, deviceFingerprint]
+            );
+
+            const isKnown = devices.length > 0;
+
+            if (!isKnown) {
+                try {
+                    await db.query(
+                        `INSERT INTO known_devices (user_id, device_fingerprint, device_name, is_trusted) 
+                         VALUES (?, ?, 'Unknown Device', FALSE)
+                         ON DUPLICATE KEY UPDATE last_seen = NOW()`,
+                        [userId, deviceFingerprint]
+                    );
+                } catch (insertError) {
+                    console.log('ℹ️ Dispositivo ya existe o tabla no disponible');
+                }
+            } else {
+                await db.query(
+                    'UPDATE known_devices SET last_seen = NOW() WHERE user_id = ? AND device_fingerprint = ?',
+                    [userId, deviceFingerprint]
+                );
+            }
+
+            return isKnown;
+        } catch (error) {
+            console.error('❌ Error verificando dispositivo conocido:', error);
+            return false;
+        }
+    }
+
+    async isNewLocation(userId, ipAddress) {
+        try {
+            const geo = geoip.lookup(ipAddress);
+
+            if (!geo) return false;
+
+            const db = require('../config/database');
+
+            const [sessions] = await db.query(
+                'SELECT DISTINCT location_country FROM user_sessions WHERE user_id = ? AND location_country IS NOT NULL',
+                [userId]
+            );
+
+            const knownCountries = sessions.map(s => s.location_country);
+
+            return !knownCountries.includes(geo.country);
+        } catch (error) {
+            console.error('❌ Error verificando nueva ubicación:', error);
+            return false;
+        }
+    }
+
+    isOffHours() {
+        const now = new Date();
+        const hour = now.getHours();
+
+        // Considerar horario inusual: 11 PM a 6 AM
+        return hour >= 23 || hour <= 6;
+    }
+
+    async getRecentFailedAttempts(userId) {
+        try {
+            const db = require('../config/database');
+
+            const [logs] = await db.query(
+                `SELECT COUNT(*) as failed_attempts 
+                 FROM security_logs 
+                 WHERE event_type = 'LOGIN_FAILED' 
+                 AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+                []
+            );
+
+            return logs[0]?.failed_attempts || 0;
+        } catch (error) {
+            console.error('❌ Error obteniendo intentos fallidos:', error);
+            return 0;
+        }
+    }
 }
 
 module.exports = new SecureAuthService();
