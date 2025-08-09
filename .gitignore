@@ -147,3 +147,4 @@ bower_components/
 .pnp.*
 
 # End of optimized .gitignore
+/front
