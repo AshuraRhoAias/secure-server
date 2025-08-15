@@ -35,7 +35,7 @@ class SecureAuthService {
             // Crear sesión segura
             const sessionData = {
                 userId: user.id,
-                username: user.username,
+                username: user.username, // Ya viene descifrado del validateCredentials
                 deviceFingerprint,
                 ipAddress: deviceInfo.ipAddress,
                 riskLevel,
@@ -62,32 +62,70 @@ class SecureAuthService {
         }
     }
 
+    // ✅ MÉTODO CORREGIDO PARA USAR COLUMNAS CIFRADAS
     async validateCredentials(username, password) {
         const db = require('../config/database');
         const tripleEncryptor = require('../crypto/tripleEncryptor');
 
         try {
+            // ✅ Generar hash del username para buscar en la base de datos
+            const usernameHash = this.generateUsernameHash(username);
+            
+            // ✅ Consulta corregida usando las columnas cifradas
             const [users] = await db.query(
-                'SELECT id, username, password_hash FROM users WHERE username = ?',
-                [username]
+                'SELECT id, username_encrypted, password_hash, risk_level_encrypted FROM users WHERE username_hash = ?',
+                [usernameHash]
             );
 
             if (users.length === 0) {
+                console.log(`🔍 Usuario no encontrado para hash: ${usernameHash.substring(0, 8)}...`);
                 return null;
             }
 
             const user = users[0];
+            
+            // ✅ Verificar password
             const isValidPassword = await bcrypt.compare(password, user.password_hash);
-
             if (!isValidPassword) {
+                console.log(`❌ Password inválido para usuario ID: ${user.id}`);
                 return null;
             }
 
-            return user;
+            // ✅ Descifrar username para devolver
+            const decryptedUsername = tripleEncryptor.decrypt(user.username_encrypted);
+            
+            console.log(`✅ Credenciales válidas para usuario: "${decryptedUsername}" (ID: ${user.id})`);
+
+            return {
+                id: user.id,
+                username: decryptedUsername, // Username descifrado
+                password_hash: user.password_hash
+            };
+
         } catch (error) {
             console.error('❌ Error validating credentials:', error);
             return null;
         }
+    }
+
+    // ✅ MÉTODO AGREGADO PARA GENERAR HASH DEL USERNAME
+    generateUsernameHash(username) {
+        // ✅ Validar entrada
+        if (!username || typeof username !== 'string') {
+            throw new Error('Username inválido para generar hash');
+        }
+        
+        const trimmedUsername = username.trim();
+        if (trimmedUsername === '') {
+            throw new Error('Username vacío no puede ser hasheado');
+        }
+        
+        // ✅ Usar la misma lógica que en AuthController
+        const salt = process.env.BASE_SEED || 'default_salt';
+        const hash = crypto.createHash('sha256').update(trimmedUsername + salt).digest('hex');
+        
+        console.log(`🔑 Hash generado para "${trimmedUsername}": ${hash.substring(0, 8)}... (SecureAuthService)`);
+        return hash;
     }
 
     generateDeviceFingerprint(deviceInfo) {
@@ -211,7 +249,9 @@ class SecureAuthService {
     }
 
     async recordFailedAttempt(username, deviceInfo) {
-        const key = `${username}_${deviceInfo.ipAddress}`;
+        // ✅ Usar hash del username para consistencia
+        const usernameHash = this.generateUsernameHash(username);
+        const key = `${usernameHash}_${deviceInfo.ipAddress}`;
         const attempts = this.failedAttempts.get(key) || [];
 
         attempts.push(Date.now());
@@ -224,7 +264,9 @@ class SecureAuthService {
     }
 
     async isAccountLocked(username) {
-        const attempts = this.failedAttempts.get(username) || [];
+        // ✅ Usar hash del username para consistencia
+        const usernameHash = this.generateUsernameHash(username);
+        const attempts = this.failedAttempts.get(usernameHash) || [];
         const oneHourAgo = Date.now() - (60 * 60 * 1000);
         const recentAttempts = attempts.filter(timestamp => timestamp > oneHourAgo);
 
@@ -269,8 +311,11 @@ class SecureAuthService {
         const tripleEncryptor = require('../crypto/tripleEncryptor');
 
         try {
+            // ✅ Usar hash del username para logging seguro
+            const usernameHash = this.generateUsernameHash(username);
+            
             const encryptedDetails = tripleEncryptor.encrypt(JSON.stringify({
-                username,
+                usernameHash: usernameHash, // Usar hash en lugar de username real
                 ipAddress: deviceInfo.ipAddress,
                 userAgent: deviceInfo.userAgent,
                 error,
@@ -363,7 +408,7 @@ class SecureAuthService {
                 `SELECT COUNT(*) as failed_attempts 
                  FROM security_logs 
                  WHERE event_type = 'LOGIN_FAILED' 
-                 AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+                 AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
                 []
             );
 

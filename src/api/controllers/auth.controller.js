@@ -16,7 +16,7 @@ class AuthController {
         try {
             const { username, email, password, deviceInfo } = req.body;
 
-            // Validaciones básicas
+            // ✅ VALIDACIONES MEJORADAS
             if (!username || !email || !password) {
                 return res.status(400).json({
                     success: false,
@@ -24,12 +24,53 @@ class AuthController {
                 });
             }
 
+            // ✅ VALIDAR STRINGS VACÍOS Y ESPACIOS EN BLANCO
+            const trimmedUsername = username.trim();
+            const trimmedEmail = email.trim();
+
+            if (trimmedUsername === '' || trimmedEmail === '' || password.trim() === '') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Los campos no pueden estar vacíos'
+                });
+            }
+
+            // ✅ VALIDACIONES ADICIONALES
+            if (trimmedUsername.length < 3) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El username debe tener al menos 3 caracteres'
+                });
+            }
+
+            if (password.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'La password debe tener al menos 6 caracteres'
+                });
+            }
+
+            // Validar formato de email básico
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(trimmedEmail)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Formato de email inválido'
+                });
+            }
+
             // Verificar si el usuario ya existe (usando username cifrado)
             const db = require('../../config/database');
-            const encryptedUsername = tripleEncryptor.encrypt(username);
+            
+            // ✅ USAR USERNAME LIMPIO PARA CIFRADO
+            const encryptedUsername = tripleEncryptor.encrypt(trimmedUsername);
 
             // Para verificar existencia, necesitamos buscar por un hash del username
-            const usernameHash = this.generateUsernameHash(username);
+            const usernameHash = this.generateUsernameHash(trimmedUsername);
+            
+            // ✅ LOG PARA DEBUGGING
+            console.log(`🔍 Registrando usuario: "${trimmedUsername}" -> Hash: ${usernameHash.substring(0, 8)}...`);
+            
             const [existingUsers] = await db.query(
                 'SELECT id FROM users WHERE username_hash = ?',
                 [usernameHash]
@@ -43,13 +84,13 @@ class AuthController {
             }
 
             // Cifrar todos los datos sensibles
-            const encryptedEmail = tripleEncryptor.encrypt(email);
+            const encryptedEmail = tripleEncryptor.encrypt(trimmedEmail);
             const passwordHash = await bcrypt.hash(password, 12);
             const deviceFingerprint = secureAuthService.generateDeviceFingerprint(deviceInfo || {});
 
             // Cifrar metadatos adicionales
             const encryptedMetadata = tripleEncryptor.encrypt(JSON.stringify({
-                originalUsername: username,
+                originalUsername: trimmedUsername,
                 registrationIP: req.ip,
                 registrationUserAgent: req.headers['user-agent'],
                 deviceFingerprint: deviceFingerprint,
@@ -59,6 +100,16 @@ class AuthController {
             // Calcular nivel de riesgo inicial
             const initialRiskLevel = 'low';
             const encryptedRiskLevel = tripleEncryptor.encrypt(initialRiskLevel);
+
+            // ✅ VALIDAR QUE LOS DATOS CIFRADOS NO ESTÉN VACÍOS
+            if (!encryptedUsername || !usernameHash || !encryptedEmail) {
+                throw new Error('Error en proceso de cifrado: datos vacíos generados');
+            }
+
+            console.log(`🔐 Datos cifrados listos para inserción:
+                - Username cifrado: ${encryptedUsername.length} chars
+                - Username hash: ${usernameHash.length} chars
+                - Email cifrado: ${encryptedEmail.length} chars`);
 
             // Crear usuario con todos los campos cifrados
             const [result] = await db.query(
@@ -104,10 +155,20 @@ class AuthController {
         } catch (error) {
             console.error('❌ Error en registro:', error);
             
+            // ✅ LOG MÁS DETALLADO PARA DEBUGGING
+            console.error('❌ Datos del request:', {
+                username: req.body?.username,
+                usernameLength: req.body?.username?.length,
+                usernameType: typeof req.body?.username,
+                email: req.body?.email,
+                emailLength: req.body?.email?.length,
+                hasPassword: !!req.body?.password
+            });
+            
             // Log del error de registro
             try {
                 await this.logUserAction('USER_REGISTRATION_ERROR', {
-                    usernameAttempt: req.body?.username ? this.generateUsernameHash(req.body.username) : 'unknown',
+                    usernameAttempt: req.body?.username ? this.generateUsernameHash(req.body.username.trim()) : 'unknown',
                     ipAddress: req.ip,
                     error: error.message,
                     encryptionVersion: this.getCurrentEncryptionVersion()
@@ -127,6 +188,7 @@ class AuthController {
         try {
             const { username, password, deviceInfo } = req.body;
 
+            // ✅ VALIDACIONES MEJORADAS
             if (!username || !password) {
                 return res.status(400).json({
                     success: false,
@@ -134,9 +196,20 @@ class AuthController {
                 });
             }
 
+            // ✅ VALIDAR STRINGS VACÍOS
+            const trimmedUsername = username.trim();
+            if (trimmedUsername === '' || password.trim() === '') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Los campos no pueden estar vacíos'
+                });
+            }
+
             // Buscar usuario por hash del username
-            const usernameHash = this.generateUsernameHash(username);
+            const usernameHash = this.generateUsernameHash(trimmedUsername);
             const db = require('../../config/database');
+            
+            console.log(`🔍 Intentando login para: "${trimmedUsername}" -> Hash: ${usernameHash.substring(0, 8)}...`);
             
             const [users] = await db.query(
                 'SELECT id, username_encrypted, password_hash, risk_level_encrypted, encrypted_metadata, encryption_version FROM users WHERE username_hash = ?',
@@ -225,7 +298,7 @@ class AuthController {
             // Log del login fallido
             try {
                 await this.logUserAction('USER_LOGIN_FAILED', {
-                    usernameHash: req.body?.username ? this.generateUsernameHash(req.body.username) : 'unknown',
+                    usernameHash: req.body?.username ? this.generateUsernameHash(req.body.username.trim()) : 'unknown',
                     ipAddress: req.ip,
                     error: error.message
                 });
@@ -377,11 +450,26 @@ class AuthController {
 
     // ============ MÉTODOS AUXILIARES PARA CIFRADO ============
 
+    // ✅ MÉTODO AUXILIAR MEJORADO
     generateUsernameHash(username) {
         // Crear hash determinístico para búsquedas
         const crypto = require('crypto');
+        
+        // ✅ VALIDAR ENTRADA
+        if (!username || typeof username !== 'string') {
+            throw new Error('Username inválido para generar hash');
+        }
+        
+        const trimmedUsername = username.trim();
+        if (trimmedUsername === '') {
+            throw new Error('Username vacío no puede ser hasheado');
+        }
+        
         const salt = process.env.BASE_SEED || 'default_salt';
-        return crypto.createHash('sha256').update(username + salt).digest('hex');
+        const hash = crypto.createHash('sha256').update(trimmedUsername + salt).digest('hex');
+        
+        console.log(`🔑 Hash generado para "${trimmedUsername}": ${hash.substring(0, 8)}...`);
+        return hash;
     }
 
     getCurrentEncryptionVersion() {
@@ -466,6 +554,160 @@ class AuthController {
         return riskScoreMap[action] || 10;
     }
 
+    // ✅ MÉTODO PARA LIMPIAR REGISTROS PROBLEMÁTICOS
+    async cleanupEmptyUsernames() {
+        try {
+            const db = require('../../config/database');
+            
+            console.log('🧹 Iniciando limpieza de registros problemáticos...');
+            
+            // Buscar registros con username_hash vacío o problemático
+            const [emptyUsers] = await db.query(`
+                SELECT id, username_encrypted, username_hash, created_at 
+                FROM users 
+                WHERE username_hash = '' 
+                   OR username_hash IS NULL 
+                   OR username_encrypted = '' 
+                   OR username_encrypted IS NULL
+            `);
+            
+            console.log(`🧹 Encontrados ${emptyUsers.length} registros problemáticos`);
+            
+            if (emptyUsers.length > 0) {
+                // Mostrar registros problemáticos
+                emptyUsers.forEach((user, index) => {
+                    console.log(`  ${index + 1}. ID: ${user.id}, Hash: "${user.username_hash}", Encrypted: "${user.username_encrypted}", Created: ${user.created_at}`);
+                });
+                
+                // Eliminar registros problemáticos (solo si están completamente vacíos)
+                const [deleteResult] = await db.query(`
+                    DELETE FROM users 
+                    WHERE (username_hash = '' OR username_hash IS NULL)
+                      AND (username_encrypted = '' OR username_encrypted IS NULL)
+                `);
+                
+                console.log(`🧹 ${deleteResult.affectedRows} registros vacíos eliminados`);
+                
+                return { 
+                    cleaned: deleteResult.affectedRows, 
+                    found: emptyUsers.length,
+                    details: emptyUsers
+                };
+            }
+            
+            console.log('✅ No se encontraron registros problemáticos');
+            return { cleaned: 0, found: 0, details: [] };
+            
+        } catch (error) {
+            console.error('❌ Error limpiando usernames vacíos:', error);
+            throw error;
+        }
+    }
+
+    // ✅ MÉTODO PARA VALIDAR INTEGRIDAD COMPLETA
+    async validateDataIntegrity() {
+        try {
+            const db = require('../../config/database');
+            console.log('🔍 Validando integridad completa de datos...');
+
+            // Obtener todos los usuarios
+            const [users] = await db.query(`
+                SELECT id, username_encrypted, username_hash, email_encrypted, 
+                       risk_level_encrypted, encrypted_metadata, encryption_version
+                FROM users 
+                ORDER BY id
+            `);
+
+            let validUsers = 0;
+            let errors = [];
+            let warnings = [];
+
+            for (const user of users) {
+                let userErrors = [];
+                
+                // Validar username
+                try {
+                    if (!user.username_encrypted || user.username_encrypted === '') {
+                        userErrors.push('Username cifrado vacío');
+                    } else {
+                        const decryptedUsername = tripleEncryptor.decrypt(user.username_encrypted);
+                        if (!decryptedUsername || decryptedUsername.trim() === '') {
+                            userErrors.push('Username descifrado vacío');
+                        }
+                        
+                        // Validar consistencia del hash
+                        const expectedHash = this.generateUsernameHash(decryptedUsername);
+                        if (expectedHash !== user.username_hash) {
+                            userErrors.push('Hash de username inconsistente');
+                        }
+                    }
+                } catch (e) {
+                    userErrors.push(`Error descifrado username: ${e.message}`);
+                }
+
+                // Validar email
+                try {
+                    if (user.email_encrypted) {
+                        tripleEncryptor.decrypt(user.email_encrypted);
+                    }
+                } catch (e) {
+                    userErrors.push(`Error descifrado email: ${e.message}`);
+                }
+
+                // Validar risk level
+                try {
+                    if (user.risk_level_encrypted) {
+                        tripleEncryptor.decrypt(user.risk_level_encrypted);
+                    }
+                } catch (e) {
+                    userErrors.push(`Error descifrado risk_level: ${e.message}`);
+                }
+
+                // Validar metadata
+                try {
+                    if (user.encrypted_metadata) {
+                        const metadata = tripleEncryptor.decrypt(user.encrypted_metadata);
+                        JSON.parse(metadata);
+                    }
+                } catch (e) {
+                    warnings.push(`User ${user.id}: Metadata no válida - ${e.message}`);
+                }
+
+                if (userErrors.length === 0) {
+                    validUsers++;
+                } else {
+                    errors.push({
+                        userId: user.id,
+                        errors: userErrors
+                    });
+                }
+            }
+
+            const integrityScore = users.length > 0 ? (validUsers / users.length) * 100 : 100;
+
+            console.log(`🔍 Integridad de datos: ${integrityScore.toFixed(2)}% (${validUsers}/${users.length})`);
+            if (warnings.length > 0) {
+                console.log(`⚠️ ${warnings.length} advertencias encontradas`);
+            }
+            if (errors.length > 0) {
+                console.log(`❌ ${errors.length} usuarios con errores`);
+            }
+
+            return {
+                success: true,
+                totalUsers: users.length,
+                validUsers,
+                integrityScore,
+                errors: errors.length > 0 ? errors : null,
+                warnings: warnings.length > 0 ? warnings : null
+            };
+
+        } catch (error) {
+            console.error('❌ Error validando integridad:', error);
+            throw error;
+        }
+    }
+
     // Método para reencriptar datos existentes (migración)
     async reencryptExistingData() {
         try {
@@ -483,6 +725,12 @@ class AuthController {
 
             for (const user of users) {
                 try {
+                    // Validar que el username no esté vacío
+                    if (!user.username || user.username.trim() === '') {
+                        console.log(`⚠️ Usuario ${user.id} tiene username vacío, saltando...`);
+                        continue;
+                    }
+
                     // Cifrar datos
                     const encryptedUsername = tripleEncryptor.encrypt(user.username);
                     const usernameHash = this.generateUsernameHash(user.username);
