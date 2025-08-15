@@ -50,8 +50,6 @@ class DatabaseConfig {
                 charset: 'utf8mb4',
                 // Configuraciones de timeout válidas
                 connectTimeout: 60000,
-                acquireTimeout: 60000,
-                timeout: 60000
             });
 
             console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
