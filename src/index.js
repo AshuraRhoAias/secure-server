@@ -191,7 +191,7 @@ class SecureServer {
         }));
 
         this.app.use(cors({
-            origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+            origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://192.168.100.58:3000'],
             credentials: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE'],
             allowedHeaders: ['Content-Type', 'Authorization']

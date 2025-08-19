@@ -7,9 +7,51 @@ class Level3Encryption {
         this.getKey = () => secureEnv.getSecret('encryption');
     }
 
+    /**
+     * Método auxiliar para generar hash de clave para debugging (seguro)
+     */
+    _getKeyHash(key) {
+        return crypto.createHash('sha256').update(key).digest('hex').substring(0, 8);
+    }
+
+    /**
+     * Validar que la clave sea válida para ChaCha20
+     */
+    _validateKey(key) {
+        if (!key) {
+            throw new Error('Clave de cifrado no encontrada');
+        }
+        
+        if (typeof key !== 'string') {
+            throw new Error('Clave debe ser string hex');
+        }
+        
+        if (key.length !== 64) { // 32 bytes = 64 hex chars
+            throw new Error(`Clave incorrecta: esperado 64 caracteres hex, recibido ${key.length}`);
+        }
+        
+        if (!/^[0-9a-fA-F]+$/.test(key)) {
+            throw new Error('Clave contiene caracteres no-hexadecimales');
+        }
+        
+        return true;
+    }
+
     encrypt(text) {
         try {
-            const key = Buffer.from(this.getKey(), 'hex');
+            if (!text || typeof text !== 'string') {
+                throw new Error('Texto a cifrar inválido o vacío');
+            }
+
+            const rawKey = this.getKey();
+            this._validateKey(rawKey);
+            
+            const key = Buffer.from(rawKey, 'hex');
+            const keyHash = this._getKeyHash(key);
+            
+            console.log(`🔑 Encrypt Key Hash: ${keyHash}...`);
+            console.log(`🔐 Cifrando texto de ${text.length} caracteres`);
+
             const iv = crypto.randomBytes(12); // nonce para chacha20-poly1305
             const cipher = crypto.createCipheriv(this.algorithm, key, iv, { authTagLength: 16 });
 
@@ -17,16 +59,23 @@ class Level3Encryption {
             encrypted += cipher.final('hex');
 
             const authTag = cipher.getAuthTag();
-
             const result = iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 
-            // Validación de integridad
+            // Validación de integridad del resultado
             console.log(`🔐 Level 3 encrypt - IV: ${iv.toString('hex').length}, AuthTag: ${authTag.toString('hex').length}, Data: ${encrypted.length}`);
+            console.log(`✅ Cifrado exitoso - Resultado: ${result.length} caracteres`);
+
+            // Test inmediato de descifrado para validar
+            try {
+                this._testDecryption(result, text, keyHash);
+            } catch (testError) {
+                console.warn(`⚠️ Test de descifrado falló: ${testError.message}`);
+            }
 
             return result;
         } catch (error) {
-            console.error('❌ Error en cifrado Level 3:', error);
-            throw new Error('Error en cifrado Level 3');
+            console.error('❌ Error en cifrado Level 3:', error.message);
+            throw new Error(`Error en cifrado Level 3: ${error.message}`);
         }
     }
 
@@ -36,6 +85,8 @@ class Level3Encryption {
             if (!encryptedText || typeof encryptedText !== 'string') {
                 throw new Error('Texto cifrado inválido o vacío');
             }
+
+            console.log(`🔍 Iniciando descifrado de ${encryptedText.length} caracteres`);
 
             const parts = encryptedText.split(':');
             if (parts.length !== 3) {
@@ -54,7 +105,7 @@ class Level3Encryption {
             }
 
             if (encryptedDataHex.length % 2 !== 0) {
-                throw new Error(`Datos hex corruptos: longitud ${encryptedDataHex.length} (debe ser par). Datos recibidos: "${encryptedDataHex}"`);
+                throw new Error(`Datos hex corruptos: longitud ${encryptedDataHex.length} (debe ser par)`);
             }
 
             // Validación de longitudes esperadas
@@ -68,34 +119,95 @@ class Level3Encryption {
 
             console.log(`🔍 Level 3 decrypt - IV: ${ivHex.length}, AuthTag: ${authTagHex.length}, Data: ${encryptedDataHex.length}`);
 
+            // Validar y obtener clave
+            const rawKey = this.getKey();
+            this._validateKey(rawKey);
+            
+            const key = Buffer.from(rawKey, 'hex');
+            const keyHash = this._getKeyHash(key);
+            
+            console.log(`🔑 Decrypt Key Hash: ${keyHash}...`);
+
+            // Convertir componentes hex a buffers
             const iv = Buffer.from(ivHex, 'hex');
             const authTag = Buffer.from(authTagHex, 'hex');
-            const key = Buffer.from(this.getKey(), 'hex');
 
+            // Debug de componentes
+            console.log(`🔍 Componentes del descifrado:`);
+            console.log(`  - IV: ${ivHex} (${iv.length} bytes)`);
+            console.log(`  - AuthTag: ${authTagHex} (${authTag.length} bytes)`);
+            console.log(`  - Key hash: ${keyHash}`);
+            console.log(`  - Datos cifrados: ${encryptedDataHex.substring(0, 40)}... (${encryptedDataHex.length/2} bytes)`);
+
+            // Crear descifrador
             const decipher = crypto.createDecipheriv(this.algorithm, key, iv, { authTagLength: 16 });
             decipher.setAuthTag(authTag);
 
+            console.log(`🔓 Aplicando descifrado...`);
+
             let decrypted = decipher.update(encryptedDataHex, 'hex', 'utf8');
+            
+            // Este es donde probablemente falla
+            console.log(`🔓 Finalizando descifrado...`);
             decrypted += decipher.final('utf8');
 
+            console.log(`✅ Descifrado exitoso - Resultado: ${decrypted.length} caracteres`);
             return decrypted;
+
         } catch (error) {
-            console.error('❌ Error en descifrado Level 3:', error);
+            console.error('❌ Error en descifrado Level 3:', error.message);
+            console.error('❌ Stack trace:', error.stack);
+            
+            // Debug detallado en caso de error
             console.error('❌ Datos problemáticos:', {
-                original: encryptedText,
+                original: encryptedText?.substring(0, 100) + (encryptedText?.length > 100 ? '...' : ''),
                 length: encryptedText?.length,
                 parts: encryptedText?.split(':').map((part, i) => ({
                     index: i,
                     length: part.length,
                     isEven: part.length % 2 === 0,
                     content: part.substring(0, 50) + (part.length > 50 ? '...' : '')
-                }))
+                })),
+                keyInfo: {
+                    exists: !!this.getKey(),
+                    length: this.getKey()?.length,
+                    hash: this.getKey() ? this._getKeyHash(Buffer.from(this.getKey(), 'hex')) : 'N/A'
+                }
             });
-            throw new Error('Error en descifrado Level 3');
+
+            // Sugerir posibles causas
+            if (error.message.includes('unable to authenticate data') || 
+                error.message.includes('Unsupported state')) {
+                console.error('💡 Posibles causas:');
+                console.error('   1. Clave de descifrado diferente a la de cifrado');
+                console.error('   2. Datos corruptos durante transporte/almacenamiento');
+                console.error('   3. AuthTag o IV incorrectos');
+                console.error('   4. Datos cifrados con versión diferente del algoritmo');
+            }
+
+            throw new Error(`Error en descifrado Level 3: ${error.message}`);
         }
     }
 
-    // Método auxiliar para validar la integridad de datos cifrados
+    /**
+     * Test interno de descifrado para validar el cifrado
+     */
+    _testDecryption(encryptedResult, originalText, expectedKeyHash) {
+        console.log(`🧪 Test de descifrado interno...`);
+        
+        const testDecrypted = this.decrypt(encryptedResult);
+        
+        if (testDecrypted !== originalText) {
+            throw new Error('Test de descifrado falló: texto no coincide');
+        }
+        
+        console.log(`✅ Test de descifrado exitoso`);
+        return true;
+    }
+
+    /**
+     * Método auxiliar para validar la integridad de datos cifrados
+     */
     validateEncryptedData(encryptedText) {
         try {
             if (!encryptedText || typeof encryptedText !== 'string') {
@@ -135,6 +247,50 @@ class Level3Encryption {
         } catch (error) {
             return { valid: false, error: error.message };
         }
+    }
+
+    /**
+     * Método de diagnóstico para debug
+     */
+    diagnose() {
+        console.log('🔍 === DIAGNÓSTICO LEVEL 3 ENCRYPTION ===');
+        
+        try {
+            const rawKey = this.getKey();
+            console.log('🔑 Clave:');
+            console.log(`  - Existe: ${!!rawKey}`);
+            console.log(`  - Tipo: ${typeof rawKey}`);
+            console.log(`  - Longitud: ${rawKey?.length || 'N/A'}`);
+            console.log(`  - Es hex válido: ${rawKey ? /^[0-9a-fA-F]+$/.test(rawKey) : 'N/A'}`);
+            console.log(`  - Hash: ${rawKey ? this._getKeyHash(Buffer.from(rawKey, 'hex')) : 'N/A'}`);
+            
+            console.log('🔧 Configuración:');
+            console.log(`  - Algoritmo: ${this.algorithm}`);
+            console.log(`  - Crypto disponible: ${!!crypto}`);
+            
+            // Test básico
+            console.log('🧪 Test básico:');
+            const testText = 'test123';
+            const encrypted = this.encrypt(testText);
+            const decrypted = this.decrypt(encrypted);
+            console.log(`  - Cifrado/Descifrado: ${testText === decrypted ? '✅ OK' : '❌ FAIL'}`);
+            
+        } catch (error) {
+            console.error('❌ Error en diagnóstico:', error.message);
+        }
+        
+        console.log('🔍 === FIN DIAGNÓSTICO ===');
+    }
+
+    /**
+     * Método para comparar claves (útil para debug)
+     */
+    compareKeys(otherKeyHash) {
+        const currentKey = this.getKey();
+        if (!currentKey) return false;
+        
+        const currentHash = this._getKeyHash(Buffer.from(currentKey, 'hex'));
+        return currentHash === otherKeyHash;
     }
 }
 
