@@ -3,6 +3,9 @@ const secureAuthService = require('../security/secure-auth.service');
 class AuthMiddleware {
     constructor() {
         this.activeValidations = new Map();
+        // verifyJWT se pasa como middleware de Express: sin bind, `this` es undefined
+        this.verifyJWT = this.verifyJWT.bind(this);
+        this.logInvalidAccess = this.logInvalidAccess.bind(this);
     }
 
     async verifyJWT(req, res, next) {

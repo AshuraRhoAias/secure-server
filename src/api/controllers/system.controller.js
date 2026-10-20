@@ -1,8 +1,18 @@
 const serverCheck = require('../../middleware/serverCheck.middleware');
 const keyRotator = require('../../crypto/keyRotator');
 const secureCommunications = require('../../services/secure-communications.service');
+const anomalyDetection = require('../../security/anomaly-detection.service');
+const scheduleKeyRotation = require('../../tasks/scheduleKeyRotation');
+const audit = require('../../services/audit.service');
 
 class SystemController {
+    constructor() {
+        // Los métodos se pasan como handlers de Express: preservar `this`
+        Object.getOwnPropertyNames(SystemController.prototype)
+            .filter(name => name !== 'constructor')
+            .forEach(name => { this[name] = this[name].bind(this); });
+    }
+
     async getSystemStatus(req, res) {
         try {
             const integrityStatus = serverCheck.getStatus();
@@ -12,11 +22,20 @@ class SystemController {
             res.json({
                 success: true,
                 status: {
-                    integrity: integrityStatus,
+                    server: {
+                        uptime: process.uptime(),
+                        nodeVersion: process.version,
+                        platform: process.platform,
+                        environment: process.env.NODE_ENV || 'development'
+                    },
+                    security: {
+                        integrityCheck: integrityStatus,
+                        communications: secureCommunications.getStats(),
+                        rotationSchedule: scheduleKeyRotation.getScheduleStatus(),
+                        anomalies: anomalyDetection.getStats()
+                    },
                     encryption: encryptionMetrics,
                     protection: protectionStats,
-                    uptime: process.uptime(),
-                    nodeVersion: process.version,
                     timestamp: new Date().toISOString()
                 }
             });
@@ -53,6 +72,11 @@ class SystemController {
         try {
             const result = await keyRotator.rotateKeys();
 
+            await audit.log('KEYS_ROTATED_MANUALLY', { rotationId: result.rotationId }, {
+                req, severity: 'high', riskScore: 20
+            });
+
+            // Nunca devolver result.newKeys: son material criptográfico
             res.json({
                 success: true,
                 message: 'Rotación de claves completada',
@@ -89,8 +113,18 @@ class SystemController {
 
     async getSecurityLogs(req, res) {
         try {
-            const { page = 1, limit = 50, severity } = req.query;
+            const { severity } = req.query;
+            const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+            const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
             const offset = (page - 1) * limit;
+
+            if (severity && !['low', 'medium', 'high', 'critical'].includes(severity)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'severity debe ser low, medium, high o critical',
+                    code: 'VALIDATION_ERROR'
+                });
+            }
 
             const db = require('../../config/database');
             let query = `
@@ -104,8 +138,9 @@ class SystemController {
                 params.push(severity);
             }
 
-            query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
-            params.push(parseInt(limit), parseInt(offset));
+            // page/limit ya son enteros acotados; se interpolan porque LIMIT con
+            // parámetros preparados falla en algunas versiones de MySQL 8.
+            query += ` ORDER BY timestamp DESC, id DESC LIMIT ${limit} OFFSET ${offset}`;
 
             const [logs] = await db.query(query, params);
 
@@ -125,8 +160,8 @@ class SystemController {
                 success: true,
                 logs,
                 pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
+                    page,
+                    limit,
                     total,
                     pages: Math.ceil(total / limit)
                 }
@@ -137,6 +172,57 @@ class SystemController {
             res.status(500).json({
                 success: false,
                 message: 'Error obteniendo logs de seguridad'
+            });
+        }
+    }
+
+    async getBlockedIPs(req, res) {
+        try {
+            const db = require('../../config/database');
+            const [ips] = await db.query(
+                `SELECT ip_address, reason, blocked_until, block_count, created_at
+                 FROM blocked_ips ORDER BY created_at DESC LIMIT 200`
+            );
+
+            res.json({ success: true, blockedIPs: ips });
+        } catch (error) {
+            console.error('❌ Error obteniendo IPs bloqueadas:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo IPs bloqueadas'
+            });
+        }
+    }
+
+    async unblockIP(req, res) {
+        try {
+            const ip = req.params.ip;
+
+            if (!require('net').isIP(ip)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Dirección IP inválida',
+                    code: 'VALIDATION_ERROR'
+                });
+            }
+
+            const unblocked = await anomalyDetection.unblockIP(ip);
+
+            if (!unblocked) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'No se pudo desbloquear la IP'
+                });
+            }
+
+            await audit.log('IP_UNBLOCKED_MANUALLY', { ip }, { req, severity: 'medium', riskScore: 10 });
+
+            res.json({ success: true, message: `IP ${ip} desbloqueada` });
+        } catch (error) {
+            console.error('❌ Error desbloqueando IP:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error desbloqueando IP'
             });
         }
     }

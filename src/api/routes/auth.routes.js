@@ -24,4 +24,7 @@ router.use(authMiddleware.verifyJWT);
 router.post('/logout', authController.logout);
 router.get('/profile', authController.getProfile);
 
+// Mezcla rutas públicas (register/login) y protegidas (logout/profile): gestiona su propia protección
+router.access = 'custom';
+
 module.exports = router;

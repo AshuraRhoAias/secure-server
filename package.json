@@ -11,6 +11,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node test_system.js",
+    "test:api": "node --test test_api.js",
+    "set-role": "node scripts/setUserRole.js",
     "debug-env": "node debug-env.js",
     "fix-permissions": "chmod 600 .env || echo 'Permisos ajustados'",
     "decrypt-message": "node scripts/decryptMessage.js",
