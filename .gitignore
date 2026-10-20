@@ -146,5 +146,15 @@ bower_components/
 .yarn/install-state.gz
 .pnp.*
 
+# El patrón `backup/` de arriba ignoraría el CÓDIGO de src/backup/: se reincluye explícitamente
+!/src/backup/
+
+# Rotación de claves: backups cifrados, journal, lock de mantenimiento y .env pendiente
+/backups/
+/data/
+.env.pending
+*.sbk
+*.sbk.new
+
 # End of optimized .gitignore
 /front

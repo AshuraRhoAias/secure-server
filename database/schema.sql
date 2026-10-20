@@ -82,7 +82,7 @@ CREATE TABLE `security_logs` (
   `risk_score` int(11) DEFAULT 0,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
   `severity` enum('low','medium','high','critical') DEFAULT 'medium',
-  `encrypted_timestamp` datetime DEFAULT NULL,
+  `encrypted_timestamp` longtext DEFAULT NULL,
   `encryption_version` varchar(10) DEFAULT NULL,
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -305,6 +305,22 @@ CREATE TABLE `user_notes` (
   PRIMARY KEY (`id`),
   KEY `idx_notes_user_id` (`user_id`, `created_at`),
   CONSTRAINT `user_notes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `crypto_meta` (huella de la clave de cifrado en uso)
+--
+
+CREATE TABLE `crypto_meta` (
+  `id` tinyint(4) NOT NULL,
+  `key_fingerprint` varchar(64) NOT NULL,
+  `key_epoch` varchar(64) NOT NULL,
+  `rotation_id` varchar(64) DEFAULT NULL,
+  `rotated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

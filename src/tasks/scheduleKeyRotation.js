@@ -128,6 +128,11 @@ class ScheduleKeyRotation {
     }
 
     async executeSessionCleanup() {
+        if (!require('../maintenance').guard.isOpen()) {
+            console.log('⏸️ Limpieza de sesiones omitida: servidor en mantenimiento');
+            return;
+        }
+
         try {
             console.log('🧹 Ejecutando limpieza de sesiones expiradas...');
 
@@ -160,6 +165,11 @@ class ScheduleKeyRotation {
 
     async executeIntegrityCheck() {
         try {
+            if (!require('../maintenance').guard.isOpen()) {
+                console.log('⏸️ Verificación de integridad omitida: servidor en mantenimiento');
+                return;
+            }
+
             console.log('🔍 Ejecutando verificación de integridad programada...');
 
             const serverCheck = require('../middleware/serverCheck.middleware');

@@ -96,7 +96,6 @@ stub('src/security/anomaly-detection.service.js', {
     async unblockIP(ip) { state.blockedIPs = state.blockedIPs.filter(i => i !== ip); return true; }
 });
 stub('src/middleware/serverCheck.middleware.js', { getStatus: () => ({ status: 'secure' }), async performAsyncCheck() { return { ok: true }; } });
-stub('src/crypto/keyRotator.js', { async rotateKeys() { return { rotationId: 'rot-1', newKeys: { secret: 'NO-DEBE-FILTRARSE' } }; } });
 stub('src/services/secure-communications.service.js', { getStats: () => ({ availableChannels: 0 }), async testChannels() { return []; } });
 stub('src/tasks/scheduleKeyRotation.js', { getScheduleStatus: () => ({ isEnabled: false }) });
 // auth.routes depende del controlador de auth (que usa bcrypt, geoip...): no se prueba aquí
@@ -234,12 +233,23 @@ test('system: un admin ve el estado y la respuesta incluye server y security', a
     assert.ok('activeRateLimitWindows' in res.json.status.protection);
 });
 
-test('system: rotate-keys no devuelve material criptográfico y queda auditado', async () => {
+test('system: rotate-keys ya no se puede lanzar por HTTP (501) y apunta al CLI', async () => {
     const res = await call('POST', '/api/system/rotate-keys', { token: 'token-admin' });
+    assert.strictEqual(res.status, 501);
+    assert.strictEqual(res.json.code, 'USE_CLI');
+    assert.match(res.json.message, /npm run rotate-keys/);
+});
+
+test('system: /rotation muestra el estado sin claves ni datos y solo a admins', async () => {
+    assert.strictEqual((await call('GET', '/api/system/rotation', { token: 'token-user' })).status, 403);
+
+    const res = await call('GET', '/api/system/rotation', { token: 'token-admin' });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.json.rotationId, 'rot-1');
-    assert.ok(!JSON.stringify(res.json).includes('NO-DEBE-FILTRARSE'));
-    assert.ok(state.securityLogs.some(l => l.event_type === 'KEYS_ROTATED_MANUALLY'));
+    assert.ok(['stable', 'legacy'].includes(res.json.rotation.keys.mode));
+    assert.ok(Array.isArray(res.json.rotation.backups));
+    assert.strictEqual(typeof res.json.rotation.guard.maintenance, 'boolean');
+    // Solo la huella pública: nunca las claves
+    assert.deepStrictEqual(Object.keys(res.json.rotation.keys).sort(), ['epoch', 'fingerprint', 'mode']);
 });
 
 test('system: logs paginados, IPs bloqueadas y desbloqueo', async () => {

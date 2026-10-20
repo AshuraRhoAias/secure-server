@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 
 // Verificar que el archivo .env existe
-const envPath = path.join(__dirname, '../.env');
+// ENV_FILE permite usar otro archivo (la rotación de claves y los tests lo usan)
+const envPath = process.env.ENV_FILE ? path.resolve(process.env.ENV_FILE) : path.join(__dirname, '../.env');
 if (!fs.existsSync(envPath)) {
     console.error('❌ ARCHIVO .env NO ENCONTRADO');
     console.error(`   Ubicación esperada: ${envPath}`);
@@ -62,6 +63,7 @@ const database = require('./config/database');
 // Importar middlewares
 const protectionMiddleware = require('./middleware/protection.middleware');
 const serverCheck = require('./middleware/serverCheck.middleware');
+const { guard: maintenanceGuard } = require('./maintenance');
 
 // Importar cargador de rutas (monta cada src/api/routes/*.routes.js en /api/<nombre>)
 const { registerRoutes } = require('./api/routes');
@@ -94,6 +96,11 @@ class SecureServer {
 
             // Configurar manejo de errores
             this.setupErrorHandling();
+
+            // Estado de mantenimiento y huella de claves, ANTES de cualquier escritura cifrada
+            const guardState = await maintenanceGuard.start();
+            if (guardState.maintenance) console.log('🔒 Hay una rotación/migración en curso: el servidor arranca en MANTENIMIENTO');
+            if (guardState.outOfSync) console.log(`⚠️ Claves desincronizadas con la base de datos: ${guardState.detail}`);
 
             // Verificar sistemas
             await this.performInitialChecks();
@@ -196,6 +203,9 @@ class SecureServer {
             methods: ['GET', 'POST', 'PUT', 'DELETE'],
             allowedHeaders: ['Content-Type', 'Authorization']
         }));
+
+        // Modo mantenimiento / claves desincronizadas: 503 a todo (ver src/maintenance/guard.js)
+        this.app.use(maintenanceGuard.middleware());
 
         this.app.use(compression());
         this.app.use(morgan('combined'));
@@ -315,8 +325,12 @@ class SecureServer {
         console.log('🔍 Realizando verificaciones iniciales...');
 
         try {
-            // Verificar integridad del servidor
-            await serverCheck.performAsyncCheck();
+            // Verificar integridad del servidor (escribe datos cifrados: solo con claves en regla)
+            if (maintenanceGuard.isOpen()) {
+                await serverCheck.performAsyncCheck();
+            } else {
+                console.log('⏸️ Verificación de integridad omitida: servidor en mantenimiento o con claves desincronizadas');
+            }
 
             // Verificar sistema de cifrado
             const tripleEncryptor = require('./crypto/tripleEncryptor');

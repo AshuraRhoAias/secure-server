@@ -94,7 +94,7 @@ class SecureAuthService {
             // ✅ Descifrar username para devolver
             const decryptedUsername = tripleEncryptor.decrypt(user.username_encrypted);
             
-            console.log(`✅ Credenciales válidas para usuario: "${decryptedUsername}" (ID: ${user.id})`);
+            console.log(`✅ Credenciales válidas para el usuario ID: ${user.id}`);
 
             return {
                 id: user.id,
