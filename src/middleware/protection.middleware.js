@@ -152,9 +152,22 @@ class ProtectionMiddleware {
         };
     }
 
+    getProtectionStats() {
+        const now = Date.now();
+        let activeWindows = 0;
+        for (const data of this.rateLimits.values()) {
+            if (now <= data.window) activeWindows++;
+        }
+
+        return {
+            activeRateLimitWindows: activeWindows,
+            trackedRateLimitEntries: this.rateLimits.size
+        };
+    }
+
     setupCleanup() {
         // Limpiar rate limits antiguos cada 5 minutos
-        setInterval(() => {
+        const timer = setInterval(() => {
             const now = Date.now();
 
             for (const [key, data] of this.rateLimits.entries()) {
@@ -163,6 +176,9 @@ class ProtectionMiddleware {
                 }
             }
         }, 5 * 60 * 1000);
+
+        // La limpieza no debe impedir que el proceso termine (tests, scripts)
+        timer.unref();
     }
 }
 

@@ -1,6 +1,88 @@
 # 🔐 Guía Completa de Instalación - Sistema Ultra Seguro con Seguridad Operacional Avanzada
 
+> **Secure Server** es una API REST en Node.js (Express 5 + MySQL) pensada para guardar y servir datos sensibles. Todo lo que se persiste se cifra con tres capas (AES-256-CBC → AES-256-GCM → ChaCha20-Poly1305), cada petición pasa por detección de anomalías y rate limiting, y las claves se rotan automáticamente.
+
+## 🧭 Descripción del proyecto
+
+| Capa | Qué hace | Dónde está |
+|------|----------|------------|
+| **Entrada** | helmet, CORS, compresión, logs (morgan), parseo JSON | `src/index.js` |
+| **Protección** | Bloqueo de IPs, detección de payloads maliciosos y anomalías, rate limiting dinámico | `src/middleware/protection.middleware.js`, `src/security/anomaly-detection.service.js` |
+| **Autenticación** | JWT (5 días) ligado a una sesión en BD, análisis de riesgo por dispositivo/ubicación/horario, bloqueo de cuentas | `src/security/secure-auth.service.js`, `src/middleware/auth.middleware.js` |
+| **Autorización** | Roles `user` / `admin` leídos de la BD en cada petición | `src/middleware/role.middleware.js` |
+| **APIs** | Cada `*.routes.js` se monta solo en `/api/<nombre>` | `src/api/routes/`, `src/api/controllers/` |
+| **Datos** | Pool MySQL; los campos sensibles se guardan cifrados | `src/config/database.js`, `src/crypto/tripleEncryptor.js` |
+| **Auditoría** | Cada acción relevante se registra cifrada en `security_logs` | `src/services/audit.service.js` |
+| **Operaciones** | Rotación mensual de claves, verificación de integridad, alertas multicanal camufladas, scripts de recuperación | `src/tasks/`, `src/crypto/keyRotator.js`, `src/services/secure-communications.service.js`, `scripts/` |
+
+### Flujo de una petición
+
+```
+Cliente
+  │
+  ▼
+helmet · CORS · compression · morgan · express.json          (src/index.js)
+  │
+  ▼
+autoProtect()  ── IP bloqueada → 403 · amenaza crítica → 403 · anomalías → rate limit 429
+  │
+  ▼
+registerRoutes()  ── verifyJWT (salvo router.access = 'public' | 'custom') → 401
+  │
+  ▼
+router  ──  requireRole('admin') → 403  ·  validate.body/query/params → 400
+  │
+  ▼
+controller  ──  db.query() · tripleEncryptor.encrypt/decrypt() · audit.log()
+  │
+  ▼
+manejador de errores global (4xx del cliente se respetan; el resto → 500 sin detalles)
+```
+
+### Endpoints disponibles
+
+| Método | Ruta | Acceso | Descripción |
+|--------|------|--------|-------------|
+| GET | `/health` | público | Estado del servidor |
+| POST | `/api/auth/register` | público (10 req/min) | Registro de usuario |
+| POST | `/api/auth/login` | público (10 req/min) | Devuelve `token` JWT |
+| POST | `/api/auth/logout` | JWT | Invalida la sesión actual |
+| GET | `/api/auth/profile` | JWT | Perfil descifrado y sesiones activas |
+| POST | `/api/notes` | JWT | Crea una nota (cifrada) |
+| GET | `/api/notes?page=1&limit=20` | JWT | Lista tus notas, paginadas |
+| GET | `/api/notes/:id` | JWT | Lee una nota tuya |
+| PUT | `/api/notes/:id` | JWT | Edita `title` y/o `content` |
+| DELETE | `/api/notes/:id` | JWT | Borra una nota tuya |
+| GET | `/api/system/status` | JWT + admin | Integridad, cifrado, protección, anomalías, rotación |
+| GET | `/api/system/logs?page=&limit=&severity=` | JWT + admin | Logs de seguridad (máx. 200 por página) |
+| GET | `/api/system/blocked-ips` | JWT + admin | IPs bloqueadas |
+| DELETE | `/api/system/blocked-ips/:ip` | JWT + admin | Desbloquea una IP |
+| POST | `/api/system/integrity-check` | JWT + admin (10 req/min) | Fuerza verificación de integridad |
+| POST | `/api/system/rotate-keys` | JWT + admin (10 req/min) | Rota las claves de cifrado |
+| POST | `/api/system/test-communications` | JWT + admin (10 req/min) | Prueba los canales de alerta |
+
+> `/api/notes` es una API **de ejemplo funcional**: sirve de plantilla para las tuyas (ver [Cómo crear una API nueva](#cómo-crear-una-api-nueva)).
+
+### Puesta en marcha rápida
+
+```bash
+npm install
+# 1. Crea la BD y aplica el esquema (instalaciones nuevas)
+mysql -u <usuario> -p <base_de_datos> < database/schema.sql
+#    …o, si ya tenías la BD de antes, solo la migración (añade users.role y user_notes):
+mysql -u <usuario> -p <base_de_datos> < database/migrations/001_roles_and_notes.sql
+# 2. Configura .env (ver "Variables de Entorno Seguras") y arranca
+npm start
+# 3. Convierte a un usuario ya registrado en administrador (para /api/system/*)
+npm run set-role -- --user-id 1 --role admin
+# 4. Tests de la capa de APIs (no necesitan MySQL)
+npm run test:api
+```
+
+---
+
 ## 📋 Índice
+0. [Descripción del proyecto](#descripción-del-proyecto)
 1. [Requisitos Previos](#requisitos-previos)
 2. [Instalación de Dependencias](#instalación-de-dependencias)
 3. [Estructura de Carpetas](#estructura-de-carpetas)
@@ -15,8 +97,11 @@
 12. [Comunicaciones Seguras](#comunicaciones-seguras)
 13. [Scripts de Recuperación](#scripts-de-recuperación)
 14. [Ejecución del Sistema](#ejecución-del-sistema)
+15. [Referencia de la API y cómo crear APIs nuevas](#referencia-de-la-api-y-cómo-crear-apis-nuevas)
 
 ---
+
+> **Nota:** las secciones de instalación paso a paso (desde *Requisitos Previos*) conservan el código de la guía original como referencia histórica. La fuente de verdad es el código del repositorio; en particular el montaje de rutas ya no vive en `src/index.js` sino en `src/api/routes/index.js`.
 
 ## 🛠️ Requisitos Previos
 
@@ -108,8 +193,9 @@ mkdir -p logs
 secure-server/
 ├── src/
 │   ├── api/
-│   │   ├── routes/
-│   │   └── controllers/
+│   │   ├── routes/        # *.routes.js se montan solos en /api/<nombre> (index.js = cargador)
+│   │   ├── controllers/
+│   │   └── utils/         # validate.js (validación de entrada)
 │   ├── config/
 │   ├── crypto/
 │   ├── middleware/
@@ -119,7 +205,10 @@ secure-server/
 │   ├── utils/
 │   └── index.js
 ├── database/
+│   ├── schema.sql
+│   └── migrations/        # cambios de esquema incrementales
 ├── scripts/
+├── test_api.js            # tests de la capa de APIs (npm run test:api)
 ├── temp/
 ├── logs/
 ├── .env
@@ -4344,6 +4433,168 @@ testSystem().catch(error => {
 
 ---
 
+## 🧩 Referencia de la API y cómo crear APIs nuevas
+
+### Probar el sistema con curl
+
+```bash
+# 1. Registro
+curl -X POST http://localhost:3000/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ana","email":"ana@example.com","password":"una-clave-larga","deviceInfo":{}}'
+
+# 2. Login → guarda el token de la respuesta
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ana","password":"una-clave-larga","deviceInfo":{}}' | jq -r .token)
+
+# 3. Usar una API protegida
+curl -X POST http://localhost:3000/api/notes \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"Mi primera nota","content":"Se guarda cifrada"}'
+
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/notes
+```
+
+Todas las respuestas siguen el mismo formato: `{ "success": true, ... }` o
+`{ "success": false, "message": "...", "code": "VALIDATION_ERROR" }`. Códigos habituales:
+`400` datos inválidos, `401` token ausente/inválido, `403` sin permisos o IP bloqueada,
+`404` no existe (o no es tuyo), `429` rate limit, `503` migración pendiente.
+
+### Cómo funciona el cargador de rutas
+
+`src/api/routes/index.js` busca todos los archivos `*.routes.js` de esa carpeta y monta cada uno en
+`/api/<nombre-del-archivo>`. **No hace falta tocar `src/index.js`.**
+
+| `router.access` | Efecto |
+|-----------------|--------|
+| *(sin definir)* o `'protected'` | JWT obligatorio (`verifyJWT`). **Es el valor por defecto: seguro por omisión.** |
+| `'public'` | Sin login (por ejemplo, un endpoint de estado público). |
+| `'custom'` | El router gestiona su propia autenticación (lo usa `/api/auth`, que mezcla rutas públicas y protegidas). |
+
+La protección global (`autoProtect`: IPs bloqueadas, anomalías, rate limiting) se aplica siempre, también a las rutas públicas.
+
+### Herramientas que puedes reutilizar
+
+| Herramienta | Para qué | Uso |
+|-------------|----------|-----|
+| `req.user` | Usuario autenticado: `{ id, username, sessionId, riskLevel }` | `req.user.id` |
+| `roleMiddleware.requireRole('admin')` | Restringir por rol (se consulta la BD, no el token) | `router.use(roleMiddleware.requireRole('admin'))` |
+| `validate.body / query / params` | Validar y limpiar la entrada; descarta campos no declarados | `validate.body({ title: { type: 'string', required: true, max: 200 } })` |
+| `tripleEncryptor.encrypt / decrypt` | Cifrar antes de guardar, descifrar al leer | `tripleEncryptor.encrypt(texto)` |
+| `audit.log(evento, detalles, { req, severity, riskScore })` | Registrar la acción, cifrada, en `security_logs` | `await audit.log('TASK_CREATED', { id }, { req })` |
+| `protectionMiddleware.highSecurity()` | Rate limit estricto (10 req/min) para operaciones sensibles | `router.post('/x', protectionMiddleware.highSecurity(), handler)` |
+| `db.query(sql, params)` | Consultas parametrizadas; devuelve `[filas]` (o `[ResultSetHeader]` en INSERT/UPDATE/DELETE) | `const [rows] = await db.query('SELECT …', [id])` |
+
+Tipos que acepta `validate`: `string`, `email`, `number`, `integer`, `boolean` y `enum` (con `values`); opciones `required`, `min`, `max`, `default`.
+En `validate.query` el resultado limpio queda en `req.validated.query` (en Express 5 `req.query` es de solo lectura); en `validate.body` se reemplaza `req.body`.
+
+### Cómo crear una API nueva
+
+Ejemplo: una API de **tareas** (`/api/tasks`). La API de notas (`notes.routes.js` + `notes.controller.js`) es la referencia completa y funcional.
+
+**1. Tabla en la base de datos** — crea un archivo en `database/migrations/` y añade la misma tabla a `database/schema.sql`. Los datos sensibles van en columnas `*_encrypted` (`longtext`), y la tabla cuelga de `users` con `ON DELETE CASCADE`:
+
+```sql
+CREATE TABLE IF NOT EXISTS `user_tasks` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `title_encrypted` longtext NOT NULL,
+  `done` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_tasks_user_id` (`user_id`),
+  CONSTRAINT `user_tasks_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**2. Controlador** — `src/api/controllers/tasks.controller.js`. Reglas de oro: filtra **siempre** por `user_id = req.user.id`, cifra lo sensible, audita las escrituras y devuelve 404 (no 403) cuando algo no es del usuario:
+
+```js
+const db = require('../../config/database');
+const tripleEncryptor = require('../../crypto/tripleEncryptor');
+const audit = require('../../services/audit.service');
+
+class TasksController {
+    constructor() {
+        this.create = this.create.bind(this);   // se usan como handlers de Express
+        this.list = this.list.bind(this);
+    }
+
+    async create(req, res) {
+        const { title } = req.body;                       // ya validado por validate.body
+        const [result] = await db.query(
+            'INSERT INTO user_tasks (user_id, title_encrypted) VALUES (?, ?)',
+            [req.user.id, tripleEncryptor.encrypt(title)]
+        );
+        await audit.log('TASK_CREATED', { taskId: result.insertId }, { req });
+        res.status(201).json({ success: true, task: { id: result.insertId, title, done: false } });
+    }
+
+    async list(req, res) {
+        const [rows] = await db.query(
+            'SELECT id, title_encrypted, done FROM user_tasks WHERE user_id = ? ORDER BY id DESC',
+            [req.user.id]
+        );
+        res.json({
+            success: true,
+            tasks: rows.map(r => ({ id: r.id, title: tripleEncryptor.decrypt(r.title_encrypted), done: !!r.done }))
+        });
+    }
+}
+
+module.exports = new TasksController();
+```
+
+> En Express 5 los errores de funciones `async` se propagan solos al manejador global: no hace falta `try/catch` ni `asyncHandler` (solo si quieres una respuesta de error propia).
+
+**3. Rutas** — `src/api/routes/tasks.routes.js`. El nombre del archivo define la URL:
+
+```js
+const express = require('express');
+const router = express.Router();
+const tasksController = require('../controllers/tasks.controller');
+const validate = require('../utils/validate');
+
+router.post('/',
+    validate.body({ title: { type: 'string', required: true, min: 1, max: 200 } }),
+    tasksController.create
+);
+router.get('/', tasksController.list);
+
+// router.access = 'public';              // opcional: sin login
+// router.use(roleMiddleware.requireRole('admin'));   // opcional: solo administradores
+
+module.exports = router;
+```
+
+**4. Listo.** Reinicia el servidor: en el arranque verás `↳ /api/tasks (protected)`. Ya hereda JWT, rate limiting, detección de anomalías, cifrado y auditoría.
+
+**5. Test** — añade casos a `test_api.js` (usa una BD simulada en memoria, así que no necesita MySQL) y ejecuta `npm run test:api`. Comprueba como mínimo: 401 sin token, validación 400, que otro usuario no ve tus datos y que en BD no queda texto plano.
+
+### Checklist de seguridad para cada API nueva
+
+- [ ] Cada consulta que toca datos de usuario filtra por `user_id = req.user.id`
+- [ ] Todo dato sensible se guarda con `tripleEncryptor.encrypt` (nada de texto plano en BD)
+- [ ] Entrada validada con `validate.*` (límites de longitud incluidos)
+- [ ] SQL siempre con parámetros `?` (nunca concatenar datos del usuario). Excepción: `LIMIT`/`OFFSET` se interpolan solo tras validarlos como enteros acotados
+- [ ] Escrituras y borrados auditados con `audit.log`
+- [ ] Operaciones administrativas detrás de `requireRole('admin')` y, si son sensibles, `highSecurity()`
+- [ ] Las respuestas nunca incluyen claves, hashes ni datos de otros usuarios
+- [ ] Rutas públicas (`router.access = 'public'`) solo cuando sea imprescindible
+
+### Roles y administradores
+
+Los usuarios nuevos tienen `role = 'user'`. Para dar acceso a `/api/system/*`:
+
+```bash
+npm run set-role -- --user-id 1 --role admin
+```
+
+El rol se consulta en la BD en cada petición: si lo quitas, el acceso desaparece al instante aunque el JWT siga vigente. Si olvidas aplicar la migración, las rutas con `requireRole` responden `503 MIGRATION_REQUIRED`.
+
+---
+
 ## 🚀 Instrucciones Finales de Despliegue
 
 ### 1. Preparación para Producción
@@ -4388,6 +4639,12 @@ npm run emergency-backup
 
 # Auditoría de seguridad
 npm run security-audit
+
+# Dar rol de administrador a un usuario
+npm run set-role -- --user-id 1 --role admin
+
+# Tests de la capa de APIs (sin MySQL)
+npm run test:api
 ```
 
 ### 3. Monitoreo Post-Despliegue
@@ -4412,6 +4669,8 @@ npm run security-audit
 ✅ **Logs de seguridad cifrados**  
 ✅ **Scripts de recuperación de emergencia**  
 ✅ **Monitoreo de sesiones sospechosas**  
+✅ **APIs extensibles**: cada `*.routes.js` se monta solo, con JWT, validación, roles, cifrado y auditoría  
+✅ **Control de acceso por roles** (`user` / `admin`)  
 
 ---
 

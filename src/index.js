@@ -63,8 +63,8 @@ const database = require('./config/database');
 const protectionMiddleware = require('./middleware/protection.middleware');
 const serverCheck = require('./middleware/serverCheck.middleware');
 
-// Importar rutas
-const authRoutes = require('./api/routes/auth.routes');
+// Importar cargador de rutas (monta cada src/api/routes/*.routes.js en /api/<nombre>)
+const { registerRoutes } = require('./api/routes');
 
 // Importar servicios
 const secureCommunications = require('./services/secure-communications.service');
@@ -260,40 +260,11 @@ class SecureServer {
             });
         }
 
-        // Rutas de autenticación
-        this.app.use('/api/auth', authRoutes);
-
-        // Ruta de información del sistema (protegida)
-        this.app.get('/api/system/status',
-            require('./middleware/auth.middleware').verifyJWT,
-            async (req, res) => {
-                try {
-                    const systemStatus = {
-                        server: {
-                            uptime: process.uptime(),
-                            nodeVersion: process.version,
-                            platform: process.platform,
-                            environment: process.env.NODE_ENV || 'development'
-                        },
-                        security: {
-                            integrityCheck: serverCheck.getStatus(),
-                            communications: secureCommunications.getStats(),
-                            rotationSchedule: scheduleKeyRotation.getScheduleStatus()
-                        }
-                    };
-
-                    res.json({
-                        success: true,
-                        status: systemStatus
-                    });
-                } catch (error) {
-                    res.status(500).json({
-                        success: false,
-                        message: 'Error obteniendo estado del sistema'
-                    });
-                }
-            }
-        );
+        // APIs: /api/auth, /api/system, /api/notes y cualquier *.routes.js que se añada
+        const mounted = registerRoutes(this.app);
+        mounted.forEach(({ path: mountPath, access }) => {
+            console.log(`   ↳ ${mountPath} (${access})`);
+        });
 
         // Ruta 404
         this.app.use((req, res) => {
@@ -316,9 +287,12 @@ class SecureServer {
             // Log del error
             this.logError(error, req);
 
-            res.status(500).json({
+            // Errores del cliente (JSON malformado, payload demasiado grande...) no son un 500
+            const status = error.status >= 400 && error.status < 500 ? error.status : 500;
+
+            res.status(status).json({
                 success: false,
-                message: 'Error interno del servidor',
+                message: status === 500 ? 'Error interno del servidor' : 'Solicitud inválida',
                 ...(process.env.NODE_ENV === 'development' && { error: error.message })
             });
         });

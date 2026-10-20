@@ -410,7 +410,7 @@ class AuthController {
                 const tokenHash = secureAuthService.hashToken(token);
 
                 await db.query(
-                    'UPDATE user_sessions SET expires_at = NOW(), updated_at = NOW() WHERE jwt_token_hash = ?',
+                    'UPDATE user_sessions SET expires_at = NOW() WHERE jwt_token_hash = ?',
                     [tokenHash]
                 );
             }

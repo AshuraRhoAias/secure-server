@@ -135,7 +135,8 @@ CREATE TABLE `users` (
   `username_hash` varchar(255) DEFAULT NULL,
   `username_encrypted` longtext DEFAULT NULL,
   `risk_level_encrypted` longtext DEFAULT NULL,
-  `encrypted_metadata` longtext DEFAULT NULL
+  `encrypted_metadata` longtext DEFAULT NULL,
+  `role` enum('user','admin') NOT NULL DEFAULT 'user'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -285,6 +286,28 @@ ALTER TABLE `known_devices`
 --
 ALTER TABLE `user_sessions`
   ADD CONSTRAINT `user_sessions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+-- --------------------------------------------------------
+
+--
+-- (Se crea después de las restricciones porque referencia a `users`)
+-- Estructura de tabla para la tabla `user_notes` (API de ejemplo: /api/notes)
+--
+
+CREATE TABLE `user_notes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `title_encrypted` longtext NOT NULL,
+  `content_encrypted` longtext DEFAULT NULL,
+  `encryption_version` varchar(10) DEFAULT 'v3.1.0',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_notes_user_id` (`user_id`, `created_at`),
+  CONSTRAINT `user_notes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
