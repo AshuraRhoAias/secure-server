@@ -4,6 +4,7 @@ const secureCommunications = require('../../services/secure-communications.servi
 const anomalyDetection = require('../../security/anomaly-detection.service');
 const scheduleKeyRotation = require('../../tasks/scheduleKeyRotation');
 const audit = require('../../services/audit.service');
+const { getNetworkPosture } = require('../../security/network-hardening.check');
 
 class SystemController {
     constructor() {
@@ -32,7 +33,9 @@ class SystemController {
                         integrityCheck: integrityStatus,
                         communications: secureCommunications.getStats(),
                         rotationSchedule: scheduleKeyRotation.getScheduleStatus(),
-                        anomalies: anomalyDetection.getStats()
+                        anomalies: anomalyDetection.getStats(),
+                        // Qué puede hacer este proceso en la red (CAP_NET_RAW, ping sin privilegios...)
+                        networkPosture: getNetworkPosture()
                     },
                     encryption: encryptionMetrics,
                     protection: protectionStats,
