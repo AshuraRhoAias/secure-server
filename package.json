@@ -21,7 +21,9 @@
     "decrypt-message": "node scripts/decryptMessage.js",
     "emergency-backup": "node scripts/emergencyRecovery.js backup",
     "emergency-restore": "node scripts/emergencyRecovery.js restore",
-    "rotate-keys": "node -e \"require('./src/tasks/scheduleKeyRotation').executeManualRotation()\"",
+    "rotate-keys": "node scripts/rotateKeys.js",
+    "maintenance-firewall": "bash scripts/maintenance-firewall.sh",
+    "test:rotation": "node --test test_rotation.js",
     "check-system": "node -e \"require('./src/middleware/serverCheck.middleware').performAsyncCheck()\"",
     "security-audit": "node scripts/securityAudit.js",
     "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\""

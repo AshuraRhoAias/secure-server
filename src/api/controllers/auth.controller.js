@@ -69,7 +69,7 @@ class AuthController {
             const usernameHash = this.generateUsernameHash(trimmedUsername);
             
             // ✅ LOG PARA DEBUGGING
-            console.log(`🔍 Registrando usuario: "${trimmedUsername}" -> Hash: ${usernameHash.substring(0, 8)}...`);
+            console.log(`🔍 Registrando usuario -> Hash: ${usernameHash.substring(0, 8)}...`);
             
             const [existingUsers] = await db.query(
                 'SELECT id FROM users WHERE username_hash = ?',
@@ -209,7 +209,7 @@ class AuthController {
             const usernameHash = this.generateUsernameHash(trimmedUsername);
             const db = require('../../config/database');
             
-            console.log(`🔍 Intentando login para: "${trimmedUsername}" -> Hash: ${usernameHash.substring(0, 8)}...`);
+            console.log(`🔍 Intentando login -> Hash: ${usernameHash.substring(0, 8)}...`);
             
             const [users] = await db.query(
                 'SELECT id, username_encrypted, password_hash, risk_level_encrypted, encrypted_metadata, encryption_version FROM users WHERE username_hash = ?',
@@ -468,7 +468,7 @@ class AuthController {
         const salt = process.env.BASE_SEED || 'default_salt';
         const hash = crypto.createHash('sha256').update(trimmedUsername + salt).digest('hex');
         
-        console.log(`🔑 Hash generado para "${trimmedUsername}": ${hash.substring(0, 8)}...`);
+        console.log(`🔑 Hash de username generado: ${hash.substring(0, 8)}...`);
         return hash;
     }
 

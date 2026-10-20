@@ -56,6 +56,29 @@ class TripleEncryptor {
         }
     }
 
+    // Ejecuta fn (SÍNCRONA) usando una clave concreta en los tres niveles en vez de la del
+    // entorno. Lo usa la migración para descifrar con la clave antigua y cifrar con la nueva
+    // sin tocar process.env. `quiet` silencia los logs por operación (hay miles en una migración).
+    withKey(encryptionKeyHex, fn, { quiet = false } = {}) {
+        const savedKeys = this.levels.map(level => level.getKey);
+        const methods = ['log', 'info', 'debug', 'warn', 'error'];
+        const savedConsole = Object.fromEntries(methods.map(m => [m, console[m]]));
+
+        this.levels.forEach(level => { level.getKey = () => encryptionKeyHex; });
+        if (quiet) {
+            // También `error`: probar una clave equivocada es una operación normal en una migración
+            // y los niveles vuelcan fragmentos del texto cifrado al fallar.
+            methods.forEach(m => { console[m] = () => {}; });
+        }
+
+        try {
+            return fn();
+        } finally {
+            this.levels.forEach((level, i) => { level.getKey = savedKeys[i]; });
+            methods.forEach(m => { console[m] = savedConsole[m]; });
+        }
+    }
+
     // Métodos de conveniencia
     encrypt(text) {
         return this.tripleEncrypt(text);

@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const keyProvider = require('../crypto/key-provider');
 
 class CredentialBuilder {
     constructor() {
@@ -10,7 +11,8 @@ class CredentialBuilder {
         if (!value) {
             console.error(`❌ Variable de entorno faltante o vacía: ${key}`);
         } else {
-            console.log(`✅ Variable de entorno encontrada: ${key} = ${value}`);
+            // Nunca se imprime el valor: son secretos (fragmentos de BD, contraseñas, tokens)
+            console.log(`✅ Variable de entorno encontrada: ${key} (${value.length} caracteres)`);
         }
         return value || null;
     }
@@ -75,11 +77,9 @@ class CredentialBuilder {
     }
 
     generateJWTSecret() {
-        const jwtSeed = this.getEnvVariable('JWT_SEED') || 'jwt_default';
-        const baseSeed = this.getEnvVariable('BASE_SEED') || 'default';
-        const today = new Date().toISOString().split('T')[0];
-
-        return crypto.scryptSync(`${baseSeed}_${jwtSeed}_${today}`, 'jwt_salt', 64).toString('hex');
+        // Con KEY_EPOCH definido el secreto es estable hasta la próxima rotación; sin él se
+        // mantiene el comportamiento anterior (cambia cada día, ver key-provider.js)
+        return keyProvider.deriveFromEnv(process.env).jwtSigning;
     }
 
     validateCredentials() {

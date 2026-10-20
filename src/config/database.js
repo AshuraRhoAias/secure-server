@@ -12,7 +12,7 @@ class DatabaseConfig {
         if (!value) {
             console.error(`❌ Variable de entorno faltante o vacía: ${key}`);
         } else {
-            console.log(`✅ Variable de entorno encontrada: ${key} = ${value}`);
+            console.log(`✅ Variable de entorno encontrada: ${key} (${value.length} caracteres)`);
         }
         return value || null;
     }

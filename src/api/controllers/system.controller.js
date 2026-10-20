@@ -1,5 +1,4 @@
 const serverCheck = require('../../middleware/serverCheck.middleware');
-const keyRotator = require('../../crypto/keyRotator');
 const secureCommunications = require('../../services/secure-communications.service');
 const anomalyDetection = require('../../security/anomaly-detection.service');
 const scheduleKeyRotation = require('../../tasks/scheduleKeyRotation');
@@ -71,27 +70,42 @@ class SystemController {
         }
     }
 
+    // La rotación bloquea el servidor entero y reescribe los datos y el .env: no se dispara por HTTP.
+    // Se ejecuta con `npm run rotate-keys` (con confirmación explícita) o por el planificador mensual.
     async rotateKeys(req, res) {
+        res.status(501).json({
+            success: false,
+            message: 'La rotación de claves no se puede lanzar por la API. Usa "npm run rotate-keys" en el servidor o el planificador mensual (AUTO_ROTATION_ENABLED=true).',
+            code: 'USE_CLI'
+        });
+    }
+
+    async getRotationStatus(req, res) {
         try {
-            const result = await keyRotator.rotateKeys();
+            const { guard, getRotationService } = require('../../maintenance');
+            const service = getRotationService();
+            const secureEnv = require('../../config/secure-env');
+            const journal = service.readJournal();
 
-            await audit.log('KEYS_ROTATED_MANUALLY', { rotationId: result.rotationId }, {
-                req, severity: 'high', riskScore: 20
-            });
-
-            // Nunca devolver result.newKeys: son material criptográfico
             res.json({
                 success: true,
-                message: 'Rotación de claves completada',
-                rotationId: result.rotationId
+                rotation: {
+                    keys: secureEnv.getKeyInfo(),
+                    guard: guard.state,
+                    lastRotation: journal && {
+                        id: journal.id, phase: journal.phase, startedAt: journal.startedAt,
+                        finishedAt: journal.finishedAt, oldEpoch: journal.oldEpoch, newEpoch: journal.newEpoch
+                    },
+                    // Solo metadatos de la cabecera: sin claves ni datos
+                    backups: service.listBackups().map(b => ({
+                        name: require('path').basename(b.file), epoch: b.epoch, createdAt: b.createdAt,
+                        bytes: b.bytes, compression: b.compression, rawBytes: b.rawBytes, tables: b.tables
+                    }))
+                }
             });
-
         } catch (error) {
-            console.error('❌ Error en rotación de claves:', error);
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
+            console.error('❌ Error obteniendo estado de rotación:', error);
+            res.status(500).json({ success: false, message: 'Error obteniendo estado de rotación' });
         }
     }
 

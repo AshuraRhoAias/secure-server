@@ -58,7 +58,8 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 | GET | `/api/system/blocked-ips` | JWT + admin | IPs bloqueadas |
 | DELETE | `/api/system/blocked-ips/:ip` | JWT + admin | Desbloquea una IP |
 | POST | `/api/system/integrity-check` | JWT + admin (10 req/min) | Fuerza verificación de integridad |
-| POST | `/api/system/rotate-keys` | JWT + admin (10 req/min) | Rota las claves de cifrado |
+| GET | `/api/system/rotation` | JWT + admin | Estado de claves, mantenimiento y backups (sin claves ni datos) |
+| POST | `/api/system/rotate-keys` | JWT + admin | `501`: la rotación se lanza con `npm run rotate-keys` (ver [Rotación de claves](#rotación-de-claves-migración-de-datos-y-backups)) |
 | POST | `/api/system/test-communications` | JWT + admin (10 req/min) | Prueba los canales de alerta |
 
 > `/api/notes` es una API **de ejemplo funcional**: sirve de plantilla para las tuyas (ver [Cómo crear una API nueva](#cómo-crear-una-api-nueva)).
@@ -99,6 +100,7 @@ npm run test:api
 14. [Ejecución del Sistema](#ejecución-del-sistema)
 15. [Referencia de la API y cómo crear APIs nuevas](#referencia-de-la-api-y-cómo-crear-apis-nuevas)
 16. [Defensa contra exfiltración por ICMP](#defensa-contra-exfiltración-por-icmp)
+17. [Rotación de claves, migración de datos y backups](#rotación-de-claves-migración-de-datos-y-backups)
 
 ---
 
@@ -200,6 +202,8 @@ secure-server/
 │   ├── config/
 │   ├── crypto/
 │   ├── middleware/
+│   ├── maintenance/       # modo mantenimiento, guardián de claves y rotación
+│   ├── backup/            # archivo de backup (compresión + AES-GCM), keyring, snapshot
 │   ├── services/
 │   ├── security/          # ← NUEVO: Servicios de seguridad operacional
 │   ├── tasks/
@@ -208,9 +212,10 @@ secure-server/
 ├── database/
 │   ├── schema.sql
 │   └── migrations/        # cambios de esquema incrementales
-├── scripts/               # + icmpMonitor.js (detección) e icmp-firewall.sh (prevención)
+├── scripts/               # + rotateKeys.js, maintenance-firewall.sh, icmpMonitor.js, icmp-firewall.sh
 ├── test_api.js            # tests de la capa de APIs (npm run test:api)
 ├── test_icmp.js           # tests de la defensa ICMP (npm run test:icmp)
+├── test_rotation.js       # rotación, backups y mantenimiento (npm run test:rotation, usa MariaDB)
 ├── temp/
 ├── logs/
 ├── .env
@@ -4510,6 +4515,12 @@ CREATE TABLE IF NOT EXISTS `user_tasks` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
+**1b. Registra la columna cifrada** en `src/crypto/encrypted-columns.js` (si no, la próxima rotación de claves la dejaría ilegible):
+
+```js
+user_tasks: { primaryKey: 'id', columns: ['title_encrypted'] },
+```
+
 **2. Controlador** — `src/api/controllers/tasks.controller.js`. Reglas de oro: filtra **siempre** por `user_id = req.user.id`, cifra lo sensible, audita las escrituras y devuelve 404 (no 403) cuando algo no es del usuario:
 
 ```js
@@ -4578,6 +4589,7 @@ module.exports = router;
 
 - [ ] Cada consulta que toca datos de usuario filtra por `user_id = req.user.id`
 - [ ] Todo dato sensible se guarda con `tripleEncryptor.encrypt` (nada de texto plano en BD)
+- [ ] Cada columna cifrada está registrada en `src/crypto/encrypted-columns.js` (`npm run test:rotation` lo comprueba)
 - [ ] Entrada validada con `validate.*` (límites de longitud incluidos)
 - [ ] SQL siempre con parámetros `?` (nunca concatenar datos del usuario). Excepción: `LIMIT`/`OFFSET` se interpolan solo tras validarlos como enteros acotados
 - [ ] Escrituras y borrados auditados con `audit.log`
@@ -4717,6 +4729,128 @@ Para ejecutar `ping -p` desde el servidor, el atacante primero necesita ejecuci�
 
 ---
 
+## 🔄 Rotación de claves, migración de datos y backups
+
+### ⚠️ Leer primero: las claves cambiaban cada día
+
+Hasta ahora las claves de cifrado se derivaban de `BASE_SEED` **y de la fecha UTC de hoy**. Un dato cifrado un martes no se podía descifrar el miércoles (se comprobó: `Error en triple descifrado`), y los JWT dejaban de valer a medianoche aunque duraran 5 días. Para que cualquier rotación tenga sentido las claves tienen que ser **estables** hasta que decidas rotarlas. Ahora lo son si defines `KEY_EPOCH`:
+
+| Variable | Qué es | ¿La cambia la rotación? |
+|----------|--------|-------------------------|
+| `KEY_EPOCH` | Etiqueta de la generación de claves (p. ej. `E20261101T020000Z`). **Su presencia activa el modo estable.** | Sí |
+| `ENCRYPTION_SEED` | Semilla de la clave de cifrado de datos | Sí |
+| `JWT_SEED` | Semilla del secreto de los JWT | Sí |
+| `BASE_SEED` | Sal de `users.username_hash` (búsqueda de login) y parte de todas las claves | **No**: cambiarla invalidaría todos los hashes de login |
+
+Sin `KEY_EPOCH` el sistema sigue en **modo legacy** (comportamiento anterior, claves diarias) para no romper instalaciones existentes. `npm run rotate-keys -- status` te dice en qué modo estás.
+
+**Si ya tienes datos cifrados (modo legacy), migra así:**
+
+```bash
+# 1. Esquema: marcador de claves y columna de auditoría (esta última arregla además un bug, ver abajo)
+mysql ... < database/migrations/002_crypto_meta.sql
+mysql ... < database/migrations/003_security_logs_encrypted_timestamp.sql
+# 2. Copia de seguridad de la BD y del .env con tus herramientas habituales (mysqldump...)
+# 3. Ensayo: busca la clave de cada fila en los últimos 30 días SIN cambiar nada
+npm run rotate-keys -- analyze --legacy-scan-days 30
+# 4. Migración real a claves estables
+npm run rotate-keys -- rotate --confirm --legacy-scan-days 30
+```
+
+Cada fila se prueba primero con las claves de la fecha de sus propias marcas de tiempo (±1 día) y después hacia atrás desde hoy. Si alguna fila se cifró con una clave anterior al rango, **toda la migración aborta sin cambiar nada** y te dice qué fila (`tabla.columna`, `id`) para que amplíes `--legacy-scan-days` o la repares.
+
+> **Bug corregido de paso:** `security_logs.encrypted_timestamp` era `DATETIME` pero el código guarda ahí texto cifrado. En MySQL/MariaDB en modo estricto (el predeterminado) **cada evento de auditoría de `auth.controller` se perdía en silencio** (`Incorrect datetime value`; en una prueba con el servidor real se perdieron 26 eventos en unos minutos). La migración 003 lo pasa a `LONGTEXT`.
+
+### Qué hace una rotación
+
+```bash
+npm run rotate-keys -- rotate --confirm
+```
+
+| # | Paso | Detalle |
+|---|------|---------|
+| 1 | **Cierre** | Lock de mantenimiento: todos los procesos del servidor responden `503` (incluido `/health`) y dejan de ejecutar tareas que escriben. Lock en la BD (`GET_LOCK`) contra rotaciones concurrentes. Todas las sesiones se expiran. Espera `--drain` s (10) a las peticiones en curso |
+| 2 | **Backup previo** | Snapshot de **toda** la BD → comprimido → cifrado con la **clave anterior** → releído y verificado antes de seguir |
+| 3 | **Backups viejos** | Los backups de meses anteriores se re-cifran con la **clave nueva** (sin descomprimirlos) |
+| 4 | **Re-cifrado** | Todas las columnas de `encrypted-columns.js`, en **una transacción**: se descifra con la clave antigua y se cifra con la nueva **en memoria**; se verifica cada valor |
+| 5 | **Confirmación en dos fases** | Lo que debe cambiar de sitio (backups, keyring, `.env`) se prepara en temporales **antes** del `COMMIT` y se renombra **después**. Un journal registra la fase |
+| 6 | **Barrido y reapertura** | Un último pase re-cifra cualquier valor que un proceso rezagado escribiera con la clave antigua; el nuevo `.env` queda activo, se recargan las claves y se quita el lock |
+
+El servidor (si está corriendo) se reabre solo: cada 5 s comprueba el lock y compara la huella de su clave en memoria con la de `crypto_meta`; si no coinciden recarga el `.env`, y si aun así no coinciden **se niega a atender** (`503 KEYS_OUT_OF_SYNC`) en lugar de escribir datos con una clave equivocada. En una prueba con el servidor real, durante una rotación de 12 s hubo `503` desde el cierre hasta ~3 s después de terminar el CLI, **0 respuestas 5xx**, y tras ella el mismo login, las notas anteriores y las nuevas funcionaron.
+
+### Decisiones de diseño (y por qué no es exactamente lo que se describió)
+
+**Sobre "cerrar la red y el PC".** Se implementan dos capas: el **modo mantenimiento** de la aplicación (503 a todo) y, opcionalmente, un **bloqueo de red** con `--lockdown-firewall`, que descarta las conexiones *entrantes nuevas* salvo loopback, conexiones ya establecidas y tus IPs de administración (`MAINTENANCE_ADMIN_IPS`). No se apaga ni se bloquea la máquina: sin acceso del administrador no se podría vigilar, completar ni deshacer la migración. El script se niega a aplicarse sin IPs de administración, y las reglas se quitan solas pasados `--firewall-ttl` minutos (120) aunque el proceso muera.
+
+**Sobre "pasar a datos no cifrados y borrar los registros no cifrados".** El texto plano **nunca se escribe en disco ni en logs**: se descifra y se vuelve a cifrar en memoria, valor a valor. No hay nada que borrar después, que es más seguro que borrarlo: en SSD, sistemas de archivos con journaling o copias de seguridad del hosting, "borrar" un archivo no destruye su contenido. (Node no puede garantizar poner a cero los strings en memoria; el proceso es corto y no vuelca nada.) Además se retiraron de los logs valores que se imprimían en claro: fragmentos de la URL de la BD, contraseñas de email y tokens (`credential-builder`/`database`), y nombres de usuario (`auth.controller`, `secure-auth.service`).
+
+**Sobre el backup "comprimido al máximo".** Se comprime con **brotli (calidad 11)** y **gzip (nivel 9)** y se guarda el que menos ocupe. No se usa ZIP ni RAR: ZIP/deflate comprime peor que brotli y RAR es un formato propietario sin soporte en Node. Dos detalles importantes:
+- **Se comprime antes de cifrar**, porque el texto cifrado no se comprime (parece aleatorio).
+- **No se usa `tripleEncryptor` para el archivo**: devuelve texto hex y cada nivel vuelve a pasar a hex la salida del anterior, así que la salida llega a ocupar ~8 veces la entrada. El archivo usa **una capa AES-256-GCM binaria** (28 bytes de sobrecarga) con la cabecera autenticada: cambiar un solo byte hace que falle el descifrado. En las pruebas, 2 000 filas repetitivas ocupan menos de la quinta parte comprimidas y cifradas, y la BD de ejemplo pasa de 10,4 KB a 1,4 KB.
+
+**El backup guarda las columnas cifradas ya descifradas** (el archivo completo sí va comprimido y cifrado). Si dentro hubiera texto cifrado con la clave antigua, cada backup necesitaría esa clave para siempre, y "re-cifrarlo con la clave nueva" solo cambiaría la capa de fuera. Así, una sola clave abre cualquier backup.
+
+### La cadena mensual de backups
+
+El backup de cada mes se cifra con la clave que acaba de dejar de ser la vigente ("copia de esas claves"), y **al mes siguiente se re-cifra con la nueva**. Para poder hacerlo, la clave anterior se guarda en `backups/keyring.json`, **envuelta con la clave actual**:
+
+| Tras la rotación de… | Backup de ene | Backup de feb | Backup de mar | Keyring (guarda…) |
+|----------------------|---------------|---------------|---------------|-------------------|
+| **Enero** (K0→K1) | clave **K0** | | | K0, envuelta con K1 |
+| **Febrero** (K1→K2) | clave **K2** | clave **K1** | | K1, envuelta con K2 |
+| **Marzo** (K2→K3) | clave **K3** | clave **K3** | clave **K2** | K2, envuelta con K3 |
+
+Con **solo la clave actual** (más el keyring) se abre cualquier backup, y no queda ninguna clave antigua suelta en disco. Si rotas porque la clave anterior **se ha comprometido**, usa `--backup-key new`: el backup de este mes también se cifra con la clave nueva (de lo contrario seguiría abierto para quien tenga la antigua hasta el mes siguiente).
+
+### Uso
+
+```bash
+npm run rotate-keys -- status                   # modo de claves, lock, journal, backups
+npm run rotate-keys -- analyze                  # ensayo: ¿se puede descifrar todo? (no cambia nada)
+npm run rotate-keys -- rotate --confirm         # rotación completa
+npm run rotate-keys -- rotate --confirm --lockdown-firewall   # + bloqueo de red (root y MAINTENANCE_ADMIN_IPS)
+npm run rotate-keys -- backups                  # lista de backups (tamaño, algoritmo, época, filas)
+npm run rotate-keys -- verify backups/<archivo>.sbk
+npm run rotate-keys -- restore backups/<archivo>.sbk --confirm RESTORE [--tables users,user_notes]
+```
+
+Opciones de `rotate`: `--no-write-env`, `--backup-key old|new`, `--drain N`, `--legacy-scan-days N`, `--keep-backups N` (por defecto se conservan **todos**; los backups crecen cada mes), `--firewall-ttl N`, `--no-notify`, `--env-file ruta`. La cabecera de `scripts/rotateKeys.js` las documenta.
+
+**Rotación mensual automática:** con `AUTO_ROTATION_ENABLED=true` el servidor rota el día 1 de cada mes a las 02:00 (México) dentro de su propio proceso (se pone en mantenimiento, rota, recarga las claves en memoria y se reabre; `BACKUP_RETENTION=N` limita los backups). Requiere un `.env` escribible y **una sola instancia** con esa variable activa. Alternativa más conservadora: déjala en `false` y programa `npm run rotate-keys -- rotate --confirm` con cron/systemd.
+
+**Claves en el panel del hosting (sin `.env` escribible):** usa `--no-write-env`. La rotación re-cifra los datos pero no toca el `.env`: deja las variables nuevas en `data/rotation/new-env-*.txt` (permisos 600) y **el servidor sigue cerrado**. Aplica `ENCRYPTION_SEED`, `JWT_SEED` y `KEY_EPOCH` en el panel, reinicia, ejecuta `npm run rotate-keys -- finish` (comprueba que coinciden con la BD antes de reabrir) y borra ese archivo.
+
+`/api/system/rotate-keys` ya **no** lanza la rotación por HTTP (responde `501`): una operación que bloquea el servidor y reescribe el `.env` no debe depender de una petición web. `GET /api/system/rotation` (admin) muestra el estado y los backups, sin claves ni datos.
+
+### Si algo falla
+
+| Dónde falló | Estado | Qué ocurre |
+|-------------|--------|------------|
+| Antes del `COMMIT` (dato ilegible, disco lleno, error de BD…) | La BD **no cambió** | Rollback, se borran los temporales, se quita el lock y el servidor se reabre con las claves anteriores. El backup ya creado se conserva |
+| `COMMIT` ambiguo (se pierde la respuesta) | Puede que la BD sí confirmara | **No** se deshace a ciegas: se pregunta a la BD por la huella; si confirmó, se trata como confirmado |
+| Después del `COMMIT` | La BD ya usa las claves nuevas | Sigue **cerrado**; `npm run rotate-keys -- recover` termina de colocar los archivos y reabre |
+| El proceso muere | Lock y journal quedan en `data/rotation/` | Sigue cerrado (el lock **no caduca solo**); `recover` decide según la huella de la BD si termina o deshace |
+
+Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de una migración corrompería datos.
+
+### Restaurar un backup
+
+`restore` sustituye el contenido de las tablas por el del backup (en una transacción), re-cifrando con la clave **actual**, aunque el backup sea de otra época. Bloquea el servidor mientras dura y cierra las sesiones. Omite `crypto_meta` y `user_sessions`. Usa `--tables` para restaurar solo algunas. Pruébalo con `verify` antes de necesitarlo de verdad.
+
+### Si añades tablas o columnas cifradas
+
+**Registra cada columna que guarde datos cifrados con `tripleEncryptor` en `src/crypto/encrypted-columns.js`.** La rotación solo re-cifra lo registrado: lo que falte quedaría cifrado con una clave que ya no existe (irrecuperable). `npm run test:rotation` falla si `database/schema.sql` tiene una columna de texto con "encrypted" en el nombre que no esté registrada. Esto está también en la guía "Cómo crear una API nueva".
+
+### Límites y qué está probado
+
+- **Probado** (`npm run test:rotation`, 41 tests contra **MariaDB 10.11 real**; se omiten si no hay BD): rotaciones encadenadas, backups en cada mes, fallos antes/durante/después del commit, `COMMIT` ambiguo, `recover`, migración legacy, restauración, modo mantenimiento y guardián, CLI. Además, una prueba manual de punta a punta con el **servidor real** corriendo (login, notas, rotación con peticiones en vuelo, tokens antiguos rechazados). Los tests comprueban con mutaciones deliberadas que detectan los fallos importantes.
+- **No probado:** MySQL 8 propiamente dicho (solo MariaDB), volúmenes grandes, y el filtrado de tráfico real del firewall (se verificó que las reglas se aplican, son idempotentes y se retiran en un entorno de red aislado, no que bloqueen una conexión externa).
+- El snapshot se construye **en memoria**: sirve para bases de datos de hasta cientos de MB. Brotli a calidad 11 es lento (del orden de 1 MB/s): una BD grande tarda minutos en comprimirse, durante los cuales el servidor está cerrado.
+- Si la BD no soporta SSL en `production`, `database.js` cae silenciosamente a una conexión **sin SSL** (`rejectUnauthorized: false` + *fallback*). Es comportamiento previo, pero conviene revisarlo.
+- Varias instancias del servidor: todas deben poder leer el mismo `.env`/variables; una instancia que no cargue las claves nuevas se queda en `503 KEYS_OUT_OF_SYNC` en vez de dañar datos.
+
+---
+
 ## 🚀 Instrucciones Finales de Despliegue
 
 ### 1. Preparación para Producción
@@ -4750,8 +4884,9 @@ npm start
 # Verificar estado del sistema
 npm run check-system
 
-# Rotar claves manualmente
-npm run rotate-keys
+# Rotar claves (con migración de datos y backup; ver la sección de rotación)
+npm run rotate-keys -- status
+npm run rotate-keys -- rotate --confirm
 
 # Descifrar mensaje recibido
 npm run decrypt-message -- --text "mensaje_camuflado"
@@ -4798,6 +4933,7 @@ sudo npm run icmp-monitor
 ✅ **Monitoreo de sesiones sospechosas**  
 ✅ **APIs extensibles**: cada `*.routes.js` se monta solo, con JWT, validación, roles, cifrado y auditoría  
 ✅ **Control de acceso por roles** (`user` / `admin`)  
+✅ **Rotación de claves con migración de datos**: modo mantenimiento, backup mensual comprimido y cifrado, re-cifrado transaccional y recuperación ante fallos  
 ✅ **Defensa contra exfiltración por ICMP** (`ping -p`): firewall, detector de patrones y verificación de postura de red  
 
 ---
