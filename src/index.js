@@ -64,6 +64,7 @@ const database = require('./config/database');
 const protectionMiddleware = require('./middleware/protection.middleware');
 const serverCheck = require('./middleware/serverCheck.middleware');
 const { guard: maintenanceGuard } = require('./maintenance');
+const { createErrorHandler } = require('./middleware/error.middleware');
 
 // Importar cargador de rutas (monta cada src/api/routes/*.routes.js en /api/<nombre>)
 const { registerRoutes } = require('./api/routes');
@@ -290,22 +291,8 @@ class SecureServer {
     setupErrorHandling() {
         console.log('🛡️ Configurando manejo de errores...');
 
-        // Manejo de errores generales
-        this.app.use((error, req, res, next) => {
-            console.error('❌ Error no manejado:', error);
-
-            // Log del error
-            this.logError(error, req);
-
-            // Errores del cliente (JSON malformado, payload demasiado grande...) no son un 500
-            const status = error.status >= 400 && error.status < 500 ? error.status : 500;
-
-            res.status(status).json({
-                success: false,
-                message: status === 500 ? 'Error interno del servidor' : 'Solicitud inválida',
-                ...(process.env.NODE_ENV === 'development' && { error: error.message })
-            });
-        });
+        // Manejo de errores generales (ver src/middleware/error.middleware.js)
+        this.app.use(createErrorHandler({ logError: (error, req) => this.logError(error, req) }));
 
         // Manejo de promesas rechazadas
         process.on('unhandledRejection', (reason, promise) => {

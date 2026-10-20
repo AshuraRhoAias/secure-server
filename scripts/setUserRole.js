@@ -5,7 +5,7 @@
 //
 // Requiere haber ejecutado database/migrations/001_roles_and_notes.sql.
 
-require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+require('dotenv').config({ path: process.env.ENV_FILE || require('path').join(__dirname, '../.env') });
 
 const VALID_ROLES = ['user', 'admin'];
 
