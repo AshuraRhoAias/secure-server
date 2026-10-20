@@ -98,6 +98,7 @@ npm run test:api
 13. [Scripts de Recuperación](#scripts-de-recuperación)
 14. [Ejecución del Sistema](#ejecución-del-sistema)
 15. [Referencia de la API y cómo crear APIs nuevas](#referencia-de-la-api-y-cómo-crear-apis-nuevas)
+16. [Defensa contra exfiltración por ICMP](#defensa-contra-exfiltración-por-icmp)
 
 ---
 
@@ -207,8 +208,9 @@ secure-server/
 ├── database/
 │   ├── schema.sql
 │   └── migrations/        # cambios de esquema incrementales
-├── scripts/
+├── scripts/               # + icmpMonitor.js (detección) e icmp-firewall.sh (prevención)
 ├── test_api.js            # tests de la capa de APIs (npm run test:api)
+├── test_icmp.js           # tests de la defensa ICMP (npm run test:icmp)
 ├── temp/
 ├── logs/
 ├── .env
@@ -4595,6 +4597,126 @@ El rol se consulta en la BD en cada petición: si lo quitas, el acceso desaparec
 
 ---
 
+## 🛰️ Defensa contra exfiltración por ICMP
+
+### El ataque
+
+Con `ping -c 1 -p <patrón> <ip>` el atacante rellena el payload del echo-request con un patrón de hasta **16 bytes** (32 caracteres hex; no 16 bits). Cada ping lleva un trozo del archivo y una máquina que escucha reconstruye el documento a partir de los payloads. Es lento, pero casi ningún firewall ni antivirus mira dentro del ICMP.
+
+Un ping legítimo no se parece a eso: Linux/macOS/BSD rellenan con bytes incrementales (`0x10, 0x11, …`) y Windows con `abcdefghijklmnopqrstuvwabcdefghi`. Un payload que repite un patrón arbitrario y **cambia de un ping al siguiente** es la firma del canal encubierto.
+
+### Qué se puede (y qué no) hacer desde Node
+
+Una aplicación Node **no ve paquetes ICMP**: eso ocurre en el kernel. Por eso la defensa va en capas y la que de verdad corta el canal vive en el host, no en el código de la API:
+
+| Capa | Qué hace | Dónde |
+|------|----------|-------|
+| **1. Prevención** | Un proceso comprometido no puede emitir ICMP, o solo hacia destinos de confianza y con tasa limitada | `scripts/icmp-firewall.sh`, `sysctl`, quitar `CAP_NET_RAW` |
+| **2. Detección** | Analiza los payloads ICMP y alerta de patrones repetidos, patrones que cambian, alta entropía, tamaños anormales y replies alterados | `scripts/icmpMonitor.js`, `src/security/icmp-covert-channel.service.js` |
+| **3. Respuesta** | Alerta camuflada por los canales existentes, evento cifrado en `security_logs`, bloqueo HTTP de IPs externas | `scripts/icmpMonitor.js` |
+| **4. Postura** | `/api/system/status` informa de qué puede hacer el proceso en red; el servidor no puede lanzar procesos | `src/security/network-hardening.check.js` |
+
+### Capa 1 — Prevención en el host
+
+**a) Firewall (la medida más eficaz).** `scripts/icmp-firewall.sh` crea cadenas propias (`ICMP_GUARD_IN` / `ICMP_GUARD_OUT`) para IPv4 e IPv6:
+
+- **Salida**: `echo-request` solo hacia `ICMP_ALLOWED_DESTS`, de tamaño estándar y máx. 6/min; el resto se registra (`ICMP_GUARD_DROP_OUT`) y se descarta. Con la lista vacía (por defecto) un servidor comprometido no puede emitir pings.
+- **Entrada**: `echo-request` de tamaño estándar con límite de tasa (o descartados del todo con `ICMP_ALLOW_INBOUND_PING=0`); los `echo-reply` que no responden a un ping nuestro se descartan.
+
+```bash
+# 1. Ver qué haría (no modifica nada)
+ICMP_ALLOWED_DESTS="1.1.1.1 8.8.8.8" npm run icmp-firewall
+# 2. Aplicar (root). Idempotente: se puede ejecutar varias veces
+sudo ICMP_ALLOWED_DESTS="1.1.1.1 8.8.8.8" npm run icmp-firewall -- --apply
+# 3. Deshacer: quita solo sus cadenas, sin tocar el resto del firewall
+sudo npm run icmp-firewall -- --remove
+```
+
+> Las reglas no persisten tras un reinicio: guárdalas con tu mecanismo habitual (`iptables-persistent`, `netfilter-persistent save`, un servicio systemd que ejecute el script…). Si la máquina enruta tráfico, replica las reglas en `FORWARD`.
+
+**b) Sin capacidad de ICMP para el proceso.** El atacante necesita `CAP_NET_RAW` o que el kernel permita ping sin privilegios:
+
+```bash
+# Desactivar ping para usuarios sin privilegios (persistente)
+echo 'net.ipv4.ping_group_range = 1 0' | sudo tee /etc/sysctl.d/90-icmp-guard.conf && sudo sysctl --system
+```
+```yaml
+# docker-compose.yml
+services:
+  secure-server:
+    user: "1000:1000"          # nunca root
+    cap_drop: [ALL]            # o, como mínimo, NET_RAW
+    read_only: true
+```
+```ini
+# systemd: [Service]
+User=secureserver
+CapabilityBoundingSet=
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+```
+
+`GET /api/system/status` (admin) devuelve `security.networkPosture` con `capNetRaw`, `unprivilegedPing`, `runningAsRoot`, `hardened` y una lista de `recommendations`. Hasta que el host esté endurecido te dirá exactamente qué falta.
+
+### Capa 2 — Detección: `icmp-monitor`
+
+Captura echo-request/echo-reply con `tcpdump` y los analiza. **Debe correr como proceso aparte**, nunca dentro del servidor web, porque capturar exige root o `CAP_NET_RAW`:
+
+```bash
+sudo apt install tcpdump
+sudo npm run icmp-monitor                                    # todas las interfaces
+sudo npm run icmp-monitor -- --interface eth0
+sudo npm run icmp-monitor -- --allowlist 10.0.0.9,10.0.0.10  # IPs de monitoreo legítimas
+# Analizar una captura guardada, sin privilegios y sin tocar BD ni enviar alertas:
+npm run icmp-monitor -- --file captura.txt --dry-run
+```
+
+| Señal | Qué significa | Nivel |
+|-------|---------------|-------|
+| `PATTERN_STEPPING` | ≥ 8 patrones distintos en 10 min entre las mismas IPs (≥ 20 → crítico): los datos "avanzan" ping a ping | high / critical |
+| `SLOW_PATTERN_STEPPING` | ≥ 40 patrones distintos en 6 h (≥ 100 → crítico): exfiltración lenta para esquivar la ventana corta | high / critical |
+| `HIGH_ENTROPY_PAYLOAD` | Payloads con aspecto de datos cifrados/comprimidos (túneles ICMP) | high / critical |
+| `OVERSIZED_PAYLOAD` | Varios payloads no estándar de más de 128 bytes | high / critical |
+| `MODIFIED_REPLY` | El echo-reply no refleja el payload del request (las pilas legítimas lo reflejan siempre) | high |
+| `NON_STANDARD_FLOOD` | ≥ 60 pings no estándar por minuto | medium |
+
+Cada alerta indica la dirección (`egress` = sale de esta máquina → **investiga el host**; `ingress` = entra), las razones, estadísticas y una muestra de patrones como evidencia. El mismo par de IPs no vuelve a alertar del mismo nivel hasta pasar 30 min.
+
+Al detectar una alerta (sin `--dry-run`) el monitor la guarda cifrada en `security_logs` (visible en `GET /api/system/logs`) y envía una alerta camuflada por los canales configurados. Con `--autoblock` además bloquea en la capa HTTP las IPs externas (`ingress`) con alertas ≥ high. **Está desactivado por defecto** porque la IP de origen de un paquete ICMP se puede falsificar: un atacante podría hacer que bloquees a una IP inocente. **Nunca bloquea nada en `egress`**: la IP es la propia máquina y lo que hay que hacer es aislarla e investigar.
+
+Servicio systemd para el monitor (usuario propio con solo la capacidad de captura):
+
+```ini
+[Service]
+User=icmpmon
+WorkingDirectory=/opt/secure-server
+ExecStart=/usr/bin/node scripts/icmpMonitor.js --interface eth0
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+Restart=always
+```
+
+### Despliegue recomendado
+
+1. `npm run icmp-firewall` (dry-run) y revisa las reglas con tus destinos reales.
+2. Ejecuta `icmp-monitor` unos días con `--dry-run` y ajusta la `--allowlist` si alguna herramienta de monitoreo legítima genera alertas (algunas usan payloads propios).
+3. Aplica el firewall (`--apply`) y activa el monitor como servicio.
+4. Endurece el proceso (sin root, sin `NET_RAW`, `ping_group_range`) hasta que `networkPosture.hardened` sea `true`.
+
+### Capa 4 — El servidor no puede lanzar `ping`
+
+Para ejecutar `ping -p` desde el servidor, el atacante primero necesita ejecución de comandos. Por eso `src/` **no usa `child_process`** y un test (`npm run test:icmp`) falla si alguien lo añade. Si algún día necesitas ejecutar un proceso, hazlo en un servicio aparte con sus propios permisos. El monitor (`scripts/`) sí lanza `tcpdump`, con argumentos fijos y sin shell.
+
+### Límites que conviene conocer
+
+- **Es heurístico.** Detecta el uso de `ping -p` y herramientas parecidas; no demuestra que no haya exfiltración. Un atacante que envíe pings con el payload estándar y codifique datos en otros campos (`id`/`seq`) o en los tiempos entre pings no queda cubierto por el análisis de payload; el firewall de la capa 1 sí limita ese canal por tasa y destino.
+- **Solo ICMP.** La exfiltración por DNS, HTTP(S) u otros protocolos necesita su propia vigilancia de salida (un firewall con política de salida denegada por defecto es la base).
+- **El ancho de banda del ataque es mínimo** (≤ 16 bytes por ping): con el firewall limitando a 6 pings/min hacia destinos de confianza, un archivo de 1 MB tardaría más de 7 días en salir… si el atacante tuviera a dónde enviarlo.
+- **Qué está probado.** `npm run test:icmp` (24 tests, sin privilegios) cubre el análisis, el detector, el parser y el monitor sobre capturas sintéticas. El firewall se verificó en un namespace de red aislado con paquetes ICMP reales (pasa lo permitido, descarta tamaño excesivo y destinos no autorizados). **La captura en vivo con `tcpdump` y los payloads estándar de cada sistema operativo no se han probado contra tráfico real**: valida con una captura tuya (`--dry-run`) antes de confiar en las alertas.
+
+---
+
 ## 🚀 Instrucciones Finales de Despliegue
 
 ### 1. Preparación para Producción
@@ -4645,6 +4767,11 @@ npm run set-role -- --user-id 1 --role admin
 
 # Tests de la capa de APIs (sin MySQL)
 npm run test:api
+
+# Defensa ICMP: tests, firewall (dry-run) y monitor
+npm run test:icmp
+npm run icmp-firewall
+sudo npm run icmp-monitor
 ```
 
 ### 3. Monitoreo Post-Despliegue
@@ -4671,6 +4798,7 @@ npm run test:api
 ✅ **Monitoreo de sesiones sospechosas**  
 ✅ **APIs extensibles**: cada `*.routes.js` se monta solo, con JWT, validación, roles, cifrado y auditoría  
 ✅ **Control de acceso por roles** (`user` / `admin`)  
+✅ **Defensa contra exfiltración por ICMP** (`ping -p`): firewall, detector de patrones y verificación de postura de red  
 
 ---
 
