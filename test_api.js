@@ -13,7 +13,7 @@ function stub(relPath, exports) {
     require.cache[resolved] = { id: resolved, filename: resolved, loaded: true, exports };
 }
 
-const state = { notes: [], nextNoteId: 1, securityLogs: [], blockedIPs: ['203.0.113.9'] };
+const state = { notes: [], nextNoteId: 1, securityLogs: [], blockedIPs: ['203.0.113.9'], counters: new Map(), securityEvents: [] };
 const users = { 1: { role: 'user' }, 2: { role: 'admin' } };
 
 const fakeDb = {
@@ -44,12 +44,33 @@ const fakeDb = {
         if (q.startsWith('SELECT') && q.includes('FROM user_notes WHERE id = ? AND user_id = ?')) {
             return [state.notes.filter(n => n.id === Number(params[0]) && n.user_id === params[1])];
         }
-        if (q.startsWith('UPDATE user_notes SET')) {
-            const [id, userId] = params.slice(-2);
+        if (q.startsWith('UPDATE user_notes')) {
+            // SQL fijo con COALESCE: null = "conservar el valor actual"
+            const [title, content, id, userId] = params;
             const note = state.notes.find(n => n.id === Number(id) && n.user_id === userId);
-            const columns = q.match(/SET (.*) WHERE/)[1].split(', ').map(c => c.split(' = ')[0]);
-            columns.forEach((col, i) => { note[col] = params[i]; });
+            if (note) {
+                if (title !== null) note.title_encrypted = title;
+                if (content !== null) note.content_encrypted = content;
+            }
             return [{ affectedRows: note ? 1 : 0 }];
+        }
+        // Contadores del limitador de peticiones (tabla rate_limit_counters)
+        if (q.startsWith('INSERT INTO rate_limit_counters')) {
+            const key = params.join('|');
+            state.counters.set(key, (state.counters.get(key) || 0) + 1);
+            return [{ affectedRows: 1 }];
+        }
+        if (q.startsWith('SELECT window_start, hits FROM rate_limit_counters')) {
+            const [scope, subject, ...windows] = params;
+            return [windows.filter(w => state.counters.has(`${scope}|${subject}|${w}`))
+                .map(w => ({ window_start: w, hits: state.counters.get(`${scope}|${subject}|${w}`) }))];
+        }
+        if (q.includes('FROM rate_limit_counters')) {
+            return [[{ tracked: state.counters.size, active: state.counters.size }]];
+        }
+        if (q.startsWith('INSERT INTO security_events')) {
+            state.securityEvents.push({ event_type: params[0] });
+            return [{ insertId: state.securityEvents.length }];
         }
         if (q.startsWith('DELETE FROM user_notes')) {
             const before = state.notes.length;
@@ -66,7 +87,9 @@ const fakeDb = {
             return [state.blockedIPs.map(ip => ({ ip_address: ip }))];
         }
         throw new Error(`Consulta no soportada por el doble de prueba: ${q}`);
-    }
+    },
+    // Varias sentencias sobre "una conexión" (la usa el limitador de peticiones)
+    async withConnection(fn) { return fn({ query: (sql, params) => fakeDb.query(sql, params) }); }
 };
 
 // Cifrado reversible trivial: lo que importa aquí es que el controlador cifre/descifre
@@ -145,6 +168,7 @@ test('el cargador monta cada *.routes.js en /api/<nombre>', () => {
     const byPath = Object.fromEntries(mounted.map(m => [m.path, m.access]));
     assert.deepStrictEqual(byPath, {
         '/api/auth': 'custom',
+        '/api/files': 'protected',
         '/api/notes': 'protected',
         '/api/system': 'protected'
     });

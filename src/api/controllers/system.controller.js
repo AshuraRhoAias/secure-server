@@ -4,6 +4,8 @@ const anomalyDetection = require('../../security/anomaly-detection.service');
 const scheduleKeyRotation = require('../../tasks/scheduleKeyRotation');
 const audit = require('../../services/audit.service');
 const { getNetworkPosture } = require('../../security/network-hardening.check');
+const securityEvents = require('../../security/security-events.service');
+const { sqlInt } = require('../../config/sql');
 
 class SystemController {
     constructor() {
@@ -17,7 +19,7 @@ class SystemController {
         try {
             const integrityStatus = serverCheck.getStatus();
             const encryptionMetrics = require('../../crypto/tripleEncryptor').getMetrics();
-            const protectionStats = require('../../middleware/protection.middleware').getProtectionStats();
+            const protectionStats = await require('../../middleware/protection.middleware').getProtectionStats();
 
             res.json({
                 success: true,
@@ -32,7 +34,7 @@ class SystemController {
                         integrityCheck: integrityStatus,
                         communications: secureCommunications.getStats(),
                         rotationSchedule: scheduleKeyRotation.getScheduleStatus(),
-                        anomalies: anomalyDetection.getStats(),
+                        anomalies: await anomalyDetection.getStats(),
                         // Qué puede hacer este proceso en la red (CAP_NET_RAW, ping sin privilegios...)
                         networkPosture: getNetworkPosture()
                     },
@@ -144,33 +146,23 @@ class SystemController {
             }
 
             const db = require('../../config/database');
-            let query = `
-                SELECT id, event_type, ip_address, timestamp, severity, risk_score 
-                FROM security_logs 
-            `;
-            let params = [];
+            const sev = severity || null;
 
-            if (severity) {
-                query += ' WHERE severity = ?';
-                params.push(severity);
-            }
+            // Consultas fijas: el filtro opcional es `(? IS NULL OR severity = ?)`, no se concatena SQL.
+            // page/limit son enteros acotados; LIMIT/OFFSET pasan por sqlInt (no admiten parámetros).
+            const [logs] = await db.query(
+                `SELECT id, event_type, ip_address, timestamp, severity, risk_score
+                 FROM security_logs
+                 WHERE (? IS NULL OR severity = ?)
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ${sqlInt(limit)} OFFSET ${sqlInt(offset)}`,
+                [sev, sev]
+            );
 
-            // page/limit ya son enteros acotados; se interpolan porque LIMIT con
-            // parámetros preparados falla en algunas versiones de MySQL 8.
-            query += ` ORDER BY timestamp DESC, id DESC LIMIT ${limit} OFFSET ${offset}`;
-
-            const [logs] = await db.query(query, params);
-
-            // Contar total
-            let countQuery = 'SELECT COUNT(*) as total FROM security_logs';
-            let countParams = [];
-
-            if (severity) {
-                countQuery += ' WHERE severity = ?';
-                countParams.push(severity);
-            }
-
-            const [countResult] = await db.query(countQuery, countParams);
+            const [countResult] = await db.query(
+                'SELECT COUNT(*) as total FROM security_logs WHERE (? IS NULL OR severity = ?)',
+                [sev, sev]
+            );
             const total = countResult[0].total;
 
             res.json({
@@ -190,6 +182,37 @@ class SystemController {
                 success: false,
                 message: 'Error obteniendo logs de seguridad'
             });
+        }
+    }
+
+    // Tabla de análisis: eventos filtrables (los filtros ya vienen validados en system.routes.js)
+    async getSecurityEvents(req, res) {
+        try {
+            const q = req.validated?.query || {};
+            const events = await securityEvents.list({
+                type: q.type, rule: q.rule, severity: q.severity, ip: q.ip, userId: q.userId,
+                sinceHours: q.hours, beforeId: q.before, limit: q.limit
+            });
+
+            res.json({
+                success: true,
+                events,
+                nextBefore: events.length === (q.limit || 100) ? events[events.length - 1].id : null
+            });
+        } catch (error) {
+            console.error('❌ Error obteniendo eventos de seguridad:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error obteniendo eventos de seguridad' });
+        }
+    }
+
+    // Resumen: qué pasó en las últimas N horas, quién insiste y con qué reglas
+    async getSecuritySummary(req, res) {
+        try {
+            const summary = await securityEvents.summary({ hours: req.validated?.query?.hours });
+            res.json({ success: true, summary });
+        } catch (error) {
+            console.error('❌ Error obteniendo el resumen de seguridad:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error obteniendo el resumen de seguridad' });
         }
     }
 

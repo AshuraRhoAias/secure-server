@@ -129,7 +129,7 @@ test('registro de columnas cifradas: cubre todas las columnas de texto "encrypte
     const schema = fs.readFileSync(path.join(__dirname, 'database/schema.sql'), 'utf8');
     const found = [];
 
-    for (const block of schema.matchAll(/CREATE TABLE `(\w+)` \(([\s\S]*?)\) ENGINE/g)) {
+    for (const block of schema.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?`(\w+)` \(([\s\S]*?)\) ENGINE/g)) {
         const [, table, body] = block;
         for (const col of body.matchAll(/^\s*`(\w+)` (\w+)/gm)) {
             const [, name, type] = col;
@@ -278,7 +278,7 @@ const itDb = (name, fn) => test(name, async (t) => {
     await fn(t);
 });
 
-const TABLES = ['known_devices', 'user_sessions', 'user_notes', 'users', 'security_logs', 'server_integrity', 'encryption_keys', 'blocked_ips', 'security_metrics', 'crypto_meta'];
+const TABLES = ['known_devices', 'user_sessions', 'user_notes', 'user_files', 'users', 'security_logs', 'security_events', 'rate_limit_counters', 'login_attempts', 'server_integrity', 'encryption_keys', 'blocked_ips', 'security_metrics', 'crypto_meta'];
 
 const currentKey = () => secureEnv.getSecret('encryption');
 const encCurrent = (text) => encryptor.withKey(currentKey(), () => encryptor.encrypt(text), { quiet: true });
@@ -488,6 +488,58 @@ itDb('rotación: re-cifra todo con la clave nueva, sin perder ni alterar datos',
     assert.ok(!envText.includes('KEY_EPOCH=T0-inicial'));
     assert.ok(!fs.existsSync(`${w.paths.envFile}.pending`));
     assert.strictEqual(fs.statSync(w.paths.envFile).mode & 0o777, 0o600);
+});
+
+itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archivos re-envuelven su clave sin tocar sus bytes', async () => {
+    const fileCipher = require('./src/files/file-cipher');
+    const { pipeline } = require('stream/promises');
+    const { Readable } = require('stream');
+    const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+    const w = await freshWorld();
+    const oldKey = currentKey();
+
+    // Una nota cifrada con el formato antiguo (tres capas con la misma clave)
+    const [l1, l2, l3] = [require('./src/crypto/level1'), require('./src/crypto/level2'), require('./src/crypto/level3')];
+    const legacy = (text) => encryptor.withKey(oldKey, () => l3.encrypt(l2.encrypt(l1.encrypt(text))));
+    const [[{ id: userId }]] = await db.query('SELECT id FROM users ORDER BY id LIMIT 1');
+    const [inserted] = await db.query('INSERT INTO user_notes (user_id, title_encrypted, content_encrypted) VALUES (?, ?, ?)',
+        [userId, legacy('título heredado'), legacy('contenido heredado')]);
+    const [[beforeNote]] = await db.query('SELECT title_encrypted FROM user_notes WHERE id = ?', [inserted.insertId]);
+    assert.ok(!beforeNote.title_encrypted.startsWith('v4:'), 'la nota de partida está en formato antiguo');
+
+    // Un archivo real cifrado en disco con su propia clave, envuelta con la clave maestra
+    const dataKey = fileCipher.newDataKey();
+    const plain = crypto.randomBytes(200_000);
+    const file = path.join(w.dir, 'archivo.enc');
+    await pipeline(Readable.from([plain]), new fileCipher.EncryptStream(dataKey), fs.createWriteStream(file));
+    const diskHash = sha(fs.readFileSync(file));
+    await db.query(
+        `INSERT INTO user_files (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256)
+         VALUES (?, ?, ?, ?, 'image/png', 'image', ?, ?)`,
+        [userId, crypto.randomUUID(), encCurrent('mi-archivo.png'), encCurrent(dataKey.toString('hex')), plain.length, sha(plain)]
+    );
+
+    await w.service.run({ env: w.env(), drainSeconds: 0 });
+    const newSet = newKeyFromFile(w.paths.envFile);
+
+    // La nota antigua ahora es v4 y se lee con la clave nueva
+    const [[afterNote]] = await db.query('SELECT title_encrypted, content_encrypted FROM user_notes WHERE id = ?', [inserted.insertId]);
+    assert.ok(afterNote.title_encrypted.startsWith('v4:') && afterNote.content_encrypted.startsWith('v4:'));
+    assert.strictEqual(decWith(newSet.encryption, afterNote.title_encrypted), 'título heredado');
+    assert.strictEqual(decWith(newSet.encryption, afterNote.content_encrypted), 'contenido heredado');
+
+    // El archivo: nombre y clave re-envueltos con la clave nueva (y ya no con la antigua)…
+    const [[row]] = await db.query('SELECT filename_encrypted, key_encrypted FROM user_files');
+    assert.strictEqual(decWith(newSet.encryption, row.filename_encrypted), 'mi-archivo.png');
+    const unwrapped = Buffer.from(decWith(newSet.encryption, row.key_encrypted), 'hex');
+    assert.ok(unwrapped.equals(dataKey));
+    assert.throws(() => decWith(oldKey, row.key_encrypted));
+
+    // …y los bytes del archivo en disco NO se tocaron, pero siguen descifrándose
+    assert.strictEqual(sha(fs.readFileSync(file)), diskHash);
+    const parts = [];
+    for await (const part of fileCipher.decryptRange({ filePath: file, key: unwrapped, plainSize: plain.length })) parts.push(part);
+    assert.ok(Buffer.concat(parts).equals(plain));
 });
 
 itDb('rotación: el texto plano nunca llega a disco ni a los logs', async () => {

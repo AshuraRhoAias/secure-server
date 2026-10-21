@@ -1,4 +1,6 @@
 const secureAuthService = require('../../security/secure-auth.service');
+const { AuthError } = secureAuthService;
+const { normalizeIp } = require('../../security/ip');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
 const bcrypt = require('bcryptjs');
 
@@ -12,136 +14,85 @@ class AuthController {
         this.logUserAction = this.logUserAction.bind(this);
     }
 
+    // Solo se aceptan estos campos (texto corto) de deviceInfo: alimentan la huella del dispositivo
+    cleanDeviceInfo(deviceInfo) {
+        const out = {};
+        if (deviceInfo && typeof deviceInfo === 'object' && !Array.isArray(deviceInfo)) {
+            for (const key of ['screenResolution', 'timezone', 'language', 'platform', 'colorDepth', 'pixelRatio']) {
+                const value = deviceInfo[key];
+                if (typeof value === 'string' || typeof value === 'number') out[key] = String(value).slice(0, 100);
+            }
+        }
+        return out;
+    }
+
     async register(req, res) {
         try {
-            const { username, email, password, deviceInfo } = req.body;
+            // Formato, longitudes y tipos ya los validó validate.body en auth.routes.js
+            const { username, email, password } = req.body;
+            const deviceInfo = this.cleanDeviceInfo(req.body.deviceInfo);
+            const ip = normalizeIp(req.ip);
 
-            // ✅ VALIDACIONES MEJORADAS
-            if (!username || !email || !password) {
+            // bcrypt solo mira los primeros 72 BYTES: más allá se ignoraría en silencio
+            if (Buffer.byteLength(password, 'utf8') > 72) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Todos los campos son requeridos'
+                    message: 'La contraseña no puede superar 72 bytes',
+                    code: 'VALIDATION_ERROR'
                 });
             }
 
-            // ✅ VALIDAR STRINGS VACÍOS Y ESPACIOS EN BLANCO
-            const trimmedUsername = username.trim();
-            const trimmedEmail = email.trim();
-
-            if (trimmedUsername === '' || trimmedEmail === '' || password.trim() === '') {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Los campos no pueden estar vacíos'
-                });
-            }
-
-            // ✅ VALIDACIONES ADICIONALES
-            if (trimmedUsername.length < 3) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'El username debe tener al menos 3 caracteres'
-                });
-            }
-
-            if (password.length < 6) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'La password debe tener al menos 6 caracteres'
-                });
-            }
-
-            // Validar formato de email básico
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(trimmedEmail)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Formato de email inválido'
-                });
-            }
-
-            // Verificar si el usuario ya existe (usando username cifrado)
             const db = require('../../config/database');
-            
-            // ✅ USAR USERNAME LIMPIO PARA CIFRADO
-            const encryptedUsername = tripleEncryptor.encrypt(trimmedUsername);
+            const usernameHash = this.generateUsernameHash(username);
 
-            // Para verificar existencia, necesitamos buscar por un hash del username
-            const usernameHash = this.generateUsernameHash(trimmedUsername);
-            
-            // ✅ LOG PARA DEBUGGING
-            console.log(`🔍 Registrando usuario -> Hash: ${usernameHash.substring(0, 8)}...`);
-            
-            const [existingUsers] = await db.query(
-                'SELECT id FROM users WHERE username_hash = ?',
-                [usernameHash]
-            );
-
+            const [existingUsers] = await db.query('SELECT id FROM users WHERE username_hash = ?', [usernameHash]);
             if (existingUsers.length > 0) {
-                return res.status(409).json({
-                    success: false,
-                    message: 'El usuario ya existe'
-                });
+                return res.status(409).json({ success: false, message: 'El usuario ya existe' });
             }
 
-            // Cifrar todos los datos sensibles
-            const encryptedEmail = tripleEncryptor.encrypt(trimmedEmail);
             const passwordHash = await bcrypt.hash(password, 12);
-            const deviceFingerprint = secureAuthService.generateDeviceFingerprint(deviceInfo || {});
+            const deviceFingerprint = secureAuthService.generateDeviceFingerprint({
+                ...deviceInfo, userAgent: req.headers['user-agent']
+            });
 
-            // Cifrar metadatos adicionales
             const encryptedMetadata = tripleEncryptor.encrypt(JSON.stringify({
-                originalUsername: trimmedUsername,
-                registrationIP: req.ip,
+                originalUsername: username,
+                registrationIP: ip,
                 registrationUserAgent: req.headers['user-agent'],
-                deviceFingerprint: deviceFingerprint,
+                deviceFingerprint,
                 registrationTimestamp: new Date().toISOString()
             }));
 
-            // Calcular nivel de riesgo inicial
-            const initialRiskLevel = 'low';
-            const encryptedRiskLevel = tripleEncryptor.encrypt(initialRiskLevel);
-
-            // ✅ VALIDAR QUE LOS DATOS CIFRADOS NO ESTÉN VACÍOS
-            if (!encryptedUsername || !usernameHash || !encryptedEmail) {
-                throw new Error('Error en proceso de cifrado: datos vacíos generados');
+            let result;
+            try {
+                [result] = await db.query(
+                    `INSERT INTO users (
+                        username_encrypted, username_hash, email_encrypted, password_hash, device_fingerprint,
+                        risk_level_encrypted, encrypted_metadata, encryption_version, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                    [
+                        tripleEncryptor.encrypt(username),
+                        usernameHash,
+                        tripleEncryptor.encrypt(email),
+                        passwordHash,
+                        deviceFingerprint,
+                        tripleEncryptor.encrypt('low'),
+                        encryptedMetadata,
+                        this.getCurrentEncryptionVersion()
+                    ]
+                );
+            } catch (insertError) {
+                // Dos registros simultáneos del mismo usuario: gana uno (índice único username_hash)
+                if (insertError.code === 'ER_DUP_ENTRY') {
+                    return res.status(409).json({ success: false, message: 'El usuario ya existe' });
+                }
+                throw insertError;
             }
 
-            console.log(`🔐 Datos cifrados listos para inserción:
-                - Username cifrado: ${encryptedUsername.length} chars
-                - Username hash: ${usernameHash.length} chars
-                - Email cifrado: ${encryptedEmail.length} chars`);
-
-            // Crear usuario con todos los campos cifrados
-            const [result] = await db.query(
-                `INSERT INTO users (
-                    username_encrypted, 
-                    username_hash, 
-                    email_encrypted, 
-                    password_hash, 
-                    device_fingerprint,
-                    risk_level_encrypted,
-                    encrypted_metadata,
-                    encryption_version,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-                [
-                    encryptedUsername,
-                    usernameHash,
-                    encryptedEmail, 
-                    passwordHash, 
-                    deviceFingerprint,
-                    encryptedRiskLevel,
-                    encryptedMetadata,
-                    this.getCurrentEncryptionVersion()
-                ]
-            );
-
-            // Log del registro con datos cifrados
             await this.logUserAction('USER_REGISTERED', {
                 userId: result.insertId,
-                usernameHash: usernameHash,
-                ipAddress: req.ip,
+                usernameHash,
+                ipAddress: ip,
                 encryptionVersion: this.getCurrentEncryptionVersion()
             });
 
@@ -153,134 +104,46 @@ class AuthController {
             });
 
         } catch (error) {
-            console.error('❌ Error en registro:', error);
-            
-            // ✅ LOG MÁS DETALLADO PARA DEBUGGING
-            console.error('❌ Datos del request:', {
-                username: req.body?.username,
-                usernameLength: req.body?.username?.length,
-                usernameType: typeof req.body?.username,
-                email: req.body?.email,
-                emailLength: req.body?.email?.length,
-                hasPassword: !!req.body?.password
-            });
-            
-            // Log del error de registro
+            // Nunca se vuelcan al log el usuario, el email ni la contraseña de la petición
+            console.error('❌ Error en registro:', error.code || error.message);
+
             try {
                 await this.logUserAction('USER_REGISTRATION_ERROR', {
-                    usernameAttempt: req.body?.username ? this.generateUsernameHash(req.body.username.trim()) : 'unknown',
-                    ipAddress: req.ip,
-                    error: error.message,
+                    ipAddress: normalizeIp(req.ip),
+                    error: error.code || 'ERROR',
                     encryptionVersion: this.getCurrentEncryptionVersion()
                 });
             } catch (logError) {
-                console.error('❌ Error logging registration error:', logError);
+                console.error('❌ Error logging registration error:', logError.message);
             }
 
-            res.status(500).json({
-                success: false,
-                message: 'Error interno del servidor'
-            });
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
         }
     }
 
     async login(req, res) {
+        const { username, password } = req.body;
+        const ip = normalizeIp(req.ip);
+
         try {
-            const { username, password, deviceInfo } = req.body;
-
-            // ✅ VALIDACIONES MEJORADAS
-            if (!username || !password) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Username y password son requeridos'
-                });
-            }
-
-            // ✅ VALIDAR STRINGS VACÍOS
-            const trimmedUsername = username.trim();
-            if (trimmedUsername === '' || password.trim() === '') {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Los campos no pueden estar vacíos'
-                });
-            }
-
-            // Buscar usuario por hash del username
-            const usernameHash = this.generateUsernameHash(trimmedUsername);
-            const db = require('../../config/database');
-            
-            console.log(`🔍 Intentando login -> Hash: ${usernameHash.substring(0, 8)}...`);
-            
-            const [users] = await db.query(
-                'SELECT id, username_encrypted, password_hash, risk_level_encrypted, encrypted_metadata, encryption_version FROM users WHERE username_hash = ?',
-                [usernameHash]
-            );
-
-            if (users.length === 0) {
-                await this.logUserAction('USER_LOGIN_FAILED', {
-                    usernameHash: usernameHash,
-                    ipAddress: req.ip,
-                    error: 'Usuario no encontrado'
-                });
-
-                return res.status(401).json({
-                    success: false,
-                    message: 'Credenciales inválidas'
-                });
-            }
-
-            const user = users[0];
-
-            // Verificar password
-            const isValidPassword = await bcrypt.compare(password, user.password_hash);
-            if (!isValidPassword) {
-                await this.logUserAction('USER_LOGIN_FAILED', {
-                    userId: user.id,
-                    usernameHash: usernameHash,
-                    ipAddress: req.ip,
-                    error: 'Password incorrecto'
-                });
-
-                return res.status(401).json({
-                    success: false,
-                    message: 'Credenciales inválidas'
-                });
-            }
-
-            // Descifrar datos del usuario
-            const decryptedUsername = tripleEncryptor.decrypt(user.username_encrypted);
-            const decryptedRiskLevel = tripleEncryptor.decrypt(user.risk_level_encrypted);
-
-            // Preparar información del dispositivo
-            const enrichedDeviceInfo = {
-                ...deviceInfo,
-                ipAddress: req.ip,
+            const authResult = await secureAuthService.authenticateUser(username, password, {
+                ...this.cleanDeviceInfo(req.body.deviceInfo),
+                ipAddress: ip,
                 userAgent: req.headers['user-agent']
-            };
+            });
 
-            // Autenticar usuario con datos descifrados
-            const authResult = await secureAuthService.authenticateUser(
-                decryptedUsername,
-                password,
-                enrichedDeviceInfo
+            const db = require('../../config/database');
+            await db.query(
+                'UPDATE users SET risk_level_encrypted = ?, updated_at = NOW() WHERE id = ?',
+                [tripleEncryptor.encrypt(authResult.riskLevel), authResult.userId]
             );
 
-            // Actualizar última actividad y nivel de riesgo si cambió
-            if (authResult.riskLevel !== decryptedRiskLevel) {
-                const newEncryptedRiskLevel = tripleEncryptor.encrypt(authResult.riskLevel);
-                await db.query(
-                    'UPDATE users SET risk_level_encrypted = ?, updated_at = NOW() WHERE id = ?',
-                    [newEncryptedRiskLevel, user.id]
-                );
-            }
-
-            // Log del login exitoso
             await this.logUserAction('USER_LOGIN_SUCCESS', {
-                userId: user.id,
-                usernameHash: usernameHash,
-                ipAddress: req.ip,
+                userId: authResult.userId,
+                usernameHash: this.generateUsernameHash(username),
+                ipAddress: ip,
                 riskLevel: authResult.riskLevel,
-                encryptionVersion: user.encryption_version
+                encryptionVersion: this.getCurrentEncryptionVersion()
             });
 
             res.json({
@@ -289,27 +152,30 @@ class AuthController {
                 token: authResult.token,
                 expiresAt: authResult.expiresAt,
                 riskLevel: authResult.riskLevel,
-                encryptionVersion: user.encryption_version
+                encryptionVersion: this.getCurrentEncryptionVersion()
             });
 
         } catch (error) {
-            console.error('❌ Error en login:', error);
-
-            // Log del login fallido
-            try {
+            // Errores previstos (credenciales, cuenta bloqueada): mensaje y código estables
+            if (error instanceof AuthError) {
                 await this.logUserAction('USER_LOGIN_FAILED', {
-                    usernameHash: req.body?.username ? this.generateUsernameHash(req.body.username.trim()) : 'unknown',
-                    ipAddress: req.ip,
-                    error: error.message
+                    usernameHash: this.generateUsernameHash(username),
+                    ipAddress: ip,
+                    error: error.code
                 });
-            } catch (logError) {
-                console.error('❌ Error logging login failure:', logError);
+
+                if (error.retryAfter) res.set('Retry-After', String(error.retryAfter));
+                return res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                    code: error.code,
+                    ...(error.retryAfter && { retryAfter: error.retryAfter })
+                });
             }
 
-            res.status(401).json({
-                success: false,
-                message: error.message
-            });
+            // Cualquier otro error es nuestro: se registra, pero al cliente NO se le cuenta el detalle
+            console.error('❌ Error en login:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
         }
     }
 
@@ -450,31 +316,14 @@ class AuthController {
 
     // ============ MÉTODOS AUXILIARES PARA CIFRADO ============
 
-    // ✅ MÉTODO AUXILIAR MEJORADO
+    // Una sola implementación del hash de usuario (la usa también el servicio de autenticación)
     generateUsernameHash(username) {
-        // Crear hash determinístico para búsquedas
-        const crypto = require('crypto');
-        
-        // ✅ VALIDAR ENTRADA
-        if (!username || typeof username !== 'string') {
-            throw new Error('Username inválido para generar hash');
-        }
-        
-        const trimmedUsername = username.trim();
-        if (trimmedUsername === '') {
-            throw new Error('Username vacío no puede ser hasheado');
-        }
-        
-        const salt = process.env.BASE_SEED || 'default_salt';
-        const hash = crypto.createHash('sha256').update(trimmedUsername + salt).digest('hex');
-        
-        console.log(`🔑 Hash de username generado: ${hash.substring(0, 8)}...`);
-        return hash;
+        return secureAuthService.generateUsernameHash(username);
     }
 
     getCurrentEncryptionVersion() {
         // Versión actual del sistema de cifrado
-        return 'v3.1.0';
+        return 'v4.0.0';
     }
 
     async logUserAction(action, details) {

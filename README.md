@@ -1,17 +1,20 @@
 # 🔐 Guía Completa de Instalación - Sistema Ultra Seguro con Seguridad Operacional Avanzada
 
-> **Secure Server** es una API REST en Node.js (Express 5 + MySQL) pensada para guardar y servir datos sensibles. Todo lo que se persiste se cifra con tres capas (AES-256-CBC → AES-256-GCM → ChaCha20-Poly1305), cada petición pasa por detección de anomalías y rate limiting, y las claves se rotan automáticamente.
+> **Secure Server** es una API REST en Node.js (Express 5 + MySQL) pensada para guardar y servir datos sensibles. Los campos sensibles se cifran con AES-256-GCM (formato `v4`; los datos del antiguo formato de tres capas siguen leyéndose), los archivos se guardan cifrados en disco, cada petición pasa por detección de inyecciones, límites y bloqueos **cuyo estado vive en tablas MySQL** (no en memoria) y las claves se rotan con migración de datos.
+>
+> 📘 **Detalle, operación y límites honestos: [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md)** · pruebas: `npm run test:all` (necesita MySQL/MariaDB; ver la cabecera de `test_helpers/env.js`).
 
 ## 🧭 Descripción del proyecto
 
 | Capa | Qué hace | Dónde está |
 |------|----------|------------|
 | **Entrada** | helmet, CORS, compresión, logs (morgan), parseo JSON | `src/index.js` |
-| **Protección** | Bloqueo de IPs, detección de payloads maliciosos y anomalías, rate limiting dinámico | `src/middleware/protection.middleware.js`, `src/security/anomaly-detection.service.js` |
-| **Autenticación** | JWT (5 días) ligado a una sesión en BD, análisis de riesgo por dispositivo/ubicación/horario, bloqueo de cuentas | `src/security/secure-auth.service.js`, `src/middleware/auth.middleware.js` |
+| **Protección** | Bloqueo progresivo de IPs, detección de inyecciones, límites de peticiones y análisis de anomalías, todo en tablas MySQL (`blocked_ips`, `rate_limit_counters`, `security_events`) | `src/middleware/protection.middleware.js`, `src/security/*.service.js`, `src/security/injection-detector.js` |
+| **Autenticación** | JWT (HS256, 5 días) ligado a una sesión en BD, análisis de riesgo por dispositivo/ubicación/horario, bloqueo de cuentas (tabla `login_attempts`) | `src/security/secure-auth.service.js`, `src/middleware/auth.middleware.js` |
 | **Autorización** | Roles `user` / `admin` leídos de la BD en cada petición | `src/middleware/role.middleware.js` |
 | **APIs** | Cada `*.routes.js` se monta solo en `/api/<nombre>` | `src/api/routes/`, `src/api/controllers/` |
-| **Datos** | Pool MySQL; los campos sensibles se guardan cifrados | `src/config/database.js`, `src/crypto/tripleEncryptor.js` |
+| **Datos** | Pool MySQL (consultas siempre con parámetros); campos sensibles cifrados con AES-256-GCM v4 | `src/config/database.js`, `src/config/sql.js`, `src/crypto/tripleEncryptor.js` |
+| **Archivos** | Subida/descarga de imágenes, vídeo, audio, PDF y texto, cifrados en disco por bloques con clave propia | `src/files/`, `src/api/controllers/files.controller.js` |
 | **Auditoría** | Cada acción relevante se registra cifrada en `security_logs` | `src/services/audit.service.js` |
 | **Operaciones** | Rotación mensual de claves, verificación de integridad, alertas multicanal camufladas, scripts de recuperación | `src/tasks/`, `src/crypto/keyRotator.js`, `src/services/secure-communications.service.js`, `scripts/` |
 
@@ -61,6 +64,14 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 | GET | `/api/system/rotation` | JWT + admin | Estado de claves, mantenimiento y backups (sin claves ni datos) |
 | POST | `/api/system/rotate-keys` | JWT + admin | `501`: la rotación se lanza con `npm run rotate-keys` (ver [Rotación de claves](#rotación-de-claves-migración-de-datos-y-backups)) |
 | POST | `/api/system/test-communications` | JWT + admin (10 req/min) | Prueba los canales de alerta |
+| GET | `/api/system/security-events?hours=&type=&rule=&severity=&ip=&userId=&before=&limit=` | JWT + admin | Tabla de análisis de anomalías (filtros y paginación por cursor) |
+| GET | `/api/system/security-summary?hours=` | JWT + admin | Resumen: por tipo/severidad, IPs y reglas más activas, línea temporal |
+| POST | `/api/files` | JWT (20/min por usuario) | Sube **un** archivo (`multipart/form-data`, campo `file`) |
+| GET | `/api/files?limit=&before=&category=` | JWT | Lista tus archivos (cursor) |
+| GET | `/api/files/quota` | JWT | Tu uso y tus límites |
+| GET | `/api/files/:id` | JWT | Metadatos de un archivo tuyo |
+| GET | `/api/files/:id/download[?inline=true]` | JWT | Descarga (soporta `Range` y `HEAD`) |
+| DELETE | `/api/files/:id` | JWT | Borra el archivo (fila y disco) |
 
 > `/api/notes` es una API **de ejemplo funcional**: sirve de plantilla para las tuyas (ver [Cómo crear una API nueva](#cómo-crear-una-api-nueva)).
 
@@ -68,8 +79,10 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 
 ```bash
 npm install
-# 1. Crea la BD y aplica el esquema (instalaciones nuevas)
+# 1. Crea la BD y aplica el esquema (instalaciones nuevas; ya incluye las migraciones 004-006)
 mysql -u <usuario> -p <base_de_datos> < database/schema.sql
+#    …si vienes de una versión anterior: migraciones 004 (tablas de seguridad), 005 (archivos) y 006
+#    (índice único de usuario) de database/migrations/ — ver docs/SEGURIDAD.md §8
 #    …o, si ya tenías la BD de antes, solo la migración (añade users.role y user_notes):
 mysql -u <usuario> -p <base_de_datos> < database/migrations/001_roles_and_notes.sql
 # 2. Configura .env (ver "Variables de Entorno Seguras") y arranca
