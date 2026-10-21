@@ -1,7 +1,7 @@
 const db = require('../config/database');
 const tripleEncryptor = require('../crypto/tripleEncryptor');
 
-const ENCRYPTION_VERSION = 'v3.1.0';
+const ENCRYPTION_VERSION = 'v4.0.0';
 
 // Registro de auditoría reutilizable por cualquier API.
 // Los detalles se cifran con el cifrador triple antes de guardarse en security_logs.

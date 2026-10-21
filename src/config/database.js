@@ -1,5 +1,36 @@
+const fs = require('fs');
 const mysql = require('mysql2/promise');
 const credentialBuilder = require('./credential-builder');
+
+// Configuración TLS hacia la base de datos (variable DB_SSL):
+//   verify     TLS y se VERIFICA el certificado del servidor (por defecto en producción)
+//   no-verify  TLS sin verificar el certificado (vulnerable a un intermediario: solo si no hay otra opción)
+//   off        sin TLS (por defecto fuera de producción; en producción se avisa en voz alta)
+// DB_SSL_CA: ruta a un PEM, o el PEM en sí, de la CA que firmó el certificado del servidor.
+function buildSslConfig(nodeEnv) {
+    const mode = (process.env.DB_SSL || (nodeEnv === 'production' ? 'verify' : 'off')).toLowerCase();
+
+    if (['off', 'false', '0'].includes(mode)) {
+        if (nodeEnv === 'production') {
+            console.error('⚠️ DB_SSL=off en producción: la conexión a la base de datos NO está cifrada');
+        }
+        return false;
+    }
+
+    const ssl = { rejectUnauthorized: mode !== 'no-verify' };
+    if (!ssl.rejectUnauthorized) {
+        console.error('⚠️ DB_SSL=no-verify: no se verifica el certificado de la base de datos (riesgo de intermediario)');
+    }
+
+    const ca = process.env.DB_SSL_CA;
+    if (ca) ssl.ca = ca.includes('BEGIN CERTIFICATE') ? ca : fs.readFileSync(ca);
+    return ssl;
+}
+
+const intFromEnv = (name, fallback) => {
+    const n = Number(process.env[name]);
+    return Number.isInteger(n) && n > 0 ? n : fallback;
+};
 
 class DatabaseConfig {
     constructor() {
@@ -17,41 +48,27 @@ class DatabaseConfig {
         return value || null;
     }
 
+    poolOptions(ssl) {
+        return {
+            uri: credentialBuilder.buildDatabaseURL(),
+            waitForConnections: true,
+            connectionLimit: intFromEnv('DB_POOL_SIZE', 10),
+            // Cola acotada: bajo una avalancha se rechaza en vez de acumular peticiones sin límite
+            queueLimit: intFromEnv('DB_QUEUE_LIMIT', 500),
+            ssl,
+            charset: 'utf8mb4',
+            connectTimeout: 10000,
+            enableKeepAlive: true,
+            // Una sentencia por llamada: apila `; DROP TABLE ...` es imposible a nivel de driver
+            multipleStatements: false
+        };
+    }
+
     initializePool() {
         try {
-            // Validar credenciales antes de conectar
             credentialBuilder.validateCredentials();
-
-            // Construir URL de conexión de forma segura
-            const databaseURL = credentialBuilder.buildDatabaseURL();
-
-            // Extraer NODE_ENV con chequeo
             const nodeEnv = this.getEnvVariable('NODE_ENV');
-
-            // Configuración SSL más robusta
-            let sslConfig = false;
-            
-            if (nodeEnv === 'production') {
-                // En producción, intentar SSL pero permitir fallar a no-SSL
-                sslConfig = {
-                    rejectUnauthorized: false,
-                    // Permitir conexiones no seguras como fallback
-                    require: false
-                };
-            }
-
-            this.pool = mysql.createPool({
-                uri: databaseURL,
-                waitForConnections: true,
-                connectionLimit: 10,
-                queueLimit: 0,
-                // Remover configuraciones no válidas que causan warnings
-                ssl: sslConfig,
-                charset: 'utf8mb4',
-                // Configuraciones de timeout válidas
-                connectTimeout: 60000,
-            });
-
+            this.pool = mysql.createPool(this.poolOptions(buildSslConfig(nodeEnv)));
             console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
         } catch (error) {
             console.error('❌ Error inicializando pool de base de datos:', error);
@@ -63,81 +80,72 @@ class DatabaseConfig {
         try {
             return await this.pool.getConnection();
         } catch (error) {
-            console.error('❌ Error al obtener conexión:', error);
+            console.error('❌ Error al obtener conexión:', error.message);
             throw error;
         }
     }
 
+    // Todas las consultas van como sentencias PREPARADAS (`execute`): los valores viajan aparte
+    // del SQL, así que nada de lo que envíe un usuario puede cambiar la consulta.
     async query(sql, params = []) {
         let connection;
         try {
             connection = await this.getConnection();
             const [results] = await connection.execute(sql, params);
-            return [results]; // Mantener formato consistente
+            return [results];
         } catch (error) {
-            console.error('❌ Error en consulta SQL:', error);
+            // Se registra el código, no el SQL ni los parámetros (pueden contener datos sensibles)
+            console.error(`❌ Error en consulta SQL: ${error.code || error.message}`);
             throw error;
         } finally {
             if (connection) connection.release();
+        }
+    }
+
+    // Varias sentencias sobre UNA misma conexión (p. ej. contador atómico + lectura)
+    async withConnection(fn) {
+        const connection = await this.getConnection();
+        try {
+            return await fn({ query: async (sql, params = []) => [(await connection.execute(sql, params))[0]] });
+        } finally {
+            connection.release();
+        }
+    }
+
+    // Transacción: fn recibe { query }; COMMIT si termina, ROLLBACK si lanza
+    async transaction(fn) {
+        const connection = await this.getConnection();
+        try {
+            await connection.beginTransaction();
+            const result = await fn({ query: async (sql, params = []) => [(await connection.execute(sql, params))[0]] });
+            await connection.commit();
+            return result;
+        } catch (error) {
+            await connection.rollback().catch(() => {});
+            throw error;
+        } finally {
+            connection.release();
         }
     }
 
     async testConnection() {
         let connection;
         try {
-            // Intentar conexión con SSL primero, luego sin SSL
             connection = await this.pool.getConnection();
             await connection.execute('SELECT 1 as test');
             console.log('✅ Conexión a base de datos exitosa');
             return true;
         } catch (error) {
-            // Si es error de SSL, intentar recrear pool sin SSL
             if (error.code === 'HANDSHAKE_NO_SSL_SUPPORT') {
-                console.log('ℹ️ SSL no soportado, reconfigurar para conexión no segura...');
-                return await this.recreatePoolWithoutSSL();
+                // Antes se degradaba en silencio a una conexión sin cifrar. Ahora hay que decidirlo explícitamente.
+                console.error('❌ El servidor de base de datos no admite TLS. Habilítalo, o fija DB_SSL=off de forma explícita si aceptas el riesgo.');
+                return false;
             }
-            
-            console.error('❌ Error de conexión a base de datos:', error);
+
+            console.error('❌ Error de conexión a base de datos:', error.code || error.message);
             return false;
         } finally {
             if (connection) connection.release();
-        }
-    }
-
-    async recreatePoolWithoutSSL() {
-        try {
-            // Cerrar pool actual
-            if (this.pool) {
-                await this.pool.end();
-            }
-
-            // Reconstruir URL de conexión
-            const databaseURL = credentialBuilder.buildDatabaseURL();
-
-            // Crear nuevo pool sin SSL
-            this.pool = mysql.createPool({
-                uri: databaseURL,
-                waitForConnections: true,
-                connectionLimit: 10,
-                queueLimit: 0,
-                ssl: false, // Explícitamente deshabilitado
-                charset: 'utf8mb4',
-                connectTimeout: 60000,
-                acquireTimeout: 60000,
-                timeout: 60000
-            });
-
-            // Probar nueva conexión
-            const connection = await this.pool.getConnection();
-            await connection.execute('SELECT 1 as test');
-            connection.release();
-
-            console.log('✅ Conexión reconfigurada sin SSL exitosamente');
-            return true;
-
-        } catch (error) {
-            console.error('❌ Error reconfigurando conexión:', error);
-            return false;
         }
     }
 
@@ -147,7 +155,6 @@ class DatabaseConfig {
         try {
             const result = await this.query(sql, params);
 
-            // Log de consulta exitosa
             await this.logDatabaseAccess({
                 type: 'QUERY_SUCCESS',
                 userId,
@@ -161,7 +168,7 @@ class DatabaseConfig {
                 type: 'QUERY_FAILED',
                 userId,
                 duration: Date.now() - startTime,
-                error: error.message
+                error: error.code || 'ERROR'
             });
 
             throw error;
@@ -174,12 +181,12 @@ class DatabaseConfig {
             const encryptedDetails = tripleEncryptor.encrypt(JSON.stringify(details));
 
             await this.query(
-                `INSERT INTO security_logs (event_type, encrypted_details, ip_address, severity) 
+                `INSERT INTO security_logs (event_type, encrypted_details, ip_address, severity)
                  VALUES (?, ?, 'DATABASE', 'low')`,
                 [details.type, encryptedDetails]
             );
         } catch (error) {
-            console.error('❌ Error logging database access:', error);
+            console.error('❌ Error logging database access:', error.message);
         }
     }
 }

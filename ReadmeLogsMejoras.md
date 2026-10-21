@@ -333,3 +333,35 @@ que tocan el código/operación y exceden el encargo aditivo).
 > encargo de **no interferir con el código existente**, se dejan **documentadas y
 > propuestas**, no aplicadas. Requieren el visto bueno de Antonio para ejecutarse en una
 > intervención aparte.
+
+
+---
+
+## G. Intervención 2026-10-21 (3.ª entrega): seguridad persistente, archivos y anti-inyección
+
+Rama `repo/sharp-noether-tbr0bz`. Todo verificado con `npm run test:all` contra **MariaDB 10.11
+real** (no dobles): 12 API · 24 ICMP · 47 rotación · 116 seguridad · 100 archivos.
+
+**Resuelto de la sección D** (y de lo propuesto en F): JWT con `algorithms` fijado, scripts de
+auto-puntuación retirados, `src/notifications/` fuera del control de versiones, `npm audit --omit=dev`
+**0 vulnerabilidades** (`geoip-lite` 2.0.3), CI con MariaDB real (`.github/workflows/ci.yml`).
+**No tocado a propósito:** `.env` (decisión del propietario).
+
+| Problema (con evidencia) | Corrección |
+|---|---|
+| "Triple cifrado" con la **misma clave** en las 3 capas (verificado) | AES-256-GCM `v4` con HKDF; lectura del formato antiguo; la rotación lo migra |
+| Niveles de cifrado volcaban IV, etiqueta, hash de clave y texto cifrado al log | Sin logs criptográficos (prueba que captura consola) |
+| **Bloqueo de cuenta inoperante** (clave `usuario_IP` vs consulta por `usuario`; 20 fallos → no bloqueaba) | Bloqueo en `login_attempts`; prueba end-to-end |
+| Estado de seguridad en `Map`/`Set` por proceso | Tablas `rate_limit_counters`, `blocked_ips`, `login_attempts`, `security_events`; prueba con **dos procesos** |
+| Sin `trust proxy` | `TRUST_PROXY`; IPv6 por /64 |
+| TLS a BD `rejectUnauthorized:false` + caída silenciosa a sin TLS | `DB_SSL=verify` por defecto en producción |
+| Riesgo de login con fallos de toda la plataforma; login más rápido si el usuario no existe | Por usuario; bcrypt siempre |
+| `autoProtect` montado dos veces en `/api/auth` (doble conteo) | Solo global |
+| Detector con regex que bloqueaban 24 h por texto legítimo (`on\w+=`, `exec(`) | Reglas por severidad, normalización anti-evasión, rechazo por ubicación, strikes |
+| Registro volcaba usuario/email de la petición al log en el error | Eliminado |
+| Sin API de archivos | `/api/files` (ver `docs/SEGURIDAD.md` §5) |
+| `quick-fix.js` reescribía `anomaly-detection`/`secure-auth`/`auth.controller` con código antiguo | Eliminado |
+| Sin índice único en `users.username_hash` (registro concurrente duplicaba) | Migración 006 + 409 en carrera (prueba con 3 registros simultáneos) |
+
+**Pendiente (ver `docs/SEGURIDAD.md` §10):** MFA, SSO, KMS/HSM, antivirus de archivos, backup de
+`FILES_DIR`, pentest externo.

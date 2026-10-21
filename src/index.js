@@ -62,6 +62,7 @@ const database = require('./config/database');
 
 // Importar middlewares
 const protectionMiddleware = require('./middleware/protection.middleware');
+const { sanitizeInput } = require('./middleware/sanitize.middleware');
 const serverCheck = require('./middleware/serverCheck.middleware');
 const { guard: maintenanceGuard } = require('./maintenance');
 const { createErrorHandler } = require('./middleware/error.middleware');
@@ -74,6 +75,7 @@ const secureCommunications = require('./services/secure-communications.service')
 
 // Importar tareas programadas
 const scheduleKeyRotation = require('./tasks/scheduleKeyRotation');
+const housekeeping = require('./tasks/securityHousekeeping');
 
 class SecureServer {
     constructor() {
@@ -178,8 +180,33 @@ class SecureServer {
         }
     }
 
+    // TRUST_PROXY indica cuántos proxies (balanceador, nginx...) hay delante, para que req.ip sea la
+    // IP REAL del cliente y no la del proxy:  1 | 2 | loopback | 10.0.0.0/8 | true
+    // Sin él, detrás de un proxy todos los usuarios comparten IP y el límite/bloqueo los afecta a todos.
+    // Con un valor que no corresponde a tu infraestructura, un cliente podría falsear X-Forwarded-For.
+    configureTrustProxy() {
+        const raw = process.env.TRUST_PROXY;
+        if (!raw) {
+            if (process.env.NODE_ENV === 'production') {
+                console.warn('⚠️ TRUST_PROXY sin definir: si hay un proxy delante, todas las peticiones parecerán venir de su IP');
+            }
+            return;
+        }
+        const value = raw === 'true' ? true : /^\d+$/.test(raw) ? Number(raw) : raw;
+        this.app.set('trust proxy', value);
+    }
+
+    allowedOrigins() {
+        if (process.env.ALLOWED_ORIGINS) return process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean);
+        // En producción, sin orígenes declarados no se permite ninguno (antes había IPs privadas fijas en el código)
+        return process.env.NODE_ENV === 'production' ? false : ['http://localhost:3000'];
+    }
+
     setupMiddlewares() {
         console.log('⚙️ Configurando middlewares de seguridad...');
+
+        this.configureTrustProxy();
+        this.app.disable('x-powered-by');
 
         // Middlewares de seguridad básicos
         this.app.use(helmet({
@@ -199,10 +226,11 @@ class SecureServer {
         }));
 
         this.app.use(cors({
-            origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://192.168.100.58:3000'],
+            origin: this.allowedOrigins(),
             credentials: true,
-            methods: ['GET', 'POST', 'PUT', 'DELETE'],
-            allowedHeaders: ['Content-Type', 'Authorization']
+            methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
+            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Disposition', 'Retry-After']
         }));
 
         // Modo mantenimiento / claves desincronizadas: 503 a todo (ver src/maintenance/guard.js)
@@ -210,11 +238,14 @@ class SecureServer {
 
         this.app.use(compression());
         this.app.use(morgan('combined'));
-        this.app.use(express.json({ limit: '10mb' }));
-        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+        // Los JSON de esta API son pequeños (la subida de archivos va por multipart, con sus propios límites)
+        const bodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
+        this.app.use(express.json({ limit: bodyLimit }));
+        this.app.use(express.urlencoded({ extended: false, limit: bodyLimit }));
 
-        // Middlewares de protección personalizados
+        // Protección (estado en MySQL) y después validación estructural de la entrada
         this.app.use(protectionMiddleware.autoProtect());
+        this.app.use(sanitizeInput());
 
         console.log('✅ Middlewares configurados');
     }
@@ -354,9 +385,15 @@ class SecureServer {
             console.log('✅ Variables críticas cargadas correctamente');
             console.log('========================================\n');
 
+            housekeeping.start();
+
             // Enviar notificación de inicio (si hay canales configurados)
             this.sendStartupNotification();
         });
+
+        // Límites de conexión: cabeceras rápidas (contra slowloris) y tiempo total holgado para subidas grandes
+        this.server.headersTimeout = 30 * 1000;
+        this.server.requestTimeout = Number(process.env.REQUEST_TIMEOUT_MS) || 10 * 60 * 1000;
 
         // Manejo graceful de cierre
         process.on('SIGTERM', () => this.gracefulShutdown());
@@ -393,6 +430,8 @@ class SecureServer {
                     timestamp: new Date().toISOString()
                 }, 'normal');
             }
+
+            housekeeping.stop();
 
             // Cerrar servidor
             this.server.close(() => {

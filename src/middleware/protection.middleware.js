@@ -1,194 +1,218 @@
 const anomalyDetection = require('../security/anomaly-detection.service');
+const rateLimiter = require('../security/rate-limiter.service');
+const events = require('../security/security-events.service');
+const { scanRequest } = require('../security/injection-detector');
+const { ipSubject } = require('../security/ip');
+
+// Capa de protección HTTP. TODO el estado (bloqueos, contadores, historial) está en MySQL:
+// ver src/security/*.service.js y database/migrations/004_security_analysis_tables.sql.
+//
+// Orden de comprobaciones de autoProtect():
+//   1. IP bloqueada                           → 403
+//   2. límite global por IP (ventana 60 s)    → 429 (y bloqueo si se multiplica por 3)
+//   3. ruta típica de escáner (.env, wp-admin) → se registra; varias seguidas → bloqueo
+//   4. firmas de inyección en URL/cabeceras/query/params/cuerpo
+//                                             → 403/400 + evento + "strike" (varios → bloqueo)
+//   5. ráfaga de 401/403 desde la misma IP    → bloqueo (fuerza bruta / enumeración)
+//
+// Si la base de datos de seguridad no responde, se responde 503 (falla CERRADO): sin ella no hay
+// forma de saber si la IP está bloqueada, y tampoco funcionaría ninguna ruta autenticada.
+
+const intEnv = (name, fallback) => {
+    const n = Number(process.env[name]);
+    return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
+const config = () => ({
+    globalPerMin: intEnv('RATE_LIMIT_GLOBAL_PER_MIN', 600),
+    sensitivePerMin: intEnv('SENSITIVE_RATE_LIMIT_PER_MIN', 10),
+    strikesToBlock: intEnv('INJECTION_STRIKES_TO_BLOCK', 5),
+    scannerHitsToBlock: intEnv('SCANNER_HITS_TO_BLOCK', 5),
+    authFailuresToBlock: intEnv('AUTH_FAILURES_TO_BLOCK', 30),
+    // 'block' (por defecto): firmas inequívocas en el cuerpo se rechazan. 'log': solo se registran.
+    bodyMode: process.env.INJECTION_BODY_MODE === 'log' ? 'log' : 'block'
+});
+
+const SCANNER_PATH = /(?:^|\/)\.(?:env|git|svn|hg|aws|ssh|ds_store|htaccess|htpasswd)\b|wp-(?:admin|login|content|includes)|xmlrpc\.php|phpmyadmin|cgi-bin|\.(?:php\d?|asp|aspx|jsp|cgi)$|\/(?:actuator|manager\/html|solr|boaform)(?:\/|$)/i;
+
+const unavailable = (res) => res.status(503).json({
+    success: false,
+    message: 'Servicio temporalmente no disponible',
+    code: 'SECURITY_BACKEND_UNAVAILABLE'
+});
 
 class ProtectionMiddleware {
-    constructor() {
-        this.rateLimits = new Map();
-        this.setupCleanup();
-    }
-
-    // Middleware principal de protección automática
     autoProtect() {
         return async (req, res, next) => {
+            this.addSecurityHeaders(req, res);
+
+            // Bypass explícito para pruebas de carga. Por defecto DESACTIVADO.
+            if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
+
+            // /health no toca la BD: así un balanceador puede comprobar que el proceso vive
+            if (req.path === '/health') return next();
+
             try {
-                // 0. Bypass explícito para pruebas de carga / mantenimiento.
-                //    Por defecto DESACTIVADO: en producción el bloqueo de IP y el
-                //    rate limiting dinámico siguen activos. Sólo se omiten cuando
-                //    se arranca con DISABLE_IP_BLOCKING=true (p. ej. un benchmark
-                //    de tráfico concurrido desde una sola IP).
-                if (process.env.DISABLE_IP_BLOCKING === 'true') {
-                    this.addSecurityHeaders(res);
-                    return next();
+                const cfg = config();
+                const subject = ipSubject(req.ip);
+
+                // 1. IP bloqueada
+                if (await anomalyDetection.isIPBlocked(req.ip)) {
+                    return res.status(403).json({ success: false, message: 'Acceso denegado', code: 'IP_BLOCKED' });
                 }
 
-                // 1. Verificar si la IP está bloqueada
-                const isBlocked = await anomalyDetection.isIPBlocked(req.ip);
-                if (isBlocked) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Acceso denegado',
-                        code: 'IP_BLOCKED'
+                // 2. Límite global por IP
+                const rate = await rateLimiter.hit('ip', subject, 60);
+                if (rate.count > cfg.globalPerMin) {
+                    // Se registra el primer exceso de la ventana y luego cada 100, no cada petición
+                    const excess = rate.count - cfg.globalPerMin;
+                    if (excess === 1 || excess % 100 === 0) {
+                        await events.record({
+                            type: 'RATE_LIMITED', rule: 'GLOBAL_IP_LIMIT', severity: 'medium', riskScore: 40,
+                            action: 'rate_limited', req, status: 429, details: { count: rate.count, limit: cfg.globalPerMin }
+                        });
+                    }
+                    if (rate.count > cfg.globalPerMin * 3) await anomalyDetection.blockIP(req.ip, 'HIGH_REQUEST_RATE');
+
+                    res.set('Retry-After', String(rate.retryAfter));
+                    return res.status(429).json({
+                        success: false, message: 'Demasiadas solicitudes', code: 'RATE_LIMITED', retryAfter: rate.retryAfter
                     });
                 }
 
-                // 2. Análisis de anomalías en tiempo real
-                const anomalies = anomalyDetection.analyzeRequest(req);
-
-                // 3. Bloquear inmediatamente amenazas críticas
-                const criticalAnomalies = anomalies.filter(a => a.severity === 'critical');
-                if (criticalAnomalies.length > 0) {
-                    console.log(`🚨 Bloqueando amenaza crítica desde ${req.ip}:`, criticalAnomalies);
-
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Solicitud rechazada por razones de seguridad',
-                        code: 'SECURITY_VIOLATION'
+                // 3. Rutas típicas de escáneres
+                if (SCANNER_PATH.test(req.path)) {
+                    await events.record({
+                        type: 'SCANNER_PATH', rule: 'SENSITIVE_PATH_PROBE', severity: 'low', riskScore: 20,
+                        req, details: { path: req.path.slice(0, 200) }
                     });
+                    await anomalyDetection.strike(req.ip, 'scanner', { threshold: cfg.scannerHitsToBlock });
                 }
 
-                // 4. Aplicar rate limiting dinámico para anomalías menores
-                if (anomalies.length > 0) {
-                    const limitApplied = await this.applyDynamicRateLimit(req, res, anomalies);
-                    if (!limitApplied) return; // Response ya enviada por rate limiter
-                }
+                // 4. Inyecciones
+                const rejection = await this.checkInjection(req, cfg);
+                if (rejection) return res.status(rejection.status).json(rejection.body);
 
-                // 5. Agregar headers de seguridad
-                this.addSecurityHeaders(res);
+                // 5. Ráfagas de 401/403 (solo cuentan las que genera el resto de la aplicación)
+                res.once('finish', () => this.trackAuthFailures(req, res, cfg));
 
-                // 6. Continuar con el siguiente middleware
                 next();
-
             } catch (error) {
-                console.error('❌ Error en middleware de protección:', error);
-                next(); // Continuar para no romper la aplicación
+                console.error('❌ Error en la capa de protección:', error.code || error.message);
+                return unavailable(res);
             }
         };
     }
 
-    async applyDynamicRateLimit(req, res, anomalies) {
-        const ip = req.ip || req.connection.remoteAddress;
+    async checkInjection(req, cfg) {
+        const { findings } = scanRequest(req);
+        if (findings.length === 0) return null;
 
-        // Calcular límite dinámico basado en anomalías
-        let requestLimit = 60; // Base: 60 req/min
-        let windowSize = 60 * 1000; // 1 minuto
+        // Rechazable: severidad alta fuera del cuerpo; en el cuerpo, solo si bodyMode = 'block'
+        const blockable = findings.filter(f => f.severity === 'high' && (!f.bodyLike || cfg.bodyMode === 'block'));
 
-        // Reducir límites según severidad de anomalías
-        anomalies.forEach(anomaly => {
-            switch (anomaly.severity) {
-                case 'high':
-                    requestLimit = Math.max(10, requestLimit - 20);
-                    break;
-                case 'medium':
-                    requestLimit = Math.max(20, requestLimit - 10);
-                    break;
-                case 'low':
-                    requestLimit = Math.max(40, requestLimit - 5);
-                    break;
-            }
-        });
-
-        // Verificar límite
-        const allowed = await this.checkRateLimit(ip, requestLimit, windowSize);
-
-        if (!allowed) {
-            const retryAfter = Math.ceil(windowSize / 1000);
-
-            res.status(429).json({
-                success: false,
-                message: 'Demasiadas solicitudes. Actividad sospechosa detectada.',
-                retryAfter: retryAfter,
-                code: 'RATE_LIMITED'
+        // Se registran hasta 3 hallazgos por petición (los más graves primero) para no inundar la tabla
+        const ordered = [...findings].sort((a, b) => (b.severity === 'high') - (a.severity === 'high')).slice(0, 3);
+        for (const finding of ordered) {
+            await events.record({
+                type: 'INJECTION_ATTEMPT',
+                rule: finding.rule,
+                severity: finding.severity === 'high' ? 'high' : 'medium',
+                riskScore: finding.severity === 'high' ? 80 : 30,
+                action: blockable.length ? 'rejected' : 'logged',
+                req,
+                status: blockable.length ? (blockable[0].bodyLike ? 400 : 403) : null,
+                details: { family: finding.family, location: finding.location, field: finding.field, sample: finding.sample }
             });
-
-            return false;
         }
 
-        return true;
+        if (blockable.length === 0) return null;
+
+        await anomalyDetection.strike(req.ip, 'injection', { threshold: cfg.strikesToBlock });
+
+        const fromBody = blockable[0].bodyLike;
+        return {
+            status: fromBody ? 400 : 403,
+            body: {
+                success: false,
+                message: fromBody ? 'La entrada contiene contenido no permitido' : 'Solicitud rechazada por razones de seguridad',
+                code: 'MALICIOUS_INPUT'
+            }
+        };
     }
 
-    async checkRateLimit(ip, limit, windowMs) {
-        const now = Date.now();
-        const key = `${ip}_${Math.floor(now / windowMs)}`;
-
-        if (!this.rateLimits.has(key)) {
-            this.rateLimits.set(key, { count: 0, window: now + windowMs });
+    async trackAuthFailures(req, res, cfg) {
+        if (res.statusCode !== 401 && res.statusCode !== 403) return;
+        try {
+            const result = await anomalyDetection.strike(req.ip, 'authfail', { threshold: cfg.authFailuresToBlock });
+            if (result.blocked) {
+                await events.record({
+                    type: 'AUTH_FAILURE_BURST', rule: 'REPEATED_401_403', severity: 'high', riskScore: 70,
+                    action: 'blocked_ip', req, status: res.statusCode, details: { failures: result.count }
+                });
+            }
+        } catch (error) {
+            console.error('❌ Error contando fallos de autenticación:', error.code || error.message);
         }
-
-        const rateLimitData = this.rateLimits.get(key);
-        rateLimitData.count++;
-
-        // Limpiar ventanas expiradas
-        if (now > rateLimitData.window) {
-            this.rateLimits.delete(key);
-            return true;
-        }
-
-        return rateLimitData.count <= limit;
     }
 
-    addSecurityHeaders(res) {
+    // Limitador reutilizable para rutas concretas. Por defecto cuenta por IP;
+    // `key` permite contar por otra cosa (p. ej. por usuario autenticado).
+    //
+    //   router.post('/', protection.limit({ scope: 'upload', limit: 20, key: req => `u:${req.user.id}` }), ...)
+    limit({ scope, limit, windowSec = 60, key = (req) => ipSubject(req.ip), code = 'RATE_LIMITED', message = 'Demasiadas solicitudes' }) {
+        return async (req, res, next) => {
+            if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
+
+            try {
+                const max = typeof limit === 'function' ? limit() : limit;
+                const rate = await rateLimiter.hit(scope, String(key(req)).slice(0, 64), windowSec);
+
+                if (rate.count > max) {
+                    if (rate.count === max + 1) {
+                        await events.record({
+                            type: 'RATE_LIMITED', rule: `${scope}_LIMIT`.toUpperCase().slice(0, 64), severity: 'medium', riskScore: 35,
+                            action: 'rate_limited', req, status: 429, details: { count: rate.count, limit: max }
+                        });
+                    }
+                    res.set('Retry-After', String(rate.retryAfter));
+                    return res.status(429).json({ success: false, message, code, retryAfter: rate.retryAfter });
+                }
+                next();
+            } catch (error) {
+                console.error('❌ Error en el limitador de peticiones:', error.code || error.message);
+                return unavailable(res);
+            }
+        };
+    }
+
+    // Rate limiting estricto para operaciones sensibles (login, registro, tareas administrativas)
+    highSecurity() {
+        return this.limit({
+            scope: 'sensitive',
+            limit: () => config().sensitivePerMin,
+            code: 'HIGH_SECURITY_RATE_LIMITED',
+            message: 'Límite de solicitudes excedido para esta operación sensible'
+        });
+    }
+
+    addSecurityHeaders(req, res) {
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
-        res.setHeader('X-XSS-Protection', '1; mode=block');
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+        res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+        // (No se fija X-XSS-Protection: el valor "1; mode=block" está desaconsejado; helmet envía "0")
 
-        // No revelar información del servidor
+        // Respuestas de la API: nada se cachea en intermediarios (las descargas de archivos lo sobrescriben)
+        if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+
         res.removeHeader('X-Powered-By');
         res.setHeader('Server', 'SecureServer');
     }
 
-    // Middleware específico para rutas sensibles
-    highSecurity() {
-        return async (req, res, next) => {
-            try {
-                const ip = req.ip || req.connection.remoteAddress;
-
-                // Rate limiting muy restrictivo para rutas sensibles
-                const allowed = await this.checkRateLimit(ip, 10, 60 * 1000); // 10 req/min
-
-                if (!allowed) {
-                    return res.status(429).json({
-                        success: false,
-                        message: 'Límite de solicitudes excedido para esta operación sensible',
-                        code: 'HIGH_SECURITY_RATE_LIMITED'
-                    });
-                }
-
-                next();
-            } catch (error) {
-                console.error('❌ Error en middleware de alta seguridad:', error);
-                next();
-            }
-        };
-    }
-
-    getProtectionStats() {
-        const now = Date.now();
-        let activeWindows = 0;
-        for (const data of this.rateLimits.values()) {
-            if (now <= data.window) activeWindows++;
-        }
-
-        return {
-            activeRateLimitWindows: activeWindows,
-            trackedRateLimitEntries: this.rateLimits.size
-        };
-    }
-
-    setupCleanup() {
-        // Limpiar rate limits antiguos cada 5 minutos
-        const timer = setInterval(() => {
-            const now = Date.now();
-
-            for (const [key, data] of this.rateLimits.entries()) {
-                if (now > data.window) {
-                    this.rateLimits.delete(key);
-                }
-            }
-        }, 5 * 60 * 1000);
-
-        // La limpieza no debe impedir que el proceso termine (tests, scripts)
-        timer.unref();
+    async getProtectionStats() {
+        return rateLimiter.stats();
     }
 }
 

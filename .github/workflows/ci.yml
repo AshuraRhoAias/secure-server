@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Base de datos REAL para las pruebas de integración (rotación, seguridad, archivos)
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Preparar bases de datos de prueba
+        run: |
+          mysql -h127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE secure_platform_test CHARACTER SET utf8mb4;
+            CREATE DATABASE secure_platform_test_app CHARACTER SET utf8mb4;
+            CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_test_pw';
+            GRANT ALL ON secure_platform_test.* TO 'sec'@'%';
+            GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
+
+      # Un archivo de prueba a la vez: comparten el mismo servidor MariaDB
+      - name: Pruebas (API, ICMP, rotación, seguridad, archivos)
+        run: npm run test:all
+
+      - name: Dependencias de producción sin vulnerabilidades altas
+        run: npm audit --omit=dev --audit-level=high

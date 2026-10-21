@@ -1,119 +1,147 @@
+const crypto = require('crypto');
+const secureEnv = require('../config/secure-env');
 const level1 = require('./level1');
 const level2 = require('./level2');
 const level3 = require('./level3');
 
-class TripleEncryptor {
+// CIFRADOR DE CAMPOS (el nombre del archivo se conserva por compatibilidad con el resto del código).
+//
+// Formato v4 (el que se ESCRIBE): un único AES-256-GCM con autenticación.
+//
+//     v4:<base64( iv[12] | authTag[16] | ciphertext )>
+//
+// - La clave se separa por propósito con HKDF-SHA256 a partir de la clave maestra, así que la clave
+//   que cifra campos de BD nunca es la misma que usa otro componente.
+// - IV aleatorio de 96 bits por mensaje; AAD fijo que liga el texto cifrado a este formato.
+// - Cualquier alteración del texto cifrado (un bit) hace fallar el descifrado.
+//
+// Formato heredado (solo se LEE): los datos cifrados antes de la v4 usaban tres capas
+// (AES-CBC → AES-GCM → ChaCha20) con LA MISMA clave. Seguirán descifrándose, y la próxima rotación
+// de claves los re-cifra en v4 (npm run rotate-keys). No se registra nada en consola.
+//
+// Límite a tener en cuenta: con IV aleatorio de 96 bits conviene no superar ~2^32 mensajes con la
+// misma clave; la rotación periódica de claves existe, entre otras cosas, para eso.
+
+const V4_PREFIX = 'v4:';
+const V4_AAD = Buffer.from('secure-server/field/v4');
+const HKDF_INFO = 'secure-server/v4/field-encryption';
+
+class FieldEncryptor {
     constructor() {
-        this.levels = [level1, level2, level3];
-        this.encryptionMetrics = {
-            totalEncryptions: 0,
-            totalDecryptions: 0,
-            errors: 0
-        };
+        this.legacyLevels = [level1, level2, level3];
+        this.getKey = () => secureEnv.getSecret('encryption');
+        this.encryptionMetrics = { totalEncryptions: 0, totalDecryptions: 0, errors: 0 };
     }
 
-    tripleEncrypt(text) {
-        try {
-            const startTime = Date.now();
-            let encrypted = text;
+    _fieldKey() {
+        const masterHex = this.getKey();
+        if (typeof masterHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(masterHex)) {
+            throw new Error('Clave de cifrado inválida');
+        }
+        return Buffer.from(crypto.hkdfSync('sha256', Buffer.from(masterHex, 'hex'), Buffer.alloc(0), HKDF_INFO, 32));
+    }
 
-            // Aplicar cifrado en secuencia: L1 → L2 → L3
-            for (let i = 0; i < this.levels.length; i++) {
-                encrypted = this.levels[i].encrypt(encrypted);
-                console.log(`🔐 Cifrado Level ${i + 1} aplicado`);
-            }
+    isLegacy(value) {
+        return typeof value === 'string' && !value.startsWith(V4_PREFIX);
+    }
+
+    encrypt(text) {
+        try {
+            if (typeof text !== 'string') throw new TypeError('Solo se puede cifrar texto');
+
+            const iv = crypto.randomBytes(12);
+            const cipher = crypto.createCipheriv('aes-256-gcm', this._fieldKey(), iv, { authTagLength: 16 });
+            cipher.setAAD(V4_AAD);
+            const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
 
             this.encryptionMetrics.totalEncryptions++;
-            console.log(`⚡ Triple cifrado completado en ${Date.now() - startTime}ms`);
-
-            return encrypted;
+            return V4_PREFIX + Buffer.concat([iv, cipher.getAuthTag(), data]).toString('base64');
         } catch (error) {
             this.encryptionMetrics.errors++;
-            console.error('❌ Error en triple cifrado:', error);
-            throw new Error('Error en triple cifrado');
+            throw new Error('Error al cifrar');
         }
     }
 
-    tripleDecrypt(encryptedText) {
+    decrypt(encryptedText) {
         try {
-            const startTime = Date.now();
-            let decrypted = encryptedText;
+            if (typeof encryptedText !== 'string' || encryptedText.length === 0) throw new TypeError('Texto cifrado inválido');
 
-            // Aplicar descifrado en orden inverso: L3 → L2 → L1
-            for (let i = this.levels.length - 1; i >= 0; i--) {
-                decrypted = this.levels[i].decrypt(decrypted);
-                console.log(`🔓 Descifrado Level ${i + 1} aplicado`);
+            let plain;
+            if (encryptedText.startsWith(V4_PREFIX)) {
+                const raw = Buffer.from(encryptedText.slice(V4_PREFIX.length), 'base64');
+                if (raw.length < 28) throw new Error('Texto cifrado truncado');
+
+                const decipher = crypto.createDecipheriv('aes-256-gcm', this._fieldKey(), raw.subarray(0, 12), { authTagLength: 16 });
+                decipher.setAAD(V4_AAD);
+                decipher.setAuthTag(raw.subarray(12, 28));
+                plain = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+            } else {
+                // Formato heredado de tres capas: L3 → L2 → L1
+                plain = encryptedText;
+                for (let i = this.legacyLevels.length - 1; i >= 0; i--) plain = this.legacyLevels[i].decrypt(plain);
             }
 
             this.encryptionMetrics.totalDecryptions++;
-            console.log(`⚡ Triple descifrado completado en ${Date.now() - startTime}ms`);
-
-            return decrypted;
+            return plain;
         } catch (error) {
             this.encryptionMetrics.errors++;
-            console.error('❌ Error en triple descifrado:', error);
-            throw new Error('Error en triple descifrado');
+            throw new Error('Error al descifrar');
         }
     }
 
-    // Ejecuta fn (SÍNCRONA) usando una clave concreta en los tres niveles en vez de la del
-    // entorno. Lo usa la migración para descifrar con la clave antigua y cifrar con la nueva
-    // sin tocar process.env. `quiet` silencia los logs por operación (hay miles en una migración).
-    withKey(encryptionKeyHex, fn, { quiet = false } = {}) {
-        const savedKeys = this.levels.map(level => level.getKey);
-        const methods = ['log', 'info', 'debug', 'warn', 'error'];
-        const savedConsole = Object.fromEntries(methods.map(m => [m, console[m]]));
+    // Ejecuta fn (SÍNCRONA) usando una clave concreta en vez de la del entorno. Lo usa la migración
+    // para descifrar con la clave antigua y cifrar con la nueva sin tocar process.env.
+    // (`quiet` se acepta por compatibilidad: ya no hay logs que silenciar.)
+    withKey(encryptionKeyHex, fn) {
+        const savedKey = this.getKey;
+        const savedLevelKeys = this.legacyLevels.map(level => level.getKey);
 
-        this.levels.forEach(level => { level.getKey = () => encryptionKeyHex; });
-        if (quiet) {
-            // También `error`: probar una clave equivocada es una operación normal en una migración
-            // y los niveles vuelcan fragmentos del texto cifrado al fallar.
-            methods.forEach(m => { console[m] = () => {}; });
-        }
+        this.getKey = () => encryptionKeyHex;
+        this.legacyLevels.forEach(level => { level.getKey = () => encryptionKeyHex; });
 
         try {
             return fn();
         } finally {
-            this.levels.forEach((level, i) => { level.getKey = savedKeys[i]; });
-            methods.forEach(m => { console[m] = savedConsole[m]; });
+            this.getKey = savedKey;
+            this.legacyLevels.forEach((level, i) => { level.getKey = savedLevelKeys[i]; });
         }
     }
 
-    // Métodos de conveniencia
-    encrypt(text) {
-        return this.tripleEncrypt(text);
-    }
+    // Alias de conveniencia (API anterior)
+    tripleEncrypt(text) { return this.encrypt(text); }
+    tripleDecrypt(text) { return this.decrypt(text); }
 
-    decrypt(encryptedText) {
-        return this.tripleDecrypt(encryptedText);
-    }
-
-    // Obtener métricas de rendimiento
     getMetrics() {
+        const operations = this.encryptionMetrics.totalEncryptions + this.encryptionMetrics.totalDecryptions;
         return {
             ...this.encryptionMetrics,
-            errorRate: this.encryptionMetrics.errors / (this.encryptionMetrics.totalEncryptions + this.encryptionMetrics.totalDecryptions) || 0
+            format: 'v4 (AES-256-GCM)',
+            errorRate: operations ? this.encryptionMetrics.errors / operations : 0
         };
     }
 
-    // Verificar salud del sistema de cifrado
+    // Comprueba que el cifrado actual funciona Y que los datos heredados siguen siendo legibles
     async healthCheck() {
         try {
-            const testData = 'health_check_' + Date.now();
-            const encrypted = this.encrypt(testData);
-            const decrypted = this.decrypt(encrypted);
+            const probe = 'health_check_' + crypto.randomBytes(8).toString('hex');
+            if (this.decrypt(this.encrypt(probe)) !== probe) throw new Error('El cifrado v4 no es reversible');
 
-            if (decrypted === testData) {
-                console.log('✅ Health check de cifrado exitoso');
-                return { healthy: true, message: 'Sistema de cifrado funcionando correctamente' };
-            } else {
-                throw new Error('Datos no coinciden después del cifrado/descifrado');
-            }
+            // El formato heredado debe seguir descifrándose con la clave en uso
+            let legacy = probe;
+            for (const level of this.legacyLevels) legacy = level.encrypt(legacy);
+            if (this.decrypt(legacy) !== probe) throw new Error('El formato heredado no es legible');
+
+            // Un texto alterado debe rechazarse
+            const tampered = this.encrypt(probe).slice(0, -2) + 'AA';
+            let rejected = false;
+            try { this.decrypt(tampered); } catch { rejected = true; }
+            if (!rejected) throw new Error('Se aceptó un texto cifrado alterado');
+
+            return { healthy: true, message: 'Sistema de cifrado funcionando correctamente' };
         } catch (error) {
-            console.error('❌ Health check de cifrado falló:', error);
             return { healthy: false, message: error.message };
         }
     }
 }
 
-module.exports = new TripleEncryptor();
+module.exports = new FieldEncryptor();

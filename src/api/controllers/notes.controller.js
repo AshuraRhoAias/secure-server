@@ -1,8 +1,9 @@
 const db = require('../../config/database');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
 const audit = require('../../services/audit.service');
+const { sqlInt } = require('../../config/sql');
 
-const ENCRYPTION_VERSION = 'v3.1.0';
+const ENCRYPTION_VERSION = 'v4.0.0';
 
 // Cada nota pertenece a un usuario: TODAS las consultas filtran por user_id
 // para que nadie pueda leer o modificar notas ajenas.
@@ -52,7 +53,7 @@ class NotesController {
             `SELECT id, title_encrypted, content_encrypted, created_at, updated_at
              FROM user_notes WHERE user_id = ?
              ORDER BY created_at DESC, id DESC
-             LIMIT ${limitNum} OFFSET ${offset}`,
+             LIMIT ${sqlInt(limitNum)} OFFSET ${sqlInt(offset)}`,
             [req.user.id]
         );
         const [countRows] = await db.query('SELECT COUNT(*) AS total FROM user_notes WHERE user_id = ?', [req.user.id]);
@@ -86,18 +87,7 @@ class NotesController {
         if (!row) return this.notFound(res);
 
         const { title, content } = req.body;
-        const fields = [];
-        const params = [];
-
-        if (title !== undefined) {
-            fields.push('title_encrypted = ?');
-            params.push(tripleEncryptor.encrypt(title));
-        }
-        if (content !== undefined) {
-            fields.push('content_encrypted = ?');
-            params.push(tripleEncryptor.encrypt(content));
-        }
-        if (fields.length === 0) {
+        if (title === undefined && content === undefined) {
             return res.status(400).json({
                 success: false,
                 message: 'Debes enviar title o content',
@@ -105,8 +95,18 @@ class NotesController {
             });
         }
 
-        params.push(req.params.id, req.user.id);
-        await db.query(`UPDATE user_notes SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, params);
+        // SQL fijo: COALESCE conserva el valor actual de lo que no se envía (sin construir SQL con texto)
+        await db.query(
+            `UPDATE user_notes
+             SET title_encrypted = COALESCE(?, title_encrypted), content_encrypted = COALESCE(?, content_encrypted)
+             WHERE id = ? AND user_id = ?`,
+            [
+                title !== undefined ? tripleEncryptor.encrypt(title) : null,
+                content !== undefined ? tripleEncryptor.encrypt(content) : null,
+                req.params.id,
+                req.user.id
+            ]
+        );
 
         await audit.log('NOTE_UPDATED', { noteId: Number(req.params.id) }, { req });
 

@@ -158,3 +158,8 @@ bower_components/
 
 # End of optimized .gitignore
 /front
+# Archivos subidos por usuarios (cifrados): nunca al repositorio
+storage/
+
+# Notificaciones generadas en tiempo de ejecucion (contienen destinatarios): no se versionan
+src/notifications/*.json

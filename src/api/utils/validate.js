@@ -6,7 +6,7 @@
 //       content: { type: 'string', max: 10000 }
 //   }), controller.create);
 //
-// Tipos soportados: string, number, integer, boolean, email, enum (con `values`).
+// Tipos soportados: string, number, integer, boolean, email, object, enum (con `values`).
 // Los campos que no estén en el esquema se descartan (req.body queda "limpio").
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -28,7 +28,8 @@ function checkField(name, rule, raw) {
         case 'string':
         case 'email': {
             if (typeof value !== 'string') return { error: `${name} debe ser texto` };
-            value = value.trim();
+            // trim: false para contraseñas: recortar espacios cambiaría la credencial que el usuario eligió
+            if (rule.trim !== false) value = value.trim();
             if (rule.type === 'email' && !EMAIL_REGEX.test(value)) {
                 return { error: `${name} no tiene formato de email válido` };
             }
@@ -58,6 +59,12 @@ function checkField(name, rule, raw) {
             if (value === 'true') value = true;
             else if (value === 'false') value = false;
             if (typeof value !== 'boolean') return { error: `${name} debe ser booleano` };
+            break;
+        }
+        case 'object': {
+            // Objeto plano (no array). Su contenido lo interpreta quien lo recibe; aquí solo se limita el tamaño.
+            if (typeof value !== 'object' || Array.isArray(value)) return { error: `${name} debe ser un objeto` };
+            if (JSON.stringify(value).length > (rule.maxBytes || 2000)) return { error: `${name} es demasiado grande` };
             break;
         }
         case 'enum': {

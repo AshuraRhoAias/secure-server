@@ -208,7 +208,8 @@ ALTER TABLE `server_integrity`
 -- Indices de la tabla `users`
 --
 ALTER TABLE `users`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uq_users_username_hash` (`username_hash`);
 
 --
 -- Indices de la tabla `user_sessions`
@@ -299,7 +300,7 @@ CREATE TABLE `user_notes` (
   `user_id` int(11) NOT NULL,
   `title_encrypted` longtext NOT NULL,
   `content_encrypted` longtext DEFAULT NULL,
-  `encryption_version` varchar(10) DEFAULT 'v3.1.0',
+  `encryption_version` varchar(10) DEFAULT 'v4.0.0',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
@@ -321,6 +322,87 @@ CREATE TABLE `crypto_meta` (
   `rotation_id` varchar(64) DEFAULT NULL,
   `rotated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- --------------------------------------------------------
+
+--
+-- Estado de seguridad en tablas (migración 004): análisis de anomalías, contadores y login
+--
+
+CREATE TABLE IF NOT EXISTS `security_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `event_type` varchar(64) NOT NULL,
+  `rule` varchar(64) DEFAULT NULL,
+  `severity` enum('info','low','medium','high','critical') NOT NULL DEFAULT 'low',
+  `risk_score` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `action_taken` enum('logged','rate_limited','rejected','blocked_ip','locked_account') NOT NULL DEFAULT 'logged',
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `username_hash` char(64) DEFAULT NULL,
+  `method` varchar(10) DEFAULT NULL,
+  `path` varchar(255) DEFAULT NULL,
+  `status_code` smallint(5) unsigned DEFAULT NULL,
+  `user_agent` varchar(255) DEFAULT NULL,
+  `country` char(2) DEFAULT NULL,
+  `details` longtext DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_se_created` (`created_at`),
+  KEY `idx_se_ip` (`ip_address`, `created_at`),
+  KEY `idx_se_type` (`event_type`, `created_at`),
+  KEY `idx_se_rule` (`rule`, `created_at`),
+  KEY `idx_se_user` (`user_id`, `created_at`),
+  KEY `idx_se_severity` (`severity`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rate_limit_counters` (
+  `scope` varchar(24) NOT NULL,
+  `subject` varchar(64) NOT NULL,
+  `window_start` int(10) unsigned NOT NULL,
+  `hits` int(10) unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY (`scope`, `subject`, `window_start`),
+  KEY `idx_rlc_window` (`window_start`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `login_attempts` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `username_hash` char(64) NOT NULL,
+  `ip_address` varchar(45) NOT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `success` tinyint(1) NOT NULL,
+  `reason` varchar(32) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_la_user` (`username_hash`, `id`),
+  KEY `idx_la_ip` (`ip_address`, `created_at`),
+  KEY `idx_la_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Archivos de usuario (migración 005): metadatos; los bytes viven cifrados en disco
+--
+
+CREATE TABLE IF NOT EXISTS `user_files` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `storage_name` char(36) NOT NULL,
+  `filename_encrypted` longtext NOT NULL,
+  `key_encrypted` longtext NOT NULL,
+  `mime_type` varchar(100) NOT NULL,
+  `category` enum('image','video','audio','document','text') NOT NULL,
+  `size_bytes` bigint(20) unsigned NOT NULL,
+  `sha256` char(64) NOT NULL,
+  `cipher_version` varchar(10) NOT NULL DEFAULT 'f1',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_files_storage_name` (`storage_name`),
+  KEY `idx_files_user` (`user_id`, `id`),
+  KEY `idx_files_user_category` (`user_id`, `category`, `id`),
+  CONSTRAINT `user_files_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
