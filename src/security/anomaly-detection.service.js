@@ -1,5 +1,5 @@
 const geoip = require('geoip-lite');
-const useragent = require('useragent');
+const { UAParser } = require('ua-parser-js');
 
 class AnomalyDetection {
     constructor() {
@@ -74,15 +74,15 @@ class AnomalyDetection {
     generateRequestFingerprint(req) {
         const ip = req.ip || req.connection.remoteAddress;
         const userAgentString = req.headers['user-agent'] || '';
-        const agent = useragent.parse(userAgentString);
+        const agent = new UAParser(userAgentString).getResult();
         const geo = geoip.lookup(ip);
 
         return {
             ip,
             userAgent: userAgentString,
-            browser: agent.family,
-            os: agent.os.family,
-            device: agent.device.family,
+            browser: agent.browser.name || 'Other',
+            os: agent.os.name || 'Other',
+            device: agent.device.type || agent.device.model || 'Other',
             country: geo ? geo.country : 'Unknown',
             city: geo ? geo.city : 'Unknown',
             timestamp: Date.now(),
