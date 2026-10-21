@@ -29,6 +29,19 @@ class RoleMiddleware {
                     });
                 }
 
+                // Con MFA_REQUIRED_FOR_ADMINS=true un administrador solo opera si inició sesión con segundo
+                // factor (otp/recovery) o por SSO (el proveedor de identidad ya lo gestiona)
+                if (role === 'admin' && process.env.MFA_REQUIRED_FOR_ADMINS === 'true') {
+                    const amr = req.user.amr || [];
+                    if (!amr.some(method => ['otp', 'recovery', 'sso'].includes(method))) {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Los administradores necesitan autenticación en dos pasos',
+                            code: 'MFA_REQUIRED'
+                        });
+                    }
+                }
+
                 req.user.role = role;
                 next();
             } catch (error) {

@@ -6,6 +6,7 @@ const credentialBuilder = require('../config/credential-builder');
 const { sqlInt } = require('../config/sql');
 const events = require('./security-events.service');
 const anomalyDetection = require('./anomaly-detection.service');
+const { ipSubject } = require('./ip');
 
 // Autenticación. Todo el estado de seguridad (intentos fallidos, bloqueos, sesiones) está en
 // MySQL (login_attempts, user_sessions, blocked_ips, security_events); no hay Map/Set en memoria.
@@ -25,6 +26,8 @@ const intEnv = (name, fallback) => {
     return Number.isInteger(n) && n > 0 ? n : fallback;
 };
 
+const MFA_CHALLENGE_SECONDS = 5 * 60;
+
 // Hash bcrypt de una cadena aleatoria desechada, para igualar el tiempo cuando el usuario no existe
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 12);
 
@@ -40,8 +43,10 @@ class AuthError extends Error {
 class SecureAuthService {
     get lockout() {
         return {
-            maxFailures: intEnv('MAX_FAILED_ATTEMPTS', 5),
+            maxFailures: intEnv('MAX_FAILED_ATTEMPTS', 5),                 // por (usuario, origen)
+            globalMaxFailures: intEnv('LOCKOUT_GLOBAL_FAILURES', 20),      // por usuario, desde cualquier origen
             windowSec: intEnv('LOCKOUT_WINDOW_SECONDS', 15 * 60),
+            trustedDays: intEnv('TRUSTED_SOURCE_DAYS', 30),
             ipFailuresToBlock: intEnv('LOGIN_IP_FAILURES_TO_BLOCK', 20)
         };
     }
@@ -50,35 +55,101 @@ class SecureAuthService {
         return intEnv('SESSION_TTL_HOURS', 24 * 5);
     }
 
+    // Paso 1 del login: usuario y contraseña. Si el usuario tiene MFA, NO se crea sesión: se devuelve un
+    // "reto" firmado de corta duración que hay que canjear en verifyMfaChallenge con el segundo factor.
     async authenticateUser(username, password, deviceInfo) {
         const usernameHash = this.generateUsernameHash(username);
         const ip = deviceInfo.ipAddress;
 
-        // 1. ¿Cuenta bloqueada por demasiados fallos recientes?
-        const lock = await this.getLockState(usernameHash);
-        if (lock.locked) {
-            await events.record({
-                type: 'LOGIN_BLOCKED', rule: 'ACCOUNT_LOCKED', severity: 'medium', riskScore: 50,
-                action: 'locked_account', ip, usernameHash, details: { retryAfter: lock.retryAfter }
-            });
-            throw new AuthError('ACCOUNT_LOCKED', 'Cuenta temporalmente bloqueada por múltiples intentos fallidos', {
-                status: 429, retryAfter: lock.retryAfter
-            });
-        }
+        await this.assertNotLocked(usernameHash, ip);
 
-        // 2. Credenciales (siempre una comparación bcrypt, exista o no el usuario)
         const user = await this.validateCredentials(username, password);
         if (!user) {
-            await this.recordAttempt({ usernameHash, ip, success: false, reason: 'bad_credentials' });
-            await events.record({
-                type: 'LOGIN_FAILED', rule: 'BAD_CREDENTIALS', severity: 'medium', riskScore: 40,
-                ip, usernameHash, status: 401
-            });
-            await this.checkIpFailures(ip);
+            await this.failLogin({ usernameHash, ip, rule: 'BAD_CREDENTIALS', reason: 'bad_credentials' });
             throw new AuthError('INVALID_CREDENTIALS', 'Credenciales inválidas');
         }
 
-        // 3. Riesgo, sesión y token
+        if (user.mfaEnabled) {
+            // Acertar la contraseña NO cuenta como éxito: si lo hiciera, quien la conoce reiniciaría el
+            // contador de fallos y podría probar códigos TOTP sin límite.
+            return {
+                success: true,
+                userId: user.id,
+                mfaRequired: true,
+                mfaToken: this.signMfaChallenge(user, usernameHash),
+                mfaTokenExpiresIn: MFA_CHALLENGE_SECONDS
+            };
+        }
+
+        return this.completeLogin({ user, usernameHash, deviceInfo, amr: ['pwd'] });
+    }
+
+    // Paso 2 del login con MFA
+    async verifyMfaChallenge(mfaToken, { otp, recoveryCode }, deviceInfo) {
+        const mfa = require('./mfa.service');
+        const ip = deviceInfo.ipAddress;
+
+        let challenge;
+        try {
+            challenge = jwt.verify(mfaToken, credentialBuilder.generateJWTSecret(), { algorithms: ['HS256'] });
+            if (challenge.typ !== 'mfa') throw new Error('tipo');
+        } catch {
+            throw new AuthError('INVALID_MFA_TOKEN', 'El reto de verificación no es válido o caducó: vuelve a iniciar sesión');
+        }
+
+        // El segundo factor comparte el bloqueo de cuenta con la contraseña
+        await this.assertNotLocked(challenge.uh, ip);
+
+        const result = await mfa.verify(challenge.userId, { otp, recoveryCode });
+        if (!result.ok) {
+            await this.failLogin({
+                usernameHash: challenge.uh, ip, userId: challenge.userId,
+                rule: result.replay ? 'MFA_CODE_REPLAY' : 'BAD_MFA_CODE', reason: 'bad_mfa'
+            });
+            throw new AuthError('INVALID_OTP', 'Código incorrecto');
+        }
+
+        if (result.method === 'recovery') {
+            await events.record({ type: 'MFA_RECOVERY_CODE_USED', severity: 'medium', riskScore: 40, ip, userId: challenge.userId, usernameHash: challenge.uh });
+        }
+
+        const user = { id: challenge.userId, username: challenge.username };
+        return this.completeLogin({ user, usernameHash: challenge.uh, deviceInfo, amr: ['pwd', result.method === 'recovery' ? 'recovery' : 'otp'] });
+    }
+
+    signMfaChallenge(user, usernameHash) {
+        return jwt.sign(
+            { typ: 'mfa', userId: user.id, username: user.username, uh: usernameHash, jti: crypto.randomUUID() },
+            credentialBuilder.generateJWTSecret(),
+            { algorithm: 'HS256', expiresIn: MFA_CHALLENGE_SECONDS }
+        );
+    }
+
+    async assertNotLocked(usernameHash, ip) {
+        const lock = await this.getLockState(usernameHash, ip);
+        if (!lock.locked) return;
+
+        await events.record({
+            type: 'LOGIN_BLOCKED', rule: 'ACCOUNT_LOCKED', severity: 'medium', riskScore: 50,
+            action: 'locked_account', ip, usernameHash, details: { retryAfter: lock.retryAfter, scope: lock.scope }
+        });
+        throw new AuthError('ACCOUNT_LOCKED', 'Cuenta temporalmente bloqueada por múltiples intentos fallidos', {
+            status: 429, retryAfter: lock.retryAfter
+        });
+    }
+
+    async failLogin({ usernameHash, ip, userId = null, rule, reason }) {
+        await this.recordAttempt({ usernameHash, ip, userId, success: false, reason });
+        await events.record({
+            type: 'LOGIN_FAILED', rule, severity: 'medium', riskScore: 40, ip, userId, usernameHash, status: 401
+        });
+        await this.checkIpFailures(ip);
+    }
+
+    // Crea la sesión y el token. `amr` dice CÓMO se autenticó (pwd, otp, recovery, sso): el middleware de
+    // roles puede exigir otp para administradores.
+    async completeLogin({ user, usernameHash, deviceInfo, amr }) {
+        const ip = deviceInfo.ipAddress;
         const deviceFingerprint = this.generateDeviceFingerprint(deviceInfo);
         const risk = await this.calculateRiskLevel(user, deviceInfo, deviceFingerprint, usernameHash);
 
@@ -89,6 +160,7 @@ class SecureAuthService {
             ipAddress: ip,
             userAgent: deviceInfo.userAgent,
             riskLevel: risk.level,
+            amr,
             createdAt: Date.now()
         };
 
@@ -100,6 +172,7 @@ class SecureAuthService {
             success: true,
             userId: user.id,
             token,
+            amr,
             expiresAt: new Date(Date.now() + this.sessionTtlHours * 3600 * 1000),
             riskLevel: risk.level,
             requiresVerification: false
@@ -112,7 +185,7 @@ class SecureAuthService {
 
         const usernameHash = this.generateUsernameHash(username);
         const [users] = await db.query(
-            'SELECT id, username_encrypted, password_hash FROM users WHERE username_hash = ?',
+            'SELECT id, username_encrypted, password_hash, mfa_enabled FROM users WHERE username_hash = ?',
             [usernameHash]
         );
 
@@ -121,7 +194,7 @@ class SecureAuthService {
         const passwordOk = await bcrypt.compare(String(password), user ? user.password_hash : DUMMY_HASH);
         if (!user || !passwordOk) return null;
 
-        return { id: user.id, username: tripleEncryptor.decrypt(user.username_encrypted) };
+        return { id: user.id, username: tripleEncryptor.decrypt(user.username_encrypted), mfaEnabled: Boolean(user.mfa_enabled) };
     }
 
     generateUsernameHash(username) {
@@ -153,15 +226,49 @@ class SecureAuthService {
     }
 
     // ------------------------------------------------------------------ bloqueo de cuenta
-
-    // Una cuenta está bloqueada si acumula `maxFailures` fallos en la ventana, contando solo los
-    // posteriores a su último login correcto. Mientras está bloqueada NO se registran más intentos
-    // (si no, un atacante la mantendría bloqueada para siempre).
-    async getLockState(usernameHash) {
+    //
+    // Dos niveles, pensados para que NO se pueda usar contra el dueño de la cuenta:
+    //
+    //  1. Por (usuario, ORIGEN): `maxFailures` fallos desde una misma IP (o /64) bloquean ESA combinación.
+    //     Quien ataca desde una IP solo consigue bloquearse a sí mismo; el dueño, desde su sitio, entra.
+    //  2. Global por usuario: `globalMaxFailures` fallos sumando todos los orígenes (ataque distribuido
+    //     contra una cuenta) bloquean a los orígenes que el usuario NO ha usado antes. Un origen de
+    //     confianza (login correcto desde él en los últimos `trustedDays` días) no se ve afectado.
+    //
+    // Solo cuentan los fallos posteriores al último login correcto de esa misma combinación (nivel 1) o
+    // del usuario (nivel 2), dentro de la ventana. Mientras algo está bloqueado NO se registran más
+    // intentos (si no, el bloqueo se prolongaría indefinidamente). Un administrador puede liberarlo
+    // (POST /api/system/accounts/unlock).
+    async getLockState(usernameHash, ip) {
         const db = require('../config/database');
-        const { maxFailures, windowSec } = this.lockout;
+        const { maxFailures, globalMaxFailures, windowSec, trustedDays } = this.lockout;
+        const subject = ipSubject(ip);
 
-        const [rows] = await db.query(
+        // Nivel 1: este usuario desde este origen
+        const [source] = await db.query(
+            `SELECT COUNT(*) AS failures
+             FROM login_attempts
+             WHERE username_hash = ? AND ip_subject = ? AND success = 0
+               AND created_at > DATE_SUB(NOW(3), INTERVAL ? SECOND)
+               AND id > COALESCE((SELECT MAX(id) FROM login_attempts WHERE username_hash = ? AND ip_subject = ? AND success = 1), 0)`,
+            [usernameHash, subject, windowSec, usernameHash, subject]
+        );
+        if (Number(source[0].failures) >= maxFailures) {
+            const [oldest] = await db.query(
+                `SELECT TIMESTAMPDIFF(SECOND, created_at, NOW(3)) AS age
+                 FROM login_attempts
+                 WHERE username_hash = ? AND ip_subject = ? AND success = 0
+                   AND created_at > DATE_SUB(NOW(3), INTERVAL ? SECOND)
+                   AND id > COALESCE((SELECT MAX(id) FROM login_attempts WHERE username_hash = ? AND ip_subject = ? AND success = 1), 0)
+                 ORDER BY id DESC
+                 LIMIT 1 OFFSET ${sqlInt(maxFailures - 1)}`,
+                [usernameHash, subject, windowSec, usernameHash, subject]
+            );
+            return { locked: true, scope: 'source', retryAfter: Math.max(1, windowSec - (Number(oldest[0]?.age) || 0)) };
+        }
+
+        // Nivel 2: este usuario desde cualquier origen (ataque distribuido)
+        const [global] = await db.query(
             `SELECT COUNT(*) AS failures
              FROM login_attempts
              WHERE username_hash = ? AND success = 0
@@ -169,37 +276,64 @@ class SecureAuthService {
                AND id > COALESCE((SELECT MAX(id) FROM login_attempts WHERE username_hash = ? AND success = 1), 0)`,
             [usernameHash, windowSec, usernameHash]
         );
-        if (Number(rows[0].failures) < maxFailures) return { locked: false };
+        if (Number(global[0].failures) < globalMaxFailures) return { locked: false };
 
-        // Se desbloquea cuando el fallo nº `maxFailures` más reciente sale de la ventana
-        const [oldest] = await db.query(
+        const [trusted] = await db.query(
+            `SELECT 1 AS trusted FROM login_attempts
+             WHERE username_hash = ? AND ip_subject = ? AND success = 1
+               AND (reason IS NULL OR reason <> 'admin_unlock')
+               AND created_at > DATE_SUB(NOW(3), INTERVAL ? DAY)
+             LIMIT 1`,
+            [usernameHash, subject, trustedDays]
+        );
+        if (trusted.length > 0) return { locked: false, trustedSource: true };
+
+        const [oldestGlobal] = await db.query(
             `SELECT TIMESTAMPDIFF(SECOND, created_at, NOW(3)) AS age
              FROM login_attempts
              WHERE username_hash = ? AND success = 0
                AND created_at > DATE_SUB(NOW(3), INTERVAL ? SECOND)
                AND id > COALESCE((SELECT MAX(id) FROM login_attempts WHERE username_hash = ? AND success = 1), 0)
              ORDER BY id DESC
-             LIMIT 1 OFFSET ${sqlInt(maxFailures - 1)}`,
+             LIMIT 1 OFFSET ${sqlInt(globalMaxFailures - 1)}`,
             [usernameHash, windowSec, usernameHash]
         );
-        const age = Number(oldest[0]?.age) || 0;
-        return { locked: true, retryAfter: Math.max(1, windowSec - age) };
+        return { locked: true, scope: 'global', retryAfter: Math.max(1, windowSec - (Number(oldestGlobal[0]?.age) || 0)) };
     }
 
-    async isAccountLocked(username) {
-        return (await this.getLockState(this.generateUsernameHash(username))).locked;
+    async isAccountLocked(username, ip) {
+        return (await this.getLockState(this.generateUsernameHash(username), ip)).locked;
     }
 
     async recordAttempt({ usernameHash, ip, userId = null, success, reason = null }) {
         const db = require('../config/database');
         try {
             await db.query(
-                'INSERT INTO login_attempts (username_hash, ip_address, user_id, success, reason) VALUES (?, ?, ?, ?, ?)',
-                [usernameHash, String(ip || 'unknown').slice(0, 45), userId, success ? 1 : 0, reason]
+                'INSERT INTO login_attempts (username_hash, ip_address, ip_subject, user_id, success, reason) VALUES (?, ?, ?, ?, ?, ?)',
+                [usernameHash, String(ip || 'unknown').slice(0, 45), ipSubject(ip), userId, success ? 1 : 0, reason]
             );
         } catch (error) {
             console.error('❌ Error registrando intento de login:', error.code || error.message);
         }
+    }
+
+    // Libera una cuenta (la usa un administrador). Inserta marcas administrativas que reinician el contador
+    // global y el de CADA origen con fallos recientes, sin borrar el historial (sigue disponible para el
+    // análisis). Estas marcas NO convierten a nadie en "origen de confianza" (ver getLockState).
+    async unlockAccount(username, { adminId } = {}) {
+        const db = require('../config/database');
+        const usernameHash = this.generateUsernameHash(username);
+        const { windowSec } = this.lockout;
+
+        await db.query(
+            `INSERT INTO login_attempts (username_hash, ip_address, ip_subject, user_id, success, reason)
+             SELECT DISTINCT username_hash, 'admin', ip_subject, NULL, 1, 'admin_unlock'
+             FROM login_attempts
+             WHERE username_hash = ? AND success = 0 AND created_at > DATE_SUB(NOW(3), INTERVAL ? SECOND)`,
+            [usernameHash, windowSec]
+        );
+        await this.recordAttempt({ usernameHash, ip: 'admin', userId: adminId ?? null, success: true, reason: 'admin_unlock' });
+        return usernameHash;
     }
 
     // Muchos fallos desde la misma IP (aunque sea contra usuarios distintos = "credential stuffing")
@@ -332,7 +466,8 @@ class SecureAuthService {
             userId: sessionData.userId,
             username: sessionData.username,
             sessionId: crypto.randomUUID(),
-            riskLevel: sessionData.riskLevel
+            riskLevel: sessionData.riskLevel,
+            amr: sessionData.amr || ['pwd']
         };
 
         return jwt.sign(payload, credentialBuilder.generateJWTSecret(), {
@@ -366,6 +501,7 @@ class SecureAuthService {
         try {
             // Algoritmo fijado: un token firmado con otro algoritmo (o "none") se rechaza
             const decoded = jwt.verify(token, credentialBuilder.generateJWTSecret(), { algorithms: ['HS256'] });
+            if (decoded.typ) throw new Error('Token no válido como sesión'); // los retos de MFA no son sesiones
 
             const db = require('../config/database');
             const [sessions] = await db.query(
@@ -383,7 +519,8 @@ class SecureAuthService {
                 userId: decoded.userId,
                 username: decoded.username,
                 sessionId: session.id,
-                riskLevel: session.risk_level
+                riskLevel: session.risk_level,
+                amr: Array.isArray(decoded.amr) ? decoded.amr : ['pwd']
             };
         } catch (error) {
             // Mensaje genérico: no se distingue firma inválida de caducada
@@ -396,7 +533,7 @@ class SecureAuthService {
     async purgeOldData() {
         const db = require('../config/database');
         const [sessions] = await db.query('DELETE FROM user_sessions WHERE expires_at < DATE_SUB(NOW(), INTERVAL 1 DAY) LIMIT 5000');
-        const [attempts] = await db.query('DELETE FROM login_attempts WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000');
+        const [attempts] = await db.query('DELETE FROM login_attempts WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000');
         return { sessions: sessions.affectedRows, loginAttempts: attempts.affectedRows };
     }
 }

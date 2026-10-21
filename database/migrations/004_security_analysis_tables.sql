@@ -54,11 +54,13 @@ CREATE TABLE IF NOT EXISTS `login_attempts` (
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `username_hash` char(64) NOT NULL,
   `ip_address` varchar(45) NOT NULL,
+  `ip_subject` varchar(45) NOT NULL DEFAULT '',
   `user_id` int(11) DEFAULT NULL,
   `success` tinyint(1) NOT NULL,
   `reason` varchar(32) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_la_user` (`username_hash`, `id`),
+  KEY `idx_la_user_subject` (`username_hash`, `ip_subject`, `success`, `id`),
   KEY `idx_la_ip` (`ip_address`, `created_at`),
   KEY `idx_la_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

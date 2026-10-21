@@ -25,6 +25,7 @@ function registerRoutes(app) {
 
     for (const file of files) {
         const name = file.slice(0, -ROUTE_SUFFIX.length);
+        // eslint-disable-next-line security/detect-non-literal-require -- `file` sale de leer ESTA carpeta del servidor (solo *.routes.js), no de la entrada del usuario
         const router = require(path.join(__dirname, file));
         const access = router.access || 'protected';
         const mountPath = `/api/${name}`;

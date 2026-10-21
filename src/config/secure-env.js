@@ -2,12 +2,18 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 const keyProvider = require('../crypto/key-provider');
+const kms = require('../crypto/kms');
 
 // Variables que definen el material de claves: son las que cambian en una rotación.
 const KEY_VARIABLES = ['BASE_SEED', 'ENCRYPTION_SEED', 'JWT_SEED', 'KEY_EPOCH'];
 
 class SecureEnvironment {
     constructor() {
+        // Valores del entorno guardados cifrados por un KMS (kms:...): se descifran AQUÍ, antes de derivar
+        // ninguna clave. Si el KMS no responde esto lanza y el servidor no arranca (falla cerrado).
+        const unwrapped = kms.resolveProcessEnv();
+        if (unwrapped > 0) console.log(`🔑 ${unwrapped} secretos descifrados con el KMS`);
+
         this.loadRotatingSecrets();
         this.setupAutoRotation();
     }
@@ -47,8 +53,10 @@ class SecureEnvironment {
         let changed = false;
 
         for (const name of KEY_VARIABLES) {
-            if (parsed[name] !== undefined && parsed[name] !== process.env[name]) {
-                process.env[name] = parsed[name];
+            // El archivo puede traer valores envueltos por el KMS (la rotación los escribe así)
+            const value = parsed[name] === undefined ? undefined : kms.resolveValue(name, parsed[name]);
+            if (value !== undefined && value !== process.env[name]) {
+                process.env[name] = value;
                 changed = true;
             }
         }

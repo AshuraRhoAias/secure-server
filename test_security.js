@@ -888,3 +888,70 @@ itDb('inundación de eventos: el tope por (IP, tipo) protege la tabla y deja una
         assert.strictEqual((await eventsOf(ip, 'IP_BLOCKED')).length, 15);
     });
 });
+
+// ---------------------------------------------------------------- bloqueo de cuenta que NO se puede usar contra su dueño
+
+itDb('el atacante se bloquea A SÍ MISMO: el dueño sigue entrando desde su sitio y desde sitios nuevos', async () => {
+    const home = testIp(), attacker = testIp(), elsewhere = testIp();
+    const owner = await registerAndLogin(app.base, { ip: home });
+
+    for (let i = 0; i < 5; i++) assert.strictEqual((await badLogin(attacker, owner.username)).status, 401);
+    const blockedAttacker = await badLogin(attacker, owner.username, owner.password);
+    assert.strictEqual(blockedAttacker.status, 429);
+    assert.strictEqual(blockedAttacker.body.code, 'ACCOUNT_LOCKED');
+
+    // El dueño, con su contraseña, entra: desde su IP habitual y desde una nueva
+    assert.strictEqual((await badLogin(home, owner.username, owner.password)).status, 200);
+    assert.strictEqual((await badLogin(elsewhere, owner.username, owner.password)).status, 200);
+
+    const trail = await eventsOf(attacker, 'LOGIN_BLOCKED');
+    assert.strictEqual(trail[0].action_taken, 'locked_account');
+    assert.strictEqual(JSON.parse(trail[0].details).scope, 'source');
+});
+
+itDb('ataque distribuido: se bloquean los orígenes DESCONOCIDOS, no los de confianza; un admin puede liberar', async () => {
+    await withEnv({ LOCKOUT_GLOBAL_FAILURES: '8' }, async () => {
+        const home = testIp();
+        const owner = await registerAndLogin(app.base, { ip: home });
+
+        // 8 fallos desde 8 IP distintas (ninguna llega a 5, así que no hay bloqueo por origen)
+        const botnet = Array.from({ length: 8 }, () => testIp());
+        for (const ip of botnet) assert.strictEqual((await badLogin(ip, owner.username)).status, 401);
+
+        const stranger = testIp();
+        const lockedStranger = await badLogin(stranger, owner.username, owner.password);
+        assert.strictEqual(lockedStranger.status, 429);
+        assert.strictEqual(JSON.parse((await eventsOf(stranger, 'LOGIN_BLOCKED'))[0].details).scope, 'global');
+        assert.ok(Number(lockedStranger.headers.get('retry-after')) > 0);
+
+        // La IP desde la que el dueño ya había entrado NO se ve afectada, y entrar reinicia el contador
+        assert.strictEqual((await badLogin(home, owner.username, owner.password)).status, 200);
+        assert.strictEqual((await badLogin(stranger, owner.username, owner.password)).status, 200, 'tras un login legítimo el bloqueo global se reinicia');
+    });
+});
+
+itDb('liberación por un administrador: reinicia los contadores y NO convierte a nadie en origen de confianza', async () => {
+    await withEnv({ LOCKOUT_GLOBAL_FAILURES: '6' }, async () => {
+        const ipAdmin = testIp(), home = testIp();
+        const admin = await registerAndLogin(app.base, { ip: ipAdmin });
+        const owner = await registerAndLogin(app.base, { ip: home });
+        await db.query("UPDATE users SET role = 'admin' WHERE id = ?", [admin.userId]);
+
+        const attacker = testIp();
+        for (let i = 0; i < 5; i++) await badLogin(attacker, owner.username);
+        assert.strictEqual((await badLogin(attacker, owner.username, owner.password)).status, 429);
+
+        // un usuario normal no puede liberar
+        assert.strictEqual((await api(app.base, 'POST', '/api/system/accounts/unlock', { ip: home, token: owner.token, json: { username: owner.username } })).status, 403);
+
+        const unlocked = await api(app.base, 'POST', '/api/system/accounts/unlock', { ip: ipAdmin, token: admin.token, json: { username: owner.username } });
+        assert.strictEqual(unlocked.status, 200);
+        assert.strictEqual((await badLogin(attacker, owner.username)).status, 401, 'el contador por origen se reinició');
+
+        // El origen del atacante no ha pasado a ser "de confianza": si vuelve el ataque distribuido, sigue bloqueado
+        for (let i = 0; i < 6; i++) await badLogin(testIp(), owner.username);
+        const again = await badLogin(attacker, owner.username, owner.password);
+        assert.strictEqual(again.status, 429);
+        assert.ok((await db.query("SELECT 1 FROM security_events WHERE event_type = 'ACCOUNT_UNLOCKED'"))[0].length >= 1);
+    });
+});

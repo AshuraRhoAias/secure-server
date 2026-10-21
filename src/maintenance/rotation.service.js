@@ -11,6 +11,7 @@ const { buildKeyring, openKeyring } = require('../backup/keyring');
 const { getPaths } = require('./paths');
 const { Maintenance } = require('./maintenance');
 const { writeFileAtomic, readJsonIfExists, isPidAlive } = require('./fsutil');
+const kms = require('../crypto/kms');
 
 // ROTACIÓN DE CLAVES Y RE-CIFRADO DE DATOS
 //
@@ -495,14 +496,16 @@ class RotationService {
             }
 
             const envUpdates = { ENCRYPTION_SEED: newEncSeed, JWT_SEED: newJwtSeed, KEY_EPOCH: newEpoch };
+            // Con KMS_PROVIDER definido, las semillas se ESCRIBEN envueltas por el KMS (en memoria siguen en claro)
+            const fileUpdates = kms.wrapUpdates(envUpdates, ['ENCRYPTION_SEED', 'JWT_SEED']);
             const envPending = `${this.paths.envFile}.pending`;
             const manualEnvFile = path.join(this.paths.dataDir, `new-env-${newEpoch}.txt`);
             if (writeEnv) {
                 const current = fs.existsSync(this.paths.envFile) ? fs.readFileSync(this.paths.envFile, 'utf8') : '';
-                writeFileAtomic(envPending, applyEnvUpdates(current, envUpdates), 0o600);
+                writeFileAtomic(envPending, applyEnvUpdates(current, fileUpdates), 0o600);
                 temps.push(envPending);
             } else {
-                writeFileAtomic(manualEnvFile, Object.entries(envUpdates).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', 0o600);
+                writeFileAtomic(manualEnvFile, Object.entries(fileUpdates).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', 0o600);
                 result.manualEnvFile = manualEnvFile;
             }
 

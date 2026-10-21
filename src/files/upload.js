@@ -4,6 +4,7 @@ const types = require('./file-types');
 const cipher = require('./file-cipher');
 const storage = require('./storage');
 const { scanText } = require('../security/injection-detector');
+const av = require('./av-scanner');
 
 // Recibe una subida multipart/form-data EN STREAMING (nunca se carga el archivo entero en memoria) y la
 // deja cifrada en un archivo temporal. Cadena por la que pasa cada byte:
@@ -20,12 +21,13 @@ const { scanText } = require('../security/injection-detector');
 const SNIFF_BYTES = 4096;
 
 class UploadError extends Error {
-    constructor(status, code, message, { severity = 'low', rule = null } = {}) {
+    constructor(status, code, message, { severity = 'low', rule = null, detail = null } = {}) {
         super(message);
         this.status = status;
         this.code = code;
         this.severity = severity;
         this.rule = rule || code;
+        this.detail = detail;
     }
 }
 
@@ -221,14 +223,20 @@ function receiveUpload(req) {
             const gate = new SniffGate({ filename, limits });
             const encrypt = new cipher.EncryptStream(dataKey);
             const out = storage.createTempWriteStream(storageName);
-            streams.push(gate, encrypt, out);
+            // Antivirus (si está activo): entre la decisión de tipo y el cifrado, para que el archivo en claro nunca se guarde
+            const scan = av.enabled() ? new av.ScanTee(UploadError) : null;
+            streams.push(gate, ...(scan ? [scan] : []), encrypt, out);
 
             stream.on('limit', () => fail(new UploadError(413, 'FILE_TOO_LARGE', 'El archivo supera el tamaño máximo permitido')));
 
             filePromise = new Promise((done, failed) => {
-                pipeline(stream, gate, encrypt, out, (error) => {
+                const stages = scan ? [stream, gate, scan, encrypt, out] : [stream, gate, encrypt, out];
+                pipeline(...stages, (error) => {
                     if (error) return failed(error);
-                    done({ size: encrypt.plainBytes, sha256: encrypt.sha256(), mime: gate.mime, category: gate.category });
+                    done({
+                        size: encrypt.plainBytes, sha256: encrypt.sha256(), mime: gate.mime, category: gate.category,
+                        scanStatus: scan ? scan.scanStatus : 'unscanned', scannerError: scan?.scannerError || null
+                    });
                 });
             });
             filePromise.catch(fail);

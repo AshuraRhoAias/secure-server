@@ -216,6 +216,43 @@ class SystemController {
         }
     }
 
+    // Libera una cuenta bloqueada por intentos fallidos (el dueño no puede esperar o lo pide soporte)
+    async unlockAccount(req, res) {
+        try {
+            const { username } = req.body;
+            const secureAuth = require('../../security/secure-auth.service');
+            await secureAuth.unlockAccount(username, { adminId: req.user.id });
+
+            await audit.log('ACCOUNT_UNLOCKED_MANUALLY', { usernameHash: secureAuth.generateUsernameHash(username) }, { req, severity: 'medium', riskScore: 10 });
+            await securityEvents.record({
+                type: 'ACCOUNT_UNLOCKED', severity: 'info', req, usernameHash: secureAuth.generateUsernameHash(username),
+                details: { by: req.user.id }
+            });
+            res.json({ success: true, message: 'Cuenta liberada' });
+        } catch (error) {
+            console.error('❌ Error liberando cuenta:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error liberando la cuenta' });
+        }
+    }
+
+    // Dispositivo perdido y sin códigos de recuperación: un administrador desactiva el MFA de ese usuario
+    async resetMfa(req, res) {
+        try {
+            const db = require('../../config/database');
+            const secureAuth = require('../../security/secure-auth.service');
+            const [rows] = await db.query('SELECT id FROM users WHERE username_hash = ?', [secureAuth.generateUsernameHash(req.body.username)]);
+            if (rows.length === 0) return res.status(404).json({ success: false, message: 'Usuario no encontrado', code: 'NOT_FOUND' });
+
+            await require('../../security/mfa.service').disable(rows[0].id);
+            await audit.log('MFA_RESET_BY_ADMIN', { userId: rows[0].id }, { req, severity: 'high', riskScore: 40 });
+            await securityEvents.record({ type: 'MFA_RESET_BY_ADMIN', severity: 'high', riskScore: 40, req, userId: rows[0].id, details: { by: req.user.id } });
+            res.json({ success: true, message: 'MFA desactivado para ese usuario' });
+        } catch (error) {
+            console.error('❌ Error reiniciando MFA:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error reiniciando el MFA' });
+        }
+    }
+
     async getBlockedIPs(req, res) {
         try {
             const db = require('../../config/database');

@@ -28,6 +28,7 @@ class SecurityHousekeeping {
             await step('rateLimitCounters', () => rateLimiter.purge());
             await step('securityEvents', () => events.purge());
             await step('authData', () => require('../security/secure-auth.service').purgeOldData());
+            await step('ssoStates', () => require('../sso/oidc.service').purgeExpired());
             await step('tempUploads', () => require('../files/storage').purgeStaleTemp());
             return result;
         } finally {

@@ -13,7 +13,12 @@ real); donde algo no se puede garantizar desde el código, se dice.
 - [7. Variables de entorno](#7-variables-de-entorno)
 - [8. Migrar una instalación existente](#8-migrar-una-instalación-existente)
 - [9. Rendimiento medido](#9-rendimiento-medido)
-- [10. Límites y pendientes (sin humo)](#10-límites-y-pendientes-sin-humo)
+- [10. MFA y SSO](#10-mfa-y-sso)
+- [11. KMS: secretos envueltos](#11-kms-secretos-envueltos)
+- [12. Antivirus](#12-antivirus)
+- [13. Copias de `FILES_DIR`](#13-copias-de-files_dir)
+- [14. Pentest, análisis estático y certificaciones](#14-pentest-análisis-estático-y-certificaciones)
+- [15. Límites y pendientes (sin humo)](#15-límites-y-pendientes-sin-humo)
 
 ---
 
@@ -81,12 +86,23 @@ Nada de lo que decide si dejas pasar una petición está en memoria del proceso.
 
 **Falla cerrado**: si la BD de seguridad no responde, la API contesta `503`, no deja pasar sin comprobar.
 
-**Bloqueo de cuenta**: 5 fallos desde el último login correcto, dentro de 15 min ⇒ `429 ACCOUNT_LOCKED`
-con `Retry-After`, aunque la contraseña sea correcta. Mientras está bloqueada no se registran más
-intentos (si no, se mantendría bloqueada para siempre). Se comporta igual con usuarios que no existen.
-Muchos fallos desde una IP contra usuarios distintos (*credential stuffing*) ⇒ bloqueo de la IP.
-*Contrapartida conocida*: quien conoce un usuario puede bloquearlo 15 min a propósito; es el precio
-estándar de este tipo de bloqueo.
+**Bloqueo de cuenta** (diseñado para que NO se pueda usar contra el dueño de la cuenta):
+
+1. **Por (usuario, origen)**: 5 fallos desde una misma IP (o /64 en IPv6) en 15 min bloquean *esa combinación*
+   (`429 ACCOUNT_LOCKED` con `Retry-After`, aunque la contraseña sea correcta). Quien ataca desde una IP solo
+   se bloquea a sí mismo; el dueño, desde su sitio, sigue entrando.
+2. **Global por usuario**: 20 fallos sumando todos los orígenes (ataque distribuido) bloquean a los orígenes
+   **desconocidos** de ese usuario. Un **origen de confianza** (login correcto desde él en los últimos 30 días) no
+   se ve afectado, y un login legítimo reinicia el contador.
+3. Un **administrador** puede liberar la cuenta (`POST /api/system/accounts/unlock`); esa liberación no convierte
+   a nadie en origen de confianza.
+
+Mientras algo está bloqueado no se registran más intentos (si no, el bloqueo se prolongaría para siempre). Se
+comporta igual con usuarios que no existen. Muchos fallos desde una IP contra usuarios distintos (*credential
+stuffing*) ⇒ bloqueo de la IP. Los códigos TOTP erróneos cuentan como fallos; acertar la contraseña de una cuenta con
+MFA **no** reinicia el contador (si lo hiciera, quien la conoce podría probar códigos sin límite).
+*Residual honesto*: si un ataque distribuido se dirige a una cuenta y su dueño entra por primera vez desde un
+origen nuevo, esperará como máximo 15 min o pedirá la liberación a un administrador.
 
 **Qué deja de hacer el detector antiguo**: se eliminaron "cambio de país" y "cambio de navegador" *por
 IP* (una IP no cambia de país). Su versión con sentido, **por usuario**, está en el login
@@ -336,19 +352,176 @@ pasa a ser la base de datos.
 
 ---
 
-## 10. Límites y pendientes (sin humo)
+## 10. MFA y SSO
 
-Sigue **sin** estar hecho, y conviene decirlo antes de venderlo como "ultra seguro":
+### MFA (TOTP + códigos de recuperación)
 
-- **MFA/TOTP**: las dependencias (`speakeasy`, `qrcode`) están, pero no hay flujo de enrolamiento.
-- **SSO** (OIDC/SAML), multi-tenant/organizaciones y roles más finos que `user`/`admin`.
-- **KMS/HSM** para la clave maestra (hoy se deriva de semillas del entorno).
-- **Antivirus** para los archivos, y copias de seguridad de `FILES_DIR`.
-- **Pentest externo y certificaciones** (SOC 2, ISO 27001, HIPAA, PCI): el código ayuda, pero la
-  certificación es de la organización y su operación, no de un repositorio.
-- Detección por reglas: bloquea lo conocido; un atacante que conozca las reglas puede evadirlas. Por eso
-  la defensa real es la capa 1 (parámetros), no el detector.
-- `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/` y se
-  añadió a `.gitignore`; **`.env` no se ha tocado** (decisión del propietario). Ojo: sus valores
-  sensibles coinciden con los de `.env.example` público (parecen de ejemplo, no secretos vivos), pero
-  el patrón sigue siendo peligroso: si algún día contiene secretos reales, quedarán en el historial.
+Compatible con Google Authenticator, Microsoft Authenticator, Authy, 1Password, Bitwarden… (RFC 6238, verificado con los
+vectores del RFC en `test_mfa.js`).
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/auth/mfa` | Estado (activo, alta pendiente, códigos de recuperación restantes) |
+| `POST` | `/api/auth/mfa/setup` | Genera el secreto, la URL `otpauth://` y un QR |
+| `POST` | `/api/auth/mfa/enable` `{otp}` | Activa MFA con un código válido y entrega **10 códigos de recuperación** (una sola vez) |
+| `POST` | `/api/auth/login/mfa` `{mfaToken, otp \| recoveryCode}` | Segundo paso del login |
+| `POST` | `/api/auth/mfa/disable` · `/mfa/recovery-codes` `{password, otp \| recoveryCode}` | Exigen contraseña **y** segundo factor |
+| `POST` | `/api/system/accounts/mfa-reset` `{username}` | Admin: dispositivo perdido y sin códigos |
+
+Login con MFA en dos pasos: `POST /api/auth/login` con la contraseña correcta devuelve `{mfaRequired: true, mfaToken}`
+(**sin sesión**); `POST /api/auth/login/mfa` lo canjea por el token. El reto dura 5 min y **no vale como sesión**.
+
+- El secreto TOTP va cifrado (v4) y la rotación de claves lo re-cifra; los códigos de recuperación solo se guardan como hash.
+- Un código no se puede reutilizar (el paso de 30 s aceptado se guarda con un `UPDATE` atómico: 5 peticiones simultáneas con el
+  mismo código ⇒ pasa una). Ventana de ±1 paso.
+- `MFA_REQUIRED_FOR_ADMINS=true`: un administrador solo opera si inició sesión con segundo factor (o por SSO).
+- Cada sesión lleva `amr` (`pwd`, `otp`, `recovery`, `sso`) para saber *cómo* se autenticó.
+
+### SSO (OpenID Connect)
+
+Authorization code + **PKCE**. Funciona con cualquier proveedor que publique `/.well-known/openid-configuration`
+(Microsoft Entra ID, Okta, Auth0, Keycloak, Google Workspace…). **SAML no está implementado.**
+
+| Variable | Qué hace |
+|---|---|
+| `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_REDIRECT_URI` | Obligatorias (sin ellas `/api/sso/*` responde `404 SSO_NOT_CONFIGURED`). `SSO_REDIRECT_URI` = `https://tu-api/api/sso/callback` |
+| `SSO_CLIENT_SECRET` | Cliente confidencial (recomendado) |
+| `SSO_ALLOWED_EMAIL_DOMAINS` | Lista de dominios permitidos (`acme.com,partner.org`) |
+| `SSO_AUTO_PROVISION` | `false` ⇒ solo entran los usuarios ya dados de alta |
+| `SSO_REQUIRE_EMAIL_VERIFIED` | `false` para aceptar emails sin verificar (por defecto se exige) |
+| `SSO_ADMIN_CLAIM` + `SSO_ADMIN_VALUE` | Rol admin según un claim (p. ej. `groups` = `secure-server-admins`); se retira al salir del grupo |
+| `SSO_POST_LOGIN_URL` | Aplicación web: redirige a esa URL **fija** con el token en el fragmento (`#token=…`) |
+
+Flujo: `GET /api/sso/login` (redirige al proveedor; `?format=json` devuelve la URL) → el usuario se autentica →
+`GET /api/sso/callback?code&state` → sesión con `amr=['sso']`.
+
+Lo que se comprueba (cada punto tiene prueba contra un proveedor simulado, `test_sso.js`, 29 pruebas): `state` de un solo
+uso y con caducidad guardado **en la BD** (el callback puede caer en otra instancia); `nonce` ligado al `id_token`;
+PKCE; que el documento de descubrimiento declare **el mismo issuer** (defensa contra *mix-up*); firma con las claves del
+proveedor y **solo algoritmos asimétricos** (se rechazan `none` y `HS256` con el secreto del cliente); `iss`, `aud`/`azp`, `exp`, `sub`;
+HTTPS obligatorio en producción. **Nunca se enlaza por email con una cuenta local existente** (vector clásico de toma de cuentas): la
+identidad SSO crea su propia cuenta, que no puede entrar con contraseña.
+
+---
+
+## 11. KMS: secretos envueltos
+
+Los secretos del `.env` (semillas de las claves, contraseña de la BD, tokens…) pueden guardarse **cifrados por un KMS**:
+
+```
+ENCRYPTION_SEED=kms:aws:AQICAHj...     # en vez del valor en claro
+```
+
+| Proveedor (`KMS_PROVIDER`) | Qué es | Configuración |
+|---|---|---|
+| `file` | Clave de envoltura (KEK) en un archivo `0400` (secreto montado, systemd-creds, volumen aparte) | `KMS_KEK_FILE` |
+| `vault` | HashiCorp Vault, motor Transit | `VAULT_ADDR` (https en producción), `VAULT_TOKEN`/`VAULT_TOKEN_FILE`, `VAULT_TRANSIT_KEY`, `VAULT_NAMESPACE` |
+| `aws` | AWS KMS (clave simétrica; con CloudHSM si así se configura en AWS) | `KMS_KEY_ID`, `AWS_REGION`, credenciales AWS estándar; `KMS_ENDPOINT` opcional |
+
+```bash
+npm run kms -- status                 # prueba de ida y vuelta + variables ya envueltas
+npm run kms -- migrate-env            # envuelve en el sitio las semillas y secretos del .env (deja .env.pre-kms: guárdalo fuera o bórralo)
+echo -n "valor" | npm run kms -- wrap NOMBRE
+npm run kms -- migrate-env --rewrap   # pasar de un KMS/KEK a otro
+npm run kms -- unwrap-env             # salida de emergencia: .env en claro por stdout
+```
+
+- Al arrancar, el servidor descifra los valores `kms:` antes de derivar ninguna clave. **Si el KMS no responde, el proceso
+  no arranca** (falla cerrado). Las claves derivadas son idénticas a las de las semillas en claro (probado).
+- Cada valor se envuelve **junto con el nombre de su variable**: el blob de `JWT_SEED` no sirve como `ENCRYPTION_SEED`.
+- La **rotación de claves** escribe las semillas nuevas ya envueltas (`.env.pending`) y otro proceso que recargue el `.env` las
+  resuelve con el KMS (probado con la rotación real).
+- El texto claro viaja por una tubería (stdin/stdout) entre el servidor y un proceso auxiliar, nunca por argumentos ni entorno.
+
+**Qué protege y qué no.** Protege el robo del `.env`, de un backup o del repositorio: sin acceso al KMS (y a su política de
+permisos) las semillas no sirven. **No** protege de quien ejecute código dentro del proceso ya arrancado, porque necesita la clave
+en memoria para cifrar. Eso solo lo evita hacer cada cifrado dentro de un HSM (latencia y coste por petición) y es una decisión
+de arquitectura. Vault y AWS KMS están probados contra servidores **simulados** del protocolo (el SDK oficial de AWS firma de
+verdad con SigV4); la primera prueba contra el servicio real es tuya: `npm run kms -- status`.
+
+---
+
+## 12. Antivirus
+
+ClamAV por el protocolo `INSTREAM`: los bytes se envían a `clamd` **mientras se cifran** (el archivo en claro nunca se
+guarda) y el veredicto llega antes de dar la subida por buena. Malware ⇒ `422 MALWARE_DETECTED`, nada queda en disco ni BD,
+evento **crítico** y *strike* (varios ⇒ bloqueo de la IP).
+
+| Variable | Qué hace |
+|---|---|
+| `FILE_SCAN` | `off` (por defecto) · `optional` (si clamd falla, se acepta marcado `unscanned` y queda un evento) · **`required`** (si clamd falla, `503`: recomendado en producción) |
+| `CLAMAV_HOST`/`CLAMAV_PORT` o `CLAMAV_SOCKET` | Dónde está clamd (`127.0.0.1:3310` por defecto) |
+| `CLAMAV_TIMEOUT_MS`, `CLAMAV_MAX_BYTES` | Espera máxima (60 s) y `StreamMaxLength` de tu clamd (25 MB) |
+| `FILE_SCAN_ON_OVERSIZE` | `reject` (por defecto) o `skip` (se guarda `skipped`) para archivos mayores que el límite |
+
+Un archivo rechazado por **tipo** (ejecutable, SVG…) ni siquiera llega al antivirus. Cada archivo guarda su `scanStatus`
+(`clean`, `skipped`, `unscanned`). Las firmas cambian cada día, así que **`npm run rescan-files`** vuelve a revisar lo ya
+guardado (`-- --all`, `-- --delete-infected`, `-- --limit N`; código de salida 3 si hay malware).
+
+Probado con un clamd simulado (caídas, silencio, errores, límites) **y con ClamAV real** (firmas locales de prueba, EICAR entero,
+a caballo entre bloques y dentro de una imagen). **Límite honesto:** ClamAV detecta lo que sus firmas conocen; un malware nuevo
+o hecho a medida pasa. Es una capa más, no una garantía. Mantén `freshclam` al día.
+
+---
+
+## 13. Copias de `FILES_DIR`
+
+Los archivos ya están cifrados con clave propia, así que la copia no vuelve a cifrar nada: el destino solo ve bytes aleatorios
+con nombres UUID y un índice sin nombres reales. Para restaurar hacen falta **las dos cosas**: los archivos (aquí) y la BD (con las claves
+de cada archivo, envueltas); las copias de BD las hace la rotación de claves (`src/backup`).
+
+```bash
+export FILES_BACKUP_DIR=/mnt/copias/archivos        # fuera de FILES_DIR (disco aparte, NFS, bucket montado con rclone…)
+npm run files:backup                                # incremental + cruza BD y disco
+npm run files:verify                                # integridad de la copia y cobertura de la BD
+npm run files:restore                               # restaura lo que falte, verificando el hash (-- --target DIR, --force, --all)
+# cron:  17 3 * * *  cd /ruta/app && npm run -s files:backup >> /var/log/files-backup.log
+```
+
+- **Incremental**, con SHA-256 del texto cifrado y verificación tras copiar.
+- **Retención**: lo que se borra en origen se conserva `FILES_BACKUP_RETENTION_DAYS` (30) y después se elimina.
+- **Detecta pérdidas**: archivos que la BD cree tener y no existen, o con tamaño incorrecto (truncados), y huérfanos. Salida `2` ⇒ alerta.
+- **Nunca sobrescribe una copia buena con un original dañado** (se señala como `changedInSource`); `restore` verifica el hash
+  antes de colocar cada archivo y no pisa existentes sin `--force`.
+- Probado con pérdida de archivos, truncado, copia dañada, **pérdida total de `FILES_DIR`** y restauración a otro directorio.
+
+Para una copia en otra región/proveedor, sincroniza `FILES_BACKUP_DIR` con `rclone sync` (los datos siguen cifrados).
+**Haz pruebas de restauración periódicas**: una copia que nunca se ha restaurado no es una copia.
+
+---
+
+## 14. Pentest, análisis estático y certificaciones
+
+**Lo que el código no puede hacer:** un pentest externo lo hace un tercero independiente, y una certificación (SOC 2, ISO 27001…)
+la emite un auditor sobre una *organización*. Aquí no se afirma ninguna de las dos cosas.
+
+**Lo que sí hay, para llegar a ellos con la tarea hecha:**
+
+- `docs/CONTROLES.md` — modelo de amenazas y matriz de controles (OWASP ASVS, SOC 2, ISO 27001) con estado real y evidencia.
+- `docs/PENTEST-AUTOEVALUACION.md` — lo que ya se probó (sqlmap, análisis estático, ataques a SSO/MFA/archivos) y lo que **no**.
+- `docs/openapi.json` — definición de la API para ZAP/Burp (una prueba garantiza que está al día con el código).
+- `SECURITY.md` — política de divulgación de vulnerabilidades.
+- CI (`.github/workflows`): pruebas con MariaDB y ClamAV reales, `npm run lint:security` (a cero avisos), `npm audit`, CodeQL,
+  gitleaks, SBOM CycloneDX y un escaneo DAST con OWASP ZAP (informativo), más Dependabot. CodeQL excluye dos consultas, con justificación en `.github/codeql/codeql-config.yml`:
+`js/missing-rate-limiting` (el limitador es propio y vive en MariaDB, CodeQL solo reconoce librerías como `express-rate-limit`) y
+`js/file-access-to-http` (el token de Vault se lee de un archivo y se envía a Vault, que es su función). Quien añada una ruta nueva
+debe protegerla con `protectionMiddleware` a mano: ahí CodeQL ya no avisará.
+
+---
+
+## 15. Límites y pendientes (sin humo)
+
+Resuelto desde la versión anterior: MFA, SSO (OIDC), KMS para los secretos, antivirus, copias de `FILES_DIR`,
+bloqueo de cuenta no abusable. Lo que **sigue sin estar** o tiene límites:
+
+- **SAML**, WebAuthn/FIDO2, multi-organización y roles más finos que `user`/`admin`.
+- **HSM por operación**: la clave maestra sigue en memoria del proceso (ver §11).
+- **Pentest externo y certificaciones**: dependen de terceros y de la organización (ver §14 y `docs/CONTROLES.md`).
+- **Antivirus**: detecta lo conocido; no elimina EXIF ni recodifica imágenes.
+- **Detección por reglas**: bloquea lo conocido; un atacante que conozca las reglas puede evadirlas. Por eso la defensa real es la
+  capa 1 (parámetros), no el detector.
+- **DoS volumétrico** de capa 7: hace falta un WAF/CDN delante.
+- Vault y AWS KMS están probados contra servidores simulados, y los workflows de CodeQL/gitleaks/ZAP no se han podido ejecutar fuera de GitHub.
+- `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/`; **`.env` no se ha tocado** (decisión
+  del propietario). Sus valores sensibles coinciden con los de `.env.example` público (parecen de ejemplo), pero si algún día contiene
+  secretos reales quedarán en el historial: usa `npm run kms -- migrate-env` y sácalo del repositorio.

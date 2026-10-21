@@ -1,0 +1,8 @@
+# Falsos positivos revisados. Cada línea es el fingerprint exacto que informa gitleaks.
+#
+# security.yml (commit 14623a7): contraseña literal del usuario efímero "zap_user", creado solo dentro del
+# job de CI sobre una base de datos que se destruye al terminar. No daba acceso a nada real y el commit
+# siguiente la sustituye por una contraseña aleatoria generada en cada ejecución. Se ignora el commit
+# antiguo (que sigue en el historial del PR) en vez de reescribir historia.
+14623a76133905fe361711e1feb421453de6a75c:.github/workflows/security.yml:generic-api-key:111
+14623a76133905fe361711e1feb421453de6a75c:.github/workflows/security.yml:generic-api-key:113

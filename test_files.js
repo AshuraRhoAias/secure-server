@@ -153,10 +153,13 @@ for (const size of SIZES) {
         const plain = crypto.randomBytes(size);
         const { file, encrypt } = await encryptToFile(plain, key);
         try {
-            assert.strictEqual(fs.statSync(file).size, cipher.cipherSize(size));
+            const onDisk = fs.readFileSync(file); // una sola lectura: tamaño y contenido salen del mismo archivo
+            assert.strictEqual(onDisk.length, cipher.cipherSize(size));
             assert.strictEqual(encrypt.plainBytes, size);
             assert.strictEqual(encrypt.sha256(), crypto.createHash('sha256').update(plain).digest('hex'));
-            assert.ok(plain.length === 0 || !fs.readFileSync(file).includes(plain.subarray(0, Math.min(16, size))));
+            // "El texto en claro no aparece en disco": solo significa algo con un patrón largo. Con 1 byte, ese byte está por azar
+            // en ~11% de los archivos cifrados (30+ bytes aleatorios), lo que hacía fallar la prueba de forma intermitente.
+            if (size >= 8) assert.ok(!onDisk.includes(plain.subarray(0, Math.min(16, size))));
 
             const back = await readAll(cipher.decryptRange({ filePath: file, key, plainSize: size }));
             assert.ok(back.equals(plain));

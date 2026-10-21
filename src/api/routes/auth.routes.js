@@ -30,8 +30,32 @@ router.post('/login',
     authController.login
 );
 
+// Segundo paso del login cuando la cuenta tiene MFA
+router.post('/login/mfa',
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        mfaToken: { type: 'string', required: true, max: 2000 },
+        otp: { type: 'string', pattern: /^\d{6}$/ },
+        recoveryCode: { type: 'string', max: 32, pattern: /^[A-Za-z2-7-]{16,23}$/ },
+        deviceInfo: { type: 'object' }
+    }),
+    authController.loginMfa
+);
+
 // Rutas protegidas (requieren autenticación)
 router.use(authMiddleware.verifyJWT);
+
+// Autenticación en dos pasos (TOTP)
+const reauth = {
+    password: { type: 'string', required: true, min: 1, max: 128, trim: false },
+    otp: { type: 'string', pattern: /^\d{6}$/ },
+    recoveryCode: { type: 'string', max: 32, pattern: /^[A-Za-z2-7-]{16,23}$/ }
+};
+router.get('/mfa', authController.mfaStatus);
+router.post('/mfa/setup', protectionMiddleware.highSecurity(), authController.mfaSetup);
+router.post('/mfa/enable', protectionMiddleware.highSecurity(), validate.body({ otp: { type: 'string', required: true, pattern: /^\d{6}$/ } }), authController.mfaEnable);
+router.post('/mfa/disable', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaDisable);
+router.post('/mfa/recovery-codes', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaRegenerateCodes);
 
 router.post('/logout', authController.logout);
 router.get('/profile', authController.getProfile);

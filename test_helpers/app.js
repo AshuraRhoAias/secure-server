@@ -51,8 +51,9 @@ async function startApp() {
 }
 
 // Cliente mínimo. `ip` se envía como X-Forwarded-For (el servidor de pruebas confía en él).
-async function api(base, method, route, { token, ip, json, form, headers = {}, raw } = {}) {
+async function api(base, method, route, { token, ip, json, form, headers = {}, raw, redirect } = {}) {
     const init = { method, headers: { ...headers } };
+    if (redirect) init.redirect = redirect;
     if (ip) init.headers['X-Forwarded-For'] = ip;
     if (token) init.headers.Authorization = `Bearer ${token}`;
     if (json !== undefined) {

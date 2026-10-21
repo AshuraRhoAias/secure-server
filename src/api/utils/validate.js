@@ -33,6 +33,7 @@ function checkField(name, rule, raw) {
             if (rule.type === 'email' && !EMAIL_REGEX.test(value)) {
                 return { error: `${name} no tiene formato de email válido` };
             }
+            if (rule.pattern && !rule.pattern.test(value)) return { error: `${name} no tiene el formato esperado` };
             if (rule.min !== undefined && value.length < rule.min) {
                 return { error: `${name} debe tener al menos ${rule.min} caracteres` };
             }

@@ -363,5 +363,24 @@ auto-puntuación retirados, `src/notifications/` fuera del control de versiones,
 | `quick-fix.js` reescribía `anomaly-detection`/`secure-auth`/`auth.controller` con código antiguo | Eliminado |
 | Sin índice único en `users.username_hash` (registro concurrente duplicaba) | Migración 006 + 409 en carrera (prueba con 3 registros simultáneos) |
 
-**Pendiente (ver `docs/SEGURIDAD.md` §10):** MFA, SSO, KMS/HSM, antivirus de archivos, backup de
-`FILES_DIR`, pentest externo.
+**Pendiente:** ver la sección H (lo que quedaba aquí se resolvió en la entrega siguiente).
+
+---
+
+## H. Intervención 2026-10-21 (4.ª entrega): lo que seguía pendiente
+
+Rama `repo/sharp-noether-tbr0bz`. Detalle y límites honestos en `docs/SEGURIDAD.md` §10–§15.
+
+| Pendiente | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| MFA | TOTP (RFC 6238) + 10 códigos de recuperación, anti-reutilización atómica, reto de 5 min que no vale como sesión, `MFA_REQUIRED_FOR_ADMINS` | Sin WebAuthn |
+| SSO | OpenID Connect (code + PKCE), state/nonce en BD, defensa mix-up, solo algoritmos asimétricos, sin enlazado por email | Sin SAML; probado contra un IdP simulado |
+| KMS/HSM | Secretos del `.env` envueltos (`file`, Vault Transit, AWS KMS); arranque falla cerrado; rotación compatible | Protege el `.env`/backups, no la memoria del proceso en marcha |
+| Antivirus | ClamAV `INSTREAM` durante el cifrado, `off/optional/required`, `npm run rescan-files` | Basado en firmas |
+| Copias de `FILES_DIR` | Incremental, verificación por hash, retención, restauración, cruce BD↔disco | La prueba de restauración periódica es tuya |
+| Pentest/certificaciones | Paquete de preparación: ESLint security, CodeQL, gitleaks, SBOM, ZAP, OpenAPI, sqlmap, matriz ASVS/SOC 2/ISO | **No sustituye** a un pentest externo ni a una auditoría |
+| Bloqueo de cuenta abusable | Bloqueo por (usuario, origen) + global con orígenes de confianza + desbloqueo admin | Ataque distribuido + dueño desde origen nuevo: ≤15 min o desbloqueo admin |
+
+Hallazgos reales durante el trabajo: la copia sobrescribía una copia buena con un original truncado (corregido); la descarga de un
+archivo ausente/truncado cortaba la conexión (ahora se autentica el primer bloque antes de enviar cabeceras); caracteres
+bidireccionales literales en `file-types.js` detectados por el lint (corregido).

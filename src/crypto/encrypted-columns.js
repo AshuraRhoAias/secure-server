@@ -15,7 +15,8 @@ const ENCRYPTED_COLUMNS = {
             'metadata_encrypted',
             'username_encrypted',
             'risk_level_encrypted',
-            'encrypted_metadata'
+            'encrypted_metadata',
+            'mfa_secret_encrypted'
         ]
     },
     security_logs: { primaryKey: 'id', columns: ['encrypted_details', 'encrypted_timestamp'] },
@@ -25,7 +26,9 @@ const ENCRYPTED_COLUMNS = {
     user_notes: { primaryKey: 'id', columns: ['title_encrypted', 'content_encrypted'] },
     // Metadatos de /api/files. key_encrypted es la clave de CADA archivo envuelta con la clave maestra:
     // al rotar solo se re-envuelven estas claves, los bytes de los archivos no se tocan.
-    user_files: { primaryKey: 'id', columns: ['filename_encrypted', 'key_encrypted'] }
+    user_files: { primaryKey: 'id', columns: ['filename_encrypted', 'key_encrypted'] },
+    // Estado de logins SSO en curso (caduca a los 10 min): si un valor queda ilegible se puede borrar
+    oidc_login_state: { primaryKey: 'id', columns: ['code_verifier_encrypted'], regenerable: true }
 };
 
 // Columnas con "encrypted" en el nombre que NO guardan texto cifrado con tripleEncryptor
