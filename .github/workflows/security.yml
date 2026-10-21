@@ -107,10 +107,13 @@ jobs:
         run: |
           ENV_FILE="$RUNNER_TEMP/dast.env" nohup node src/index.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for i in $(seq 1 40); do curl -sf http://localhost:3000/health >/dev/null && break; sleep 1; done
+          # Contraseña aleatoria del usuario efímero (no hay ningún secreto literal en el repositorio)
+          ZAP_PW="Zap-$(openssl rand -hex 16)-1"
+          echo "::add-mask::$ZAP_PW"
           curl -sf -X POST http://localhost:3000/api/auth/register -H 'Content-Type: application/json' \
-            -d '{"username":"zap_user","email":"zap@example.com","password":"Contrasena-De-Pruebas-1"}'
+            -d "{\"username\":\"zap_user\",\"email\":\"zap@example.com\",\"password\":\"$ZAP_PW\"}"
           TOKEN=$(curl -sf -X POST http://localhost:3000/api/auth/login -H 'Content-Type: application/json' \
-            -d '{"username":"zap_user","password":"Contrasena-De-Pruebas-1"}' | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).token")
+            -d "{\"username\":\"zap_user\",\"password\":\"$ZAP_PW\"}" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).token")
           echo "::add-mask::$TOKEN"
           echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
