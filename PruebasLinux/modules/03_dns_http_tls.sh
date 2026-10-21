@@ -16,16 +16,16 @@ m_axfr()     {
   note "Intentando transferencia de zona contra $ns (debe fallar en servidores bien configurados)…"
   if dig AXFR "$TARGET" "@$ns" | grep -q 'Transfer failed\|connection timed out\|; <<>>'; then good "Transferencia de zona RECHAZADA (correcto)."; else flag "Posible transferencia de zona permitida — revisar."; return 1; fi
 }
-m_http_headers() { curl -sS -D - -o /dev/null --max-time 10 "$BASE_URL" || { flag "No se pudo contactar $BASE_URL"; return 1; }; }
+m_http_headers() { curl -sS -D - -o /dev/null --connect-timeout 2 --max-time 6 "$BASE_URL" || { flag "No se pudo contactar $BASE_URL"; return 1; }; }
 m_sec_headers()  {
-  local h; h=$(curl -sS -D - -o /dev/null --max-time 10 "$BASE_URL" 2>/dev/null) || { flag "No se pudo contactar $BASE_URL"; return 1; }
+  local h; h=$(curl -sS -D - -o /dev/null --connect-timeout 2 --max-time 6 "$BASE_URL" 2>/dev/null) || { flag "No se pudo contactar $BASE_URL"; return 1; }
   local rc=0
   for hdr in "Strict-Transport-Security" "Content-Security-Policy" "X-Frame-Options" "X-Content-Type-Options" "Referrer-Policy"; do
     if grep -iq "^$hdr:" <<<"$h"; then good "$hdr presente"; else flag "$hdr AUSENTE"; rc=1; fi
   done
   return $rc
 }
-m_http_methods() { curl -sS -i -X OPTIONS --max-time 10 "$BASE_URL" | grep -i '^allow:' || { note "El servidor no anuncia métodos vía OPTIONS."; return 0; }; }
+m_http_methods() { curl -sS -i -X OPTIONS --connect-timeout 2 --max-time 6 "$BASE_URL" | grep -i '^allow:' || { note "El servidor no anuncia métodos vía OPTIONS."; return 0; }; }
 m_tls_cert()     { local h; h=$(_host_of_url "$BASE_URL"); echo | openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || { note "Sin TLS en $h:443 (esperable en lab HTTP)."; return 1; }; }
 m_tls_expiry()   {
   local h; h=$(_host_of_url "$BASE_URL")
@@ -43,7 +43,7 @@ m_tls_versions() {
   done
 }
 m_weak_ciphers() { confirm_target "$TARGET" || return 2; nmap -Pn --script ssl-enum-ciphers -p 443 "$(_host_of_url "$BASE_URL")" 2>&1; }
-m_redirects()    { curl -sS -I -L --max-time 15 "$BASE_URL" | grep -iE '^(HTTP/|location:)' || { note "Sin redirecciones."; return 0; }; }
+m_redirects()    { curl -sS -I -L --connect-timeout 2 --max-time 8 "$BASE_URL" | grep -iE '^(HTTP/|location:)' || { note "Sin redirecciones."; return 0; }; }
 
 reg 3 "DNS: registros A"           "Resolución de direcciones A del objetivo."            "dig"    "INFO" m_dig_a
 reg 3 "DNS: registros MX"          "Servidores de correo del dominio."                    "dig"    "INFO" m_dig_mx

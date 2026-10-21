@@ -101,6 +101,10 @@ note() { printf '  %s\n' "$*"; }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Comprueba rápido si una URL HTTP está accesible (evita esperar timeouts largos
+# cuando el servidor del proyecto no está arrancado).
+http_reachable() { curl -sS -o /dev/null --connect-timeout 2 --max-time 4 "${1:-$BASE_URL}" 2>/dev/null; }
+
 # Sugerencia de instalación por comando (Debian/Ubuntu + pip).
 install_hint() {
   case "$1" in
@@ -260,9 +264,11 @@ run_category() {
 }
 
 # Ejecuta todas las opciones de riesgo INFO/LOCAL/LOW sobre localhost/repo (perfil seguro).
+# Excluye la categoría 15 (meta: informes/agregados) para no re-entrar en sí misma.
 run_safe_all() {
   local i
   for (( i=1; i<=OPT_COUNT; i++ )); do
+    [[ "${OPT_CAT[$i]}" == "15" ]] && continue
     case "${OPT_RISK[$i]}" in
       INFO|LOCAL|LOW) run_option "$i" ;;
     esac

@@ -2,11 +2,11 @@
 # Categoría 5 — Auditoría de configuraciones de servidores (web).
 
 m_whatweb()     { confirm_target "$TARGET" || return 2; whatweb --no-errors -a 3 "$BASE_URL" 2>&1; }
-m_server_hdr()  { curl -sS -D - -o /dev/null --max-time 10 "$BASE_URL" 2>/dev/null | grep -iE '^(server|x-powered-by):' && flag "El servidor revela software/versión (considera ocultarlo)." || { good "No se revela Server/X-Powered-By."; }; }
+m_server_hdr()  { curl -sS -D - -o /dev/null --connect-timeout 2 --max-time 6 "$BASE_URL" 2>/dev/null | grep -iE '^(server|x-powered-by):' && flag "El servidor revela software/versión (considera ocultarlo)." || { good "No se revela Server/X-Powered-By."; }; }
 m_dir_listing() {
   local rc=0 p
   for p in / /files/ /uploads/ /static/ /backup/; do
-    local code; code=$(curl -sS -o /tmp/pl_dl.$$ -w '%{http_code}' --max-time 8 "$BASE_URL$p" 2>/dev/null)
+    local code; code=$(curl -sS -o /tmp/pl_dl.$$ -w '%{http_code}' --connect-timeout 2 --max-time 5 "$BASE_URL$p" 2>/dev/null)
     if grep -qi 'Index of' /tmp/pl_dl.$$ 2>/dev/null; then flag "Posible listado de directorios en $p (HTTP $code)"; rc=1; else note "$p → HTTP $code"; fi
   done
   rm -f /tmp/pl_dl.$$; return $rc
@@ -14,15 +14,15 @@ m_dir_listing() {
 m_exposed()     {
   local rc=0 p
   for p in /.env /.git/config /package.json /.git/HEAD /config.js /docker-compose.yml; do
-    local code; code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$BASE_URL$p" 2>/dev/null)
+    local code; code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$BASE_URL$p" 2>/dev/null)
     if [[ "$code" == "200" ]]; then flag "Archivo sensible accesible: $p (HTTP 200)"; rc=1; else note "$p → HTTP $code"; fi
   done
   return $rc
 }
-m_error_page()  { curl -sS -i --max-time 10 "$BASE_URL/__pl_noexiste_$RANDOM" 2>/dev/null | head -20 | grep -iqE 'stack|at .*\.js:|Error:' && { flag "La página de error parece filtrar detalles internos."; return 1; } || good "La página de error no filtra traza visible."; }
-m_trace()       { local m; m=$(curl -sS -i -X TRACE --max-time 10 "$BASE_URL" 2>/dev/null | head -1); grep -qi '200' <<<"$m" && { flag "Método TRACE habilitado (riesgo XST)."; return 1; } || good "TRACE no habilitado."; }
+m_error_page()  { curl -sS -i --connect-timeout 2 --max-time 6 "$BASE_URL/__pl_noexiste_$RANDOM" 2>/dev/null | head -20 | grep -iqE 'stack|at .*\.js:|Error:' && { flag "La página de error parece filtrar detalles internos."; return 1; } || good "La página de error no filtra traza visible."; }
+m_trace()       { local m; m=$(curl -sS -i -X TRACE --connect-timeout 2 --max-time 6 "$BASE_URL" 2>/dev/null | head -1); grep -qi '200' <<<"$m" && { flag "Método TRACE habilitado (riesgo XST)."; return 1; } || good "TRACE no habilitado."; }
 m_cookie_flags(){
-  local sc; sc=$(curl -sS -D - -o /dev/null --max-time 10 "$BASE_URL" 2>/dev/null | grep -i '^set-cookie:')
+  local sc; sc=$(curl -sS -D - -o /dev/null --connect-timeout 2 --max-time 6 "$BASE_URL" 2>/dev/null | grep -i '^set-cookie:')
   [[ -z "$sc" ]] && { note "El endpoint raíz no fija cookies."; return 0; }
   say "$sc"
   local rc=0
