@@ -58,14 +58,21 @@ migraciones de BD, scripts de operación, dependencias y configuración.
 - Entorno independiente **`PruebasLinux/`** con **117 pruebas** defensivas reales en 15
   categorías, menú interactivo, modo no interactivo, logging e informes MD/JSON/CSV.
 - Instalación y verificación de 33 herramientas defensivas en el laboratorio.
-- **No se ha modificado el código de la aplicación**, conforme a lo solicitado: la
-  intervención es aditiva y no interfiere con la ejecución del proyecto (ver §F y la
-  verificación de no interferencia).
+- **Corrección de vulnerabilidades de dependencias** (de 21 a 3; ver #6): a petición
+  expresa del usuario se tocó el mínimo de código de la app necesario (migrar el parseo
+  de user-agent a `ua-parser-js` y subir `nodemailer`), validado sin regresiones.
+- **Instalador multiplataforma** (Linux/Windows) con barra de progreso (ver #7).
 
-**Riesgos pendientes.** Las vulnerabilidades de dependencias y la higiene de secretos
-siguen abiertas: su corrección implica actualizar paquetes (algunas con *breaking
-changes*) y reescribir el historial de git / rotar secretos, decisiones que afectan al
-código y a la operación y que se dejan propuestas, no aplicadas (ver §F).
+> **Alcance de los cambios en el código.** La primera entrega (entorno `PruebasLinux`
+> y documentación) fue puramente aditiva. En esta segunda entrega, **con autorización
+> expresa de Antonio**, se modificaron `package.json`, `package-lock.json` y
+> `src/security/anomaly-detection.service.js` para corregir vulnerabilidades, y se
+> añadió el instalador. No se tocó ninguna otra lógica de la aplicación.
+
+**Riesgos pendientes.** La higiene de secretos sigue abierta (ver #5); de las
+dependencias quedan 3 vulnerabilidades transitivas no alcanzables (ver #6). Sacar `.env`
+y los artefactos del control de versiones y rotar secretos afecta al repositorio y a la
+operación, por lo que se deja propuesto, no aplicado (ver §F).
 
 ---
 
@@ -145,6 +152,50 @@ código y a la operación y que se dejan propuestas, no aplicadas (ver §F).
   código**; no se aplica en esta intervención aditiva.
 - **Siguiente mejora:** plan de actualización escalonado con pruebas. *(Prioridad alta.)*
 
+### #6 — Corrección de vulnerabilidades de dependencias
+
+- **Estado:** completado (de 21 a 3; las 3 restantes, riesgo aceptado documentado).
+- **Archivos:** `package.json`, `package-lock.json`, `src/security/anomaly-detection.service.js`.
+- **Problema detectado:** `npm audit --omit=dev` reportaba 21 vulnerabilidades (1 crítica).
+- **Acciones realizadas:**
+  - `npm audit fix` (no disruptivo): resuelve la mayoría (incl. `proxy-addr` crítica, `axios`, `mysql2`, `path-to-regexp`, `lodash`, `qs`, `morgan`, `brace-expansion`).
+  - `nodemailer` 7 → **10.1.7**: corrige la inyección de comandos SMTP (`envelope.size`).
+  - Migración del parseo de user-agent de `useragent` (sin arreglo, arrastra `tmp`) a
+    **`ua-parser-js`** (ya presente y parcheado) en `anomaly-detection.service.js`;
+    eliminada la dependencia `useragent`.
+- **Pruebas ejecutadas:** `test:api` 12/12, `test:icmp` 24/24, `test:system` 5/5,
+  `test:rotation` 14 en verde (+32 omitidas sin MySQL); smoke de carga de
+  `anomaly-detection` y `nodemailer`. Sin regresiones.
+- **Puntuación:** dependencias **4 → 7/10**.
+- **Problemas restantes:** 3 vulnerabilidades transitivas vía `geoip-lite → ip-address@5.9.4`
+  (XSS en métodos HTML de `ip-address`, DoS de `sprintf-js`). El único "arreglo" de npm
+  degrada `geoip-lite` a 1.2.2 (pierde la BD mantenida) y el `ip-address` parcheado es un
+  *major* (10.x) incompatible con `geoip-lite`. **No alcanzables:** la app sólo usa
+  `geoip.lookup()`; nunca renderiza HTML de `ip-address` ni pasa entrada de usuario a
+  `sprintf`. Riesgo aceptado y a vigilar upstream.
+- **Siguiente mejora:** actualizar cuando `geoip-lite` publique una versión con
+  `ip-address` parcheado. *(Prioridad media.)*
+
+### #7 — Instalador multiplataforma (Linux y Windows)
+
+- **Estado:** completado.
+- **Archivos:** `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`.
+- **Problema detectado:** no había un instalador que preparase el entorno de forma guiada
+  en ambos sistemas.
+- **Acciones realizadas:** instalador en Node (sin dependencias nuevas) que **pregunta
+  Linux/Windows**, instala dependencias (`npm ci`/`install`), prepara `.env` (con `600`
+  en Linux), ajusta permisos, ofrece instalar el toolset de `PruebasLinux` y verifica,
+  todo con **barra de progreso**. Lanzadores `install.sh` (Linux) y `install.ps1`
+  (Windows) que delegan en él.
+- **Pruebas ejecutadas:** `node --check` + `shellcheck`; ejecución real `--os linux`
+  (npm ci, .env, chmod 600, verificación → OK) y `--os windows` (sin chmod, guía
+  Windows); rechazo de `--os` inválido con código 2.
+- **Puntuación:** 8/10 (en Windows la instalación del toolset de seguridad se guía, no se
+  automatiza; el menú de `PruebasLinux` requiere WSL/Git Bash en Windows).
+- **Problemas restantes:** automatizar el toolset en Windows (winget/choco) queda como
+  mejora.
+- **Siguiente mejora:** script `winget`/`choco` para el toolset en Windows. *(Prioridad baja.)*
+
 ### #5 — Higiene de secretos y repositorio
 
 - **Estado:** completado (hallazgos abiertos).
@@ -175,7 +226,7 @@ suficiente.** Se distingue el grado de evaluación.
 | API / validación de entrada | Parcial (sin servidor) | 7 | `validate.js`, 400 en malformados, rate limit. No ejecutado en vivo. |
 | Base de datos | Parcial (sin MySQL) | 7 | Columnas cifradas, consultas parametrizadas. Integración no verificada aquí. |
 | Gestión de errores | Evaluado (estático) | 7 | Manejador global; 4xx respetados, resto 500 sin detalle. |
-| Dependencias | Evaluado | 4 | 21 vulnerabilidades (1 crítica). |
+| Dependencias | Evaluado | 7 | Corregidas 18 de 21 (ver #6); quedan 3 transitivas no alcanzables vía geoip-lite. |
 | Secretos / configuración | Evaluado | 5 | `.env` versionado (valores de ejemplo), permisos `644`. |
 | Logging / auditoría | Evaluado (estático) | 8 | Auditoría cifrada, integridad, sin fugas en logs. |
 | Calidad / mantenibilidad | Evaluado | 6 | Artefactos de auto-puntuación engañosos; ruido (56 JSON); scripts `.sh` con avisos. |
@@ -194,9 +245,11 @@ auto-declarada.
 
 ### 🔴 Crítica / Alta
 
-- **[ALTA] Dependencias vulnerables.** *Evidencia:* `npm audit --omit=dev` → 21 vulns
-  (1 crítica). *Impacto:* exposición a CVEs conocidos en tiempo de ejecución. *Solución:*
-  actualizar por fases y validar con las suites. *Estado:* abierto (propuesto).
+- **[ALTA → mayormente resuelto] Dependencias vulnerables.** *Evidencia:* `npm audit
+  --omit=dev` pasó de **21 a 3** (ver #6). *Acción aplicada:* `npm audit fix`, `nodemailer`
+  7→10, migración `useragent`→`ua-parser-js`. *Restante:* 3 transitivas vía
+  `geoip-lite → ip-address`, no alcanzables (sólo `geoip.lookup()`); riesgo aceptado y a
+  vigilar upstream. *Estado:* corregido con residual documentado.
 - **[ALTA] `.env` y artefactos versionados.** *Evidencia:* `git ls-files` lista `.env`,
   56 `src/notifications/*.json`, `reports/*.json`. *Impacto:* higiene de secretos y
   divulgación. *Solución:* `git rm --cached`, rotación de secretos reales si los hubo.
@@ -224,9 +277,8 @@ auto-declarada.
 
 ## E. Historial de cambios de esta intervención
 
-Todos los cambios son **aditivos** y viven bajo `PruebasLinux/` + este documento. **No
-se ha creado, modificado ni eliminado ningún archivo del código de la aplicación**
-(`src/`, `scripts/`, `database/`, `package.json`, etc.).
+Primera entrega: aditiva (`PruebasLinux/` + documentación). Segunda entrega (con
+autorización de Antonio): corrección de vulnerabilidades e instalador.
 
 | Acción | Archivo(s) | Motivo | Validación |
 |--------|-----------|--------|------------|
@@ -236,11 +288,14 @@ se ha creado, modificado ni eliminado ningún archivo del código de la aplicaci
 | Creado | `PruebasLinux/ReadmeLogMejoras.md` | Documentación del entorno | revisión; tabla generada del registro real |
 | Creado | `PruebasLinux/.gitignore`, `logs/.gitkeep`, `reports/.gitkeep` | No versionar salida | — |
 | Creado | `ReadmeLogsMejoras.md` (este archivo) | Bitácora de auditoría | — |
+| **Modificado** | `package.json`, `package-lock.json` | Corregir vulnerabilidades (nodemailer↑, audit fix, quitar `useragent`) | `npm audit` 21→3; suites en verde |
+| **Modificado** | `src/security/anomaly-detection.service.js` | Migrar `useragent`→`ua-parser-js` | smoke de `generateRequestFingerprint`; suites en verde |
+| Creado | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md` | Instalador multiplataforma con barra de progreso | `node --check`, `shellcheck`, ejecución `--os linux/windows` |
 
-**Punto de recuperación.** El estado previo es el commit `b7b1ea1` en `main`; esta
-intervención se realiza en la rama `claude/project-thread-qjkfd0`, de modo que revertir
-es tan simple como no fusionar la rama (o eliminar la carpeta `PruebasLinux/` y este
-archivo). No hay cambios en la aplicación que deshacer.
+**Punto de recuperación.** El estado previo es el commit `b7b1ea1` en `main`; el trabajo
+está en la rama `claude/project-thread-qjkfd0`. Revertir todo es no fusionar la rama; los
+cambios en el código de la app se limitan a los dos archivos marcados **Modificado** y
+están aislados en commits propios, fáciles de revertir individualmente.
 
 ---
 
@@ -250,15 +305,17 @@ Separado entre **completado** en esta intervención y **propuesto** (requiere de
 que tocan el código/operación y exceden el encargo aditivo).
 
 ### Completado
+- ✅ Corrección de vulnerabilidades de dependencias (21 → 3; ver #6).
+- ✅ Instalador multiplataforma Linux/Windows con barra de progreso (ver #7).
 - ✅ Entorno `PruebasLinux` funcional con 117 pruebas, logging e informes.
 - ✅ Verificación de las suites de test existentes (sin regresiones).
 - ✅ Auditoría estática con evidencia y esta bitácora.
 
 ### Propuesto (con dependencias, prioridad y criterio de aceptación)
 
-1. **Actualizar dependencias vulnerables.** *Prioridad:* alta. *Dependencia:* suite de
-   tests verde tras actualizar. *Aceptación:* `npm audit --omit=dev` sin vulnerabilidades
-   críticas/altas y `npm test` en verde.
+1. **Dependencias vulnerables restantes (geoip-lite → ip-address).** *Prioridad:* media
+   (hecho lo crítico/alto; ver #6). *Dependencia:* que `geoip-lite` publique una versión
+   con `ip-address` parcheado. *Aceptación:* `npm audit --omit=dev` sin vulnerabilidades.
 2. **Sacar `.env` y artefactos del control de versiones + rotar secretos.** *Prioridad:*
    alta. *Dependencia:* confirmar que no se rompe el arranque. *Aceptación:* `git ls-files`
    no lista `.env` ni `src/notifications/*.json`; secretos rotados si fueron reales.
