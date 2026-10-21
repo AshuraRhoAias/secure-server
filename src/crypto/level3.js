@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const secureEnv = require('../config/secure-env');
+const { clog, CRYPTO_DEBUG } = require('./debug');
 
 class Level3Encryption {
     constructor() {
@@ -47,10 +48,11 @@ class Level3Encryption {
             this._validateKey(rawKey);
             
             const key = Buffer.from(rawKey, 'hex');
-            const keyHash = this._getKeyHash(key);
-            
-            console.log(`🔑 Encrypt Key Hash: ${keyHash}...`);
-            console.log(`🔐 Cifrando texto de ${text.length} caracteres`);
+
+            if (CRYPTO_DEBUG) {
+                clog(`🔑 Encrypt Key Hash: ${this._getKeyHash(key)}...`);
+                clog(`🔐 Cifrando texto de ${text.length} caracteres`);
+            }
 
             const iv = crypto.randomBytes(12); // nonce para chacha20-poly1305
             const cipher = crypto.createCipheriv(this.algorithm, key, iv, { authTagLength: 16 });
@@ -61,15 +63,17 @@ class Level3Encryption {
             const authTag = cipher.getAuthTag();
             const result = iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 
-            // Validación de integridad del resultado
-            console.log(`🔐 Level 3 encrypt - IV: ${iv.toString('hex').length}, AuthTag: ${authTag.toString('hex').length}, Data: ${encrypted.length}`);
-            console.log(`✅ Cifrado exitoso - Resultado: ${result.length} caracteres`);
-
-            // Test inmediato de descifrado para validar
-            try {
-                this._testDecryption(result, text, keyHash);
-            } catch (testError) {
-                console.warn(`⚠️ Test de descifrado falló: ${testError.message}`);
+            if (CRYPTO_DEBUG) {
+                clog(`🔐 Level 3 encrypt - IV: ${iv.toString('hex').length}, AuthTag: ${authTag.toString('hex').length}, Data: ${encrypted.length}`);
+                clog(`✅ Cifrado exitoso - Resultado: ${result.length} caracteres`);
+                // El auto-test de descifrado DUPLICA el trabajo por operación, así que
+                // sólo se ejecuta al depurar. La corrección del ida y vuelta la cubren
+                // los tests (test:api, test:rotation), no cada cifrado en caliente.
+                try {
+                    this._testDecryption(result, text, this._getKeyHash(key));
+                } catch (testError) {
+                    console.warn(`⚠️ Test de descifrado falló: ${testError.message}`);
+                }
             }
 
             return result;
@@ -86,7 +90,7 @@ class Level3Encryption {
                 throw new Error('Texto cifrado inválido o vacío');
             }
 
-            console.log(`🔍 Iniciando descifrado de ${encryptedText.length} caracteres`);
+            clog(`🔍 Iniciando descifrado de ${encryptedText.length} caracteres`);
 
             const parts = encryptedText.split(':');
             if (parts.length !== 3) {
@@ -117,72 +121,63 @@ class Level3Encryption {
                 throw new Error(`AuthTag incorrecto: esperado 32 caracteres, recibido ${authTagHex.length}`);
             }
 
-            console.log(`🔍 Level 3 decrypt - IV: ${ivHex.length}, AuthTag: ${authTagHex.length}, Data: ${encryptedDataHex.length}`);
+            clog(`🔍 Level 3 decrypt - IV: ${ivHex.length}, AuthTag: ${authTagHex.length}, Data: ${encryptedDataHex.length}`);
 
             // Validar y obtener clave
             const rawKey = this.getKey();
             this._validateKey(rawKey);
-            
+
             const key = Buffer.from(rawKey, 'hex');
-            const keyHash = this._getKeyHash(key);
-            
-            console.log(`🔑 Decrypt Key Hash: ${keyHash}...`);
 
             // Convertir componentes hex a buffers
             const iv = Buffer.from(ivHex, 'hex');
             const authTag = Buffer.from(authTagHex, 'hex');
 
-            // Debug de componentes
-            console.log(`🔍 Componentes del descifrado:`);
-            console.log(`  - IV: ${ivHex} (${iv.length} bytes)`);
-            console.log(`  - AuthTag: ${authTagHex} (${authTag.length} bytes)`);
-            console.log(`  - Key hash: ${keyHash}`);
-            console.log(`  - Datos cifrados: ${encryptedDataHex.substring(0, 40)}... (${encryptedDataHex.length/2} bytes)`);
+            if (CRYPTO_DEBUG) {
+                const keyHash = this._getKeyHash(key);
+                clog(`🔑 Decrypt Key Hash: ${keyHash}...`);
+                clog(`🔍 Componentes del descifrado:`);
+                clog(`  - IV: ${ivHex} (${iv.length} bytes)`);
+                clog(`  - AuthTag: ${authTagHex} (${authTag.length} bytes)`);
+                clog(`  - Key hash: ${keyHash}`);
+                clog(`  - Datos cifrados: ${encryptedDataHex.substring(0, 40)}... (${encryptedDataHex.length/2} bytes)`);
+            }
 
             // Crear descifrador
             const decipher = crypto.createDecipheriv(this.algorithm, key, iv, { authTagLength: 16 });
             decipher.setAuthTag(authTag);
 
-            console.log(`🔓 Aplicando descifrado...`);
-
             let decrypted = decipher.update(encryptedDataHex, 'hex', 'utf8');
-            
-            // Este es donde probablemente falla
-            console.log(`🔓 Finalizando descifrado...`);
             decrypted += decipher.final('utf8');
 
-            console.log(`✅ Descifrado exitoso - Resultado: ${decrypted.length} caracteres`);
+            clog(`✅ Descifrado exitoso - Resultado: ${decrypted.length} caracteres`);
             return decrypted;
 
         } catch (error) {
             console.error('❌ Error en descifrado Level 3:', error.message);
-            console.error('❌ Stack trace:', error.stack);
-            
-            // Debug detallado en caso de error
-            console.error('❌ Datos problemáticos:', {
-                original: encryptedText?.substring(0, 100) + (encryptedText?.length > 100 ? '...' : ''),
-                length: encryptedText?.length,
-                parts: encryptedText?.split(':').map((part, i) => ({
-                    index: i,
-                    length: part.length,
-                    isEven: part.length % 2 === 0,
-                    content: part.substring(0, 50) + (part.length > 50 ? '...' : '')
-                })),
-                keyInfo: {
-                    exists: !!this.getKey(),
-                    length: this.getKey()?.length,
-                    hash: this.getKey() ? this._getKeyHash(Buffer.from(this.getKey(), 'hex')) : 'N/A'
-                }
-            });
 
-            // Sugerir posibles causas
-            if (error.message.includes('unable to authenticate data') || 
-                error.message.includes('Unsupported state')) {
-                console.error('💡 Posibles causas:');
-                console.error('   1. Clave de descifrado diferente a la de cifrado');
-                console.error('   2. Datos corruptos durante transporte/almacenamiento');
-                console.error('   3. AuthTag o IV incorrectos');
-                console.error('   4. Datos cifrados con versión diferente del algoritmo');
+            // El volcado detallado expone fragmentos de texto cifrado y de la clave,
+            // así que sólo se emite al depurar (CRYPTO_DEBUG=true).
+            if (CRYPTO_DEBUG) {
+                console.error('❌ Stack trace:', error.stack);
+                console.error('❌ Datos problemáticos:', {
+                    original: encryptedText?.substring(0, 100) + (encryptedText?.length > 100 ? '...' : ''),
+                    length: encryptedText?.length,
+                    parts: encryptedText?.split(':').map((part, i) => ({
+                        index: i,
+                        length: part.length,
+                        isEven: part.length % 2 === 0,
+                        content: part.substring(0, 50) + (part.length > 50 ? '...' : '')
+                    }))
+                });
+                if (error.message.includes('unable to authenticate data') ||
+                    error.message.includes('Unsupported state')) {
+                    console.error('💡 Posibles causas:');
+                    console.error('   1. Clave de descifrado diferente a la de cifrado');
+                    console.error('   2. Datos corruptos durante transporte/almacenamiento');
+                    console.error('   3. AuthTag o IV incorrectos');
+                    console.error('   4. Datos cifrados con versión diferente del algoritmo');
+                }
             }
 
             throw new Error(`Error en descifrado Level 3: ${error.message}`);

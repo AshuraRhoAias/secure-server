@@ -1,6 +1,7 @@
 const level1 = require('./level1');
 const level2 = require('./level2');
 const level3 = require('./level3');
+const { clog } = require('./debug');
 
 class TripleEncryptor {
     constructor() {
@@ -20,11 +21,11 @@ class TripleEncryptor {
             // Aplicar cifrado en secuencia: L1 → L2 → L3
             for (let i = 0; i < this.levels.length; i++) {
                 encrypted = this.levels[i].encrypt(encrypted);
-                console.log(`🔐 Cifrado Level ${i + 1} aplicado`);
+                clog(`🔐 Cifrado Level ${i + 1} aplicado`);
             }
 
             this.encryptionMetrics.totalEncryptions++;
-            console.log(`⚡ Triple cifrado completado en ${Date.now() - startTime}ms`);
+            clog(`⚡ Triple cifrado completado en ${Date.now() - startTime}ms`);
 
             return encrypted;
         } catch (error) {
@@ -42,11 +43,11 @@ class TripleEncryptor {
             // Aplicar descifrado en orden inverso: L3 → L2 → L1
             for (let i = this.levels.length - 1; i >= 0; i--) {
                 decrypted = this.levels[i].decrypt(decrypted);
-                console.log(`🔓 Descifrado Level ${i + 1} aplicado`);
+                clog(`🔓 Descifrado Level ${i + 1} aplicado`);
             }
 
             this.encryptionMetrics.totalDecryptions++;
-            console.log(`⚡ Triple descifrado completado en ${Date.now() - startTime}ms`);
+            clog(`⚡ Triple descifrado completado en ${Date.now() - startTime}ms`);
 
             return decrypted;
         } catch (error) {

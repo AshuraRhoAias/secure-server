@@ -1,5 +1,7 @@
 const secureAuthService = require('../../security/secure-auth.service');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
+const clientTokenService = require('../../security/client-token.service');
+const anomalyDetection = require('../../security/anomaly-detection.service');
 const bcrypt = require('bcryptjs');
 
 class AuthController {
@@ -9,7 +11,22 @@ class AuthController {
         this.login = this.login.bind(this);
         this.logout = this.logout.bind(this);
         this.getProfile = this.getProfile.bind(this);
+        this.getClientToken = this.getClientToken.bind(this);
         this.logUserAction = this.logUserAction.bind(this);
+    }
+
+    // Reúne la información de cliente que el frontend necesita y que permite
+    // comprobar que fingerprint, geolocalizador y localizador de IP funcionan.
+    buildClientInfo(req) {
+        const fp = anomalyDetection.generateRequestFingerprint(req);
+        return {
+            ip: fp.ip,
+            fingerprintId: fp.id,
+            browser: fp.browser,
+            os: fp.os,
+            device: fp.device,
+            geo: { country: fp.country, city: fp.city }
+        };
     }
 
     async register(req, res) {
@@ -283,13 +300,20 @@ class AuthController {
                 encryptionVersion: user.encryption_version
             });
 
+            // Emitir el token de cliente diario: el frontend debe enviarlo en
+            // CADA petición protegida (cabecera X-Client-Token) o será rechazada.
+            const clientToken = clientTokenService.issue(user.id);
+
             res.json({
                 success: true,
                 message: 'Autenticación exitosa',
                 token: authResult.token,
                 expiresAt: authResult.expiresAt,
                 riskLevel: authResult.riskLevel,
-                encryptionVersion: user.encryption_version
+                encryptionVersion: user.encryption_version,
+                clientToken: clientToken.token,
+                clientTokenExpiresAt: clientToken.expiresAt,
+                client: this.buildClientInfo(req)
             });
 
         } catch (error) {
@@ -364,6 +388,9 @@ class AuthController {
                 encryptionVersion: user.encryption_version
             });
 
+            // Renovar el token de cliente diario (útil tras cruzar medianoche UTC).
+            const clientToken = clientTokenService.issue(req.user.id);
+
             res.json({
                 success: true,
                 user: {
@@ -376,7 +403,10 @@ class AuthController {
                     activeSessions: sessions.length,
                     sessions: sessions,
                     metadata: decryptedMetadata
-                }
+                },
+                clientToken: clientToken.token,
+                clientTokenExpiresAt: clientToken.expiresAt,
+                client: this.buildClientInfo(req)
             });
 
         } catch (error) {
@@ -397,6 +427,18 @@ class AuthController {
                 message: 'Error obteniendo perfil'
             });
         }
+    }
+
+    // Devuelve el token de cliente del día para el usuario autenticado. El
+    // cliente lo llama si cambió el día (UTC) y su token caducó, sin re-login.
+    async getClientToken(req, res) {
+        const clientToken = clientTokenService.issue(req.user.id);
+        res.json({
+            success: true,
+            clientToken: clientToken.token,
+            clientTokenExpiresAt: clientToken.expiresAt,
+            client: this.buildClientInfo(req)
+        });
     }
 
     async logout(req, res) {

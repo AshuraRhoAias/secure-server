@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "start:half": "node scripts/start-capped.js",
     "dev": "nodemon src/index.js",
     "test": "node test_system.js",
     "test:api": "node --test test_api.js",

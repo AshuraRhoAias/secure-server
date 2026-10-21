@@ -59,6 +59,31 @@ Columna **%** = qué tan bien quedó ese aspecto (0–100, criterio explicado en
 
 ---
 
+---
+
+## 4. Ronda 4 — optimizaciones aplicadas (medidas)
+
+Tras la ronda 3 se optimizó el camino caliente. Mismo equipo (4 vCPU, sin GPU),
+mismos datos (usuario con 100 000 notas cifradas). Ver `OPTIMIZACIONES.md`.
+
+| Métrica | Antes (ronda 3) | Después (ronda 4) | Mejora |
+|---|---:|---:|---:|
+| `/api/notes` throughput | 8.3 req/s | **316 req/s** | **~38×** |
+| `/api/notes` p50 | 4 379 ms | **78 ms** | **~56× menos** |
+| `/api/notes` p99 | 11 520 ms | **659 ms** | ~17× menos |
+| Éxito | 100% | 100% | = |
+
+Qué lo consiguió, sin humo:
+- **Cifrado:** se quitó del camino caliente un auto-descifrado que corría en CADA
+  cifrado (duplicaba el trabajo) y el log por operación. A/B sobre los mismos
+  datos: 159 → 345 req/s (~2.2×). Microbenchmark: ~9 600 pares cifrar+descifrar/s.
+- **COUNT cacheado:** el `COUNT(*)` por listado costaba ~17 ms con 100k notas
+  (la página en sí, <1 ms). Cacheado unos segundos e invalidado al escribir, la
+  paginación sigue exacta y el listado deja de pagar ese coste en cada petición.
+
+Formato de cifrado intacto: los datos ya guardados se descifran igual (0 fallos
+en 2 000 ciclos y en las suites test:api / test:rotation).
+
 ### Reproducibilidad
 ```bash
 # Carga ligera (techo de throughput)

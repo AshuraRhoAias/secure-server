@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const authMiddleware = require('../../middleware/auth.middleware');
+const { requireClientToken } = require('../../middleware/client-token.middleware');
 
 // Cargador automático de APIs.
 //
@@ -10,9 +11,12 @@ const authMiddleware = require('../../middleware/auth.middleware');
 // Seguridad por defecto: protectionMiddleware.autoProtect() ya es global (src/index.js) y el
 // cargador antepone authMiddleware.verifyJWT. Un router puede cambiar eso con `router.access`:
 //
-//   'protected' (por defecto)  JWT obligatorio
+//   'protected' (por defecto)  JWT + token de cliente diario (X-Client-Token) obligatorios
 //   'public'                   sin login (solo la protección global)
 //   'custom'                   el router gestiona su propia autenticación (p. ej. /api/auth)
+//
+// En las rutas 'protected' se añade requireClientToken DESPUÉS de verifyJWT: sin
+// el token web diario único por usuario no se recibe la petición (403).
 
 const ROUTE_SUFFIX = '.routes.js';
 
@@ -33,7 +37,9 @@ function registerRoutes(app) {
             throw new Error(`${file}: debe exportar un express.Router() y router.access debe ser protected | public | custom`);
         }
 
-        const middlewares = access === 'protected' ? [authMiddleware.verifyJWT] : [];
+        const middlewares = access === 'protected'
+            ? [authMiddleware.verifyJWT, requireClientToken]
+            : [];
 
         app.use(mountPath, ...middlewares, router);
         mounted.push({ path: mountPath, access });

@@ -1,5 +1,6 @@
 const mysql = require('mysql2/promise');
 const credentialBuilder = require('./credential-builder');
+const capacity = require('./capacity');
 
 class DatabaseConfig {
     constructor() {
@@ -40,10 +41,14 @@ class DatabaseConfig {
                 };
             }
 
+            // El tamaño del pool sale del presupuesto de capacidad (media máquina),
+            // configurable con DB_POOL_SIZE.
+            const connectionLimit = parseInt(process.env.DB_POOL_SIZE, 10) || capacity.dbPool;
+
             this.pool = mysql.createPool({
                 uri: databaseURL,
                 waitForConnections: true,
-                connectionLimit: 10,
+                connectionLimit,
                 queueLimit: 0,
                 // Remover configuraciones no válidas que causan warnings
                 ssl: sslConfig,
@@ -52,7 +57,7 @@ class DatabaseConfig {
                 connectTimeout: 60000,
             });
 
-            console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
+            console.log(`🗄️ Pool de conexiones MySQL inicializado de forma segura (límite: ${connectionLimit})`);
         } catch (error) {
             console.error('❌ Error inicializando pool de base de datos:', error);
             throw error;
@@ -118,13 +123,11 @@ class DatabaseConfig {
             this.pool = mysql.createPool({
                 uri: databaseURL,
                 waitForConnections: true,
-                connectionLimit: 10,
+                connectionLimit: parseInt(process.env.DB_POOL_SIZE, 10) || capacity.dbPool,
                 queueLimit: 0,
                 ssl: false, // Explícitamente deshabilitado
                 charset: 'utf8mb4',
-                connectTimeout: 60000,
-                acquireTimeout: 60000,
-                timeout: 60000
+                connectTimeout: 60000
             });
 
             // Probar nueva conexión

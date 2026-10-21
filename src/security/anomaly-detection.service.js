@@ -1,5 +1,19 @@
+const crypto = require('crypto');
 const geoip = require('geoip-lite');
 const { UAParser } = require('ua-parser-js');
+
+// Normaliza la IP para que el localizador funcione de verdad:
+//   - Express/Node devuelven IPv4 mapeada en IPv6 ("::ffff:1.2.3.4"): geoip-lite
+//     NO resuelve esa forma, hay que quedarse con la IPv4.
+//   - El loopback IPv6 "::1" se trata como "127.0.0.1".
+//   - Si llega una lista (X-Forwarded-For con varias), se toma la primera.
+function normalizeIp(raw) {
+    if (!raw) return '';
+    let ip = String(raw).split(',')[0].trim();
+    if (ip === '::1') return '127.0.0.1';
+    if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+    return ip;
+}
 
 class AnomalyDetection {
     constructor() {
@@ -72,19 +86,34 @@ class AnomalyDetection {
     }
 
     generateRequestFingerprint(req) {
-        const ip = req.ip || req.connection.remoteAddress;
+        const ip = normalizeIp(req.ip || (req.connection && req.connection.remoteAddress));
         const userAgentString = req.headers['user-agent'] || '';
         const agent = new UAParser(userAgentString).getResult();
-        const geo = geoip.lookup(ip);
+        // geoip-lite sólo resuelve IPs públicas: loopback/privadas dan null (Unknown).
+        const geo = ip ? geoip.lookup(ip) : null;
+
+        // Huella de dispositivo estable: combina los rasgos del navegador que no
+        // cambian entre peticiones del mismo cliente. Permite detectar cambios de
+        // dispositivo de forma más fiable que usando sólo la IP.
+        const fingerprintId = crypto.createHash('sha256').update([
+            userAgentString,
+            req.headers['accept-language'] || '',
+            req.headers['accept-encoding'] || '',
+            agent.browser.name || '',
+            agent.os.name || ''
+        ].join('|')).digest('hex').slice(0, 32);
 
         return {
             ip,
+            id: fingerprintId,
             userAgent: userAgentString,
             browser: agent.browser.name || 'Other',
             os: agent.os.name || 'Other',
             device: agent.device.type || agent.device.model || 'Other',
             country: geo ? geo.country : 'Unknown',
-            city: geo ? geo.city : 'Unknown',
+            city: geo && geo.city ? geo.city : 'Unknown',
+            coordinates: geo && geo.ll ? { lat: geo.ll[0], lon: geo.ll[1] } : null,
+            timezone: geo && geo.timezone ? geo.timezone : null,
             timestamp: Date.now(),
             path: req.path,
             method: req.method,

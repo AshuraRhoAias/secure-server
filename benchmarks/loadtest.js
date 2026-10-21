@@ -35,9 +35,23 @@ const BODY = arg('body', null);
 const ISJSON = !!arg('json', false);
 const SAMPLE_PID = arg('sample-pid', null);
 const OUT = arg('out', null);
+// Admite varias cabeceras: repetir --header "Clave: valor" tantas veces como haga falta.
+function allArgs(name) {
+    const out = [];
+    for (let i = 0; i < process.argv.length; i++) {
+        if (process.argv[i] === '--' + name) {
+            const v = process.argv[i + 1];
+            if (v !== undefined && !v.startsWith('--')) out.push(v);
+        }
+    }
+    return out;
+}
+
 const headers = {};
-let h = arg('header', null);
-if (h && typeof h === 'string') { const idx = h.indexOf(':'); headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim(); }
+for (const h of allArgs('header')) {
+    const idx = h.indexOf(':');
+    if (idx > 0) headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim();
+}
 if (ISJSON) headers['Content-Type'] = 'application/json';
 
 const u = new URL(URL_);

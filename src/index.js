@@ -2,6 +2,11 @@
 const path = require('path');
 const fs = require('fs');
 
+// Detección de capacidad ANTES que nada: fija UV_THREADPOOL_SIZE (debe estar
+// puesto antes del primer uso del threadpool de libuv) y calcula el presupuesto
+// de "media máquina" que luego usan el pool de BD y las cargas en paralelo.
+const capacity = require('./config/capacity');
+
 // Verificar que el archivo .env existe
 // ENV_FILE permite usar otro archivo (la rotación de claves y los tests lo usan)
 const envPath = process.env.ENV_FILE ? path.resolve(process.env.ENV_FILE) : path.join(__dirname, '../.env');
@@ -85,6 +90,9 @@ class SecureServer {
     async initializeServer() {
         try {
             console.log('🚀 Inicializando Servidor Ultra Seguro...');
+
+            // Informar de la capacidad detectada y del presupuesto de media máquina.
+            capacity.logSummary();
 
             // Validar configuración inicial
             await this.validateConfiguration();
@@ -181,6 +189,13 @@ class SecureServer {
     setupMiddlewares() {
         console.log('⚙️ Configurando middlewares de seguridad...');
 
+        // Confiar en el proxy de delante (reverse proxy / balanceador) para que
+        // req.ip sea la IP REAL del cliente (de X-Forwarded-For) y no la del
+        // proxy. Sin esto, el fingerprint y el geolocalizador verían siempre la
+        // IP del proxy. Configurable con TRUST_PROXY (número de saltos o lista);
+        // por defecto confía en redes locales/loopback.
+        this.app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');
+
         // Middlewares de seguridad básicos
         this.app.use(helmet({
             contentSecurityPolicy: {
@@ -202,7 +217,10 @@ class SecureServer {
             origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://192.168.100.58:3000'],
             credentials: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE'],
-            allowedHeaders: ['Content-Type', 'Authorization']
+            // X-Client-Token: token web diario único por usuario. Se admite en CORS
+            // y es obligatorio en las rutas protegidas (ver client-token.middleware).
+            allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Token'],
+            exposedHeaders: ['X-Session-Risk-Level', 'X-Session-Valid']
         }));
 
         // Modo mantenimiento / claves desincronizadas: 503 a todo (ver src/maintenance/guard.js)

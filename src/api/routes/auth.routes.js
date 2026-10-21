@@ -23,6 +23,8 @@ router.use(authMiddleware.verifyJWT);
 
 router.post('/logout', authController.logout);
 router.get('/profile', authController.getProfile);
+// Renueva el token de cliente diario sin volver a iniciar sesión.
+router.get('/client-token', authController.getClientToken);
 
 // Mezcla rutas públicas (register/login) y protegidas (logout/profile): gestiona su propia protección
 router.access = 'custom';

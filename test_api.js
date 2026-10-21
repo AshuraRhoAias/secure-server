@@ -103,12 +103,16 @@ stub('src/api/controllers/auth.controller.js', {
     register: (req, res) => res.json({ success: true }),
     login: (req, res) => res.json({ success: true }),
     logout: (req, res) => res.json({ success: true }),
-    getProfile: (req, res) => res.json({ success: true })
+    getProfile: (req, res) => res.json({ success: true }),
+    getClientToken: (req, res) => res.json({ success: true })
 });
 
 const express = require('express');
 const { registerRoutes } = require('./src/api/routes');
 const { createErrorHandler } = require('./src/middleware/error.middleware');
+// El token de cliente diario es real (determinista): lo calculamos para el
+// usuario de cada token de prueba y lo enviamos en X-Client-Token.
+const clientTokenService = require('./src/security/client-token.service');
 const loggedErrors = [];
 
 let server;
@@ -128,11 +132,21 @@ test.before(async () => {
 
 test.after(() => server.close());
 
-async function call(method, url, { token, body, raw } = {}) {
+async function call(method, url, { token, body, raw, clientToken } = {}) {
+    // Por defecto, con un token válido mandamos también el token de cliente del día
+    // (el que correspondería al usuario de ese token). `clientToken: false` lo omite
+    // a propósito para probar el rechazo; `clientToken: '...'` fuerza uno concreto.
+    const userId = tokens[token];
+    let xClientToken;
+    if (clientToken === false) xClientToken = undefined;
+    else if (typeof clientToken === 'string') xClientToken = clientToken;
+    else if (userId) xClientToken = clientTokenService.tokenFor(userId);
+
     const res = await fetch(base + url, {
         method,
         headers: {
             ...(token && { Authorization: `Bearer ${token}` }),
+            ...(xClientToken && { 'X-Client-Token': xClientToken }),
             ...((body || raw) && { 'Content-Type': 'application/json' })
         },
         body: raw ?? (body ? JSON.stringify(body) : undefined)
@@ -155,6 +169,24 @@ test('rutas protegidas rechazan peticiones sin token o con token inválido (401)
     const bad = await call('GET', '/api/notes', { token: 'basura' });
     assert.strictEqual(bad.status, 401);
     assert.strictEqual(bad.json.code, 'INVALID_TOKEN');
+});
+
+test('rutas protegidas exigen el token de cliente diario (X-Client-Token)', async () => {
+    // Con JWT válido pero SIN token de cliente -> 403
+    const sinToken = await call('GET', '/api/notes', { token: 'token-user', clientToken: false });
+    assert.strictEqual(sinToken.status, 403);
+    assert.strictEqual(sinToken.json.code, 'CLIENT_TOKEN_REQUIRED');
+
+    // Con un token de cliente equivocado -> 403
+    const malo = await call('GET', '/api/notes', { token: 'token-user', clientToken: 'deadbeef' });
+    assert.strictEqual(malo.status, 403);
+    assert.strictEqual(malo.json.code, 'INVALID_CLIENT_TOKEN');
+
+    // El token de un usuario NO vale para otro (único por usuario)
+    const clientTokenService = require('./src/security/client-token.service');
+    const ajeno = await call('GET', '/api/notes', { token: 'token-user', clientToken: clientTokenService.tokenFor(2) });
+    assert.strictEqual(ajeno.status, 403);
+    assert.strictEqual(ajeno.json.code, 'INVALID_CLIENT_TOKEN');
 });
 
 // ---------- /api/notes ----------
