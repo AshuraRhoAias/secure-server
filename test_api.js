@@ -126,7 +126,13 @@ stub('src/api/controllers/auth.controller.js', {
     register: (req, res) => res.json({ success: true }),
     login: (req, res) => res.json({ success: true }),
     logout: (req, res) => res.json({ success: true }),
-    getProfile: (req, res) => res.json({ success: true })
+    getProfile: (req, res) => res.json({ success: true }),
+    loginMfa: (req, res) => res.json({ success: true }),
+    mfaStatus: (req, res) => res.json({ success: true }),
+    mfaSetup: (req, res) => res.json({ success: true }),
+    mfaEnable: (req, res) => res.json({ success: true }),
+    mfaDisable: (req, res) => res.json({ success: true }),
+    mfaRegenerateCodes: (req, res) => res.json({ success: true })
 });
 
 const express = require('express');
@@ -170,6 +176,7 @@ test('el cargador monta cada *.routes.js en /api/<nombre>', () => {
         '/api/auth': 'custom',
         '/api/files': 'protected',
         '/api/notes': 'protected',
+        '/api/sso': 'public',
         '/api/system': 'protected'
     });
 });
@@ -311,4 +318,27 @@ test('system: logs paginados, IPs bloqueadas y desbloqueo', async () => {
     assert.strictEqual((await call('DELETE', '/api/system/blocked-ips/no-es-ip', { token: 'token-admin' })).status, 400);
     assert.strictEqual((await call('DELETE', '/api/system/blocked-ips/203.0.113.9', { token: 'token-admin' })).status, 200);
     assert.strictEqual(state.blockedIPs.length, 0);
+});
+
+// ---------- Documentación OpenAPI al día ----------
+test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no exista)', () => {
+    const fs = require('fs');
+    const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'docs/openapi.json'), 'utf8'));
+    const documented = new Set();
+    for (const [route, methods] of Object.entries(spec.paths)) {
+        for (const method of Object.keys(methods)) documented.add(`${method.toUpperCase()} ${route.replace(/\{(\w+)\}/g, ':$1')}`);
+    }
+
+    const implemented = new Set(['GET /health']);
+    const dir = path.join(__dirname, 'src/api/routes');
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.routes.js'))) {
+        const mount = `/api/${file.replace('.routes.js', '')}`;
+        const source = fs.readFileSync(path.join(dir, file), 'utf8');
+        for (const [, method, route] of source.matchAll(/router\.(get|post|put|delete)\(\s*'([^']*)'/g)) {
+            implemented.add(`${method.toUpperCase()} ${mount}${route === '/' ? '' : route}`);
+        }
+    }
+
+    assert.deepStrictEqual([...implemented].filter(r => !documented.has(r)), [], 'rutas sin documentar en docs/openapi.json');
+    assert.deepStrictEqual([...documented].filter(r => !implemented.has(r)), [], 'rutas documentadas que no existen');
 });

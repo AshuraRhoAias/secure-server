@@ -1,0 +1,131 @@
+name: Security
+
+# Análisis automáticos que auditores y pentesters esperan ver funcionando. Ninguno sustituye a una auditoría humana.
+# (Estos workflows no se han podido ejecutar en el entorno donde se escribieron: la primera ejecución en GitHub puede
+#  requerir ajustes; el job DAST es informativo y no bloquea.)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 4 * * 1'   # cada lunes
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Análisis estático (ESLint security)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint:security
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+
+  secrets:
+    name: Búsqueda de secretos (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.cdx.json }
+
+  dast:
+    name: DAST (OWASP ZAP contra la API en marcha)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env: { MARIADB_ROOT_PASSWORD: root }
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      SEEDS: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+
+      - name: Base de datos y entorno de la API
+        run: |
+          mysql -h127.0.0.1 -uroot -proot -e "CREATE DATABASE secure_platform CHARACTER SET utf8mb4; CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_dast_pw'; GRANT ALL ON secure_platform.* TO 'sec'@'%';"
+          mysql -h127.0.0.1 -uroot -proot secure_platform < database/schema.sql
+          cat > "$RUNNER_TEMP/dast.env" <<ENV
+          PORT=3000
+          NODE_ENV=development
+          BASE_SEED=dast-base-${SEEDS}-0123456789abcdef0123456789abcdef
+          ENCRYPTION_SEED=dast-enc-${SEEDS}-0123456789abcdef0123456789abcdef
+          JWT_SEED=dast-jwt-${SEEDS}-0123456789abcdef0123456789abcdef
+          KEY_EPOCH=DAST-1
+          DB_FRAGMENT_1=mysql://sec:sec_dast_pw@
+          DB_FRAGMENT_2=127.0.0.1:3306
+          DB_FRAGMENT_3=/secure_platform
+          DISABLE_EMAIL_NOTIFICATIONS=true
+          FILES_DIR=$RUNNER_TEMP/dast-files
+          # Un escáner activo genera muchísimo tráfico desde una sola IP: se sube el límite global para que ZAP pueda recorrer la API
+          RATE_LIMIT_GLOBAL_PER_MIN=100000
+          SENSITIVE_RATE_LIMIT_PER_MIN=100000
+          ENV
+          sed -i 's/^          //' "$RUNNER_TEMP/dast.env"
+
+      - name: Arrancar la API y crear un usuario de pruebas
+        run: |
+          ENV_FILE="$RUNNER_TEMP/dast.env" nohup node src/index.js > "$RUNNER_TEMP/api.log" 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://localhost:3000/health >/dev/null && break; sleep 1; done
+          curl -sf -X POST http://localhost:3000/api/auth/register -H 'Content-Type: application/json' \
+            -d '{"username":"zap_user","email":"zap@example.com","password":"Contrasena-De-Pruebas-1"}'
+          TOKEN=$(curl -sf -X POST http://localhost:3000/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"username":"zap_user","password":"Contrasena-De-Pruebas-1"}' | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).token")
+          echo "::add-mask::$TOKEN"
+          echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - uses: zaproxy/action-api-scan@v0.9.0
+        with:
+          target: docs/openapi.json
+          format: openapi
+          fail_action: false
+          cmd_options: >-
+            -z "-config replacer.full_list(0).description=auth
+            -config replacer.full_list(0).enabled=true
+            -config replacer.full_list(0).matchtype=REQ_HEADER
+            -config replacer.full_list(0).matchstr=Authorization
+            -config replacer.full_list(0).regex=false
+            -config replacer.full_list(0).replacement=Bearer\ ${{ env.ZAP_TOKEN }}"
+
+      - if: always()
+        run: tail -n 50 "$RUNNER_TEMP/api.log" || true

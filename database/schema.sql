@@ -136,7 +136,10 @@ CREATE TABLE `users` (
   `username_encrypted` longtext DEFAULT NULL,
   `risk_level_encrypted` longtext DEFAULT NULL,
   `encrypted_metadata` longtext DEFAULT NULL,
-  `role` enum('user','admin') NOT NULL DEFAULT 'user'
+  `role` enum('user','admin') NOT NULL DEFAULT 'user',
+  `mfa_secret_encrypted` longtext DEFAULT NULL,
+  `mfa_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `mfa_last_step` bigint(20) unsigned DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -371,11 +374,13 @@ CREATE TABLE IF NOT EXISTS `login_attempts` (
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `username_hash` char(64) NOT NULL,
   `ip_address` varchar(45) NOT NULL,
+  `ip_subject` varchar(45) NOT NULL DEFAULT '',
   `user_id` int(11) DEFAULT NULL,
   `success` tinyint(1) NOT NULL,
   `reason` varchar(32) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_la_user` (`username_hash`, `id`),
+  KEY `idx_la_user_subject` (`username_hash`, `ip_subject`, `success`, `id`),
   KEY `idx_la_ip` (`ip_address`, `created_at`),
   KEY `idx_la_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -396,6 +401,7 @@ CREATE TABLE IF NOT EXISTS `user_files` (
   `category` enum('image','video','audio','document','text') NOT NULL,
   `size_bytes` bigint(20) unsigned NOT NULL,
   `sha256` char(64) NOT NULL,
+  `scan_status` enum('clean','skipped','unscanned') NOT NULL DEFAULT 'unscanned',
   `cipher_version` varchar(10) NOT NULL DEFAULT 'f1',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
@@ -405,6 +411,56 @@ CREATE TABLE IF NOT EXISTS `user_files` (
   CONSTRAINT `user_files_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+-- --------------------------------------------------------
+
+--
+-- Códigos de recuperación de MFA (migración 008)
+--
+
+CREATE TABLE IF NOT EXISTS `user_recovery_codes` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `code_hash` char(64) NOT NULL,
+  `used_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_recovery_user_hash` (`user_id`, `code_hash`),
+  CONSTRAINT `user_recovery_codes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- SSO por OpenID Connect (migración 009)
+--
+
+CREATE TABLE IF NOT EXISTS `user_identities` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `issuer` varchar(255) NOT NULL,
+  `identity_hash` char(64) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_login_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_identity_hash` (`identity_hash`),
+  KEY `idx_identity_user` (`user_id`),
+  CONSTRAINT `user_identities_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `oidc_login_state` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `state_hash` char(64) NOT NULL,
+  `nonce` varchar(64) NOT NULL,
+  `code_verifier_encrypted` longtext NOT NULL,
+  `ip_subject` varchar(45) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` datetime NOT NULL,
+  `used_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_oidc_state` (`state_hash`),
+  KEY `idx_oidc_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 COMMIT;
 

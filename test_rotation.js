@@ -542,6 +542,44 @@ itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archi
     assert.ok(Buffer.concat(parts).equals(plain));
 });
 
+itDb('rotación con KMS: las semillas nuevas se escriben ENVUELTAS en el .env, y recargar (otro proceso) las resuelve', async () => {
+    const kms = require('./src/crypto/kms');
+    const kek = path.join(os.tmpdir(), `kek-rot-${crypto.randomBytes(4).toString('hex')}`);
+    fs.writeFileSync(kek, crypto.randomBytes(32).toString('hex'), { mode: 0o400 });
+    Object.assign(process.env, { KMS_PROVIDER: 'file', KMS_KEK_FILE: kek });
+    try {
+        const w = await freshWorld();
+        await w.service.run({ env: w.env(), drainSeconds: 0 });
+
+        // En disco: solo blobs kms:file:..., nunca la semilla en claro
+        const vars = require('dotenv').parse(fs.readFileSync(w.paths.envFile));
+        assert.match(vars.ENCRYPTION_SEED, /^kms:file:/);
+        assert.match(vars.JWT_SEED, /^kms:file:/);
+        assert.match(vars.KEY_EPOCH, /^[A-Za-z0-9._-]+$/, 'la época no es secreta y queda en claro');
+
+        // Las claves derivadas del archivo (resolviendo con el KMS) descifran todo lo re-cifrado
+        kms.clearCache();
+        const newSet = keyProvider.deriveFromEnv({ BASE_SEED: process.env.BASE_SEED, ...vars });
+        assertPlainData(await readAll(newSet.encryption));
+        const [[meta]] = await db.query('SELECT key_fingerprint FROM crypto_meta WHERE id = 1');
+        assert.strictEqual(meta.key_fingerprint, newSet.fingerprint);
+
+        // Otro proceso que recarga el .env (el guardián) obtiene las mismas claves: resuelve los blobs con el KMS
+        kms.clearCache();
+        secureEnv.reload(w.paths.envFile);
+        assert.strictEqual(secureEnv.fingerprint, newSet.fingerprint);
+        assert.ok(!kms.isWrapped(process.env.ENCRYPTION_SEED), 'en memoria queda el valor en claro');
+
+        // Sin acceso al KMS, ese .env no se puede usar
+        delete process.env.KMS_KEK_FILE;
+        kms.clearCache();
+        assert.throws(() => keyProvider.deriveFromEnv({ BASE_SEED: process.env.BASE_SEED, ...vars }), /KMS/);
+    } finally {
+        delete process.env.KMS_PROVIDER; delete process.env.KMS_KEK_FILE;
+        fs.rmSync(kek, { force: true });
+    }
+});
+
 itDb('rotación: el texto plano nunca llega a disco ni a los logs', async () => {
     const w = await freshWorld();
     const logs = [];

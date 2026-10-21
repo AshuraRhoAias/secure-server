@@ -29,7 +29,18 @@
     "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\"",
     "test:security": "node --test test_security.js",
     "test:files": "node --test test_files.js",
-    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_files.js"
+    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sso.js test_kms.js test_files.js test_av.js test_files_backup.js",
+    "test:mfa": "node --test test_mfa.js",
+    "test:sso": "node --test test_sso.js",
+    "kms": "node scripts/kms.js",
+    "test:kms": "node --test test_kms.js",
+    "test:av": "node --test test_av.js",
+    "rescan-files": "node scripts/rescanFiles.js",
+    "files:backup": "node scripts/filesBackup.js backup",
+    "files:verify": "node scripts/filesBackup.js verify",
+    "files:restore": "node scripts/filesBackup.js restore",
+    "test:files-backup": "node --test test_files_backup.js",
+    "lint:security": "eslint src scripts --max-warnings 0"
   },
   "keywords": [
     "security",
@@ -42,6 +53,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1155.0",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "busboy": "^1.6.0",
@@ -54,6 +66,7 @@
     "fs-extra": "^11.3.0",
     "geoip-lite": "^2.0.3",
     "helmet": "^8.1.0",
+    "jose": "^6.2.13",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "mysql2": "^3.14.3",
@@ -66,6 +79,9 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-security": "^3.0.1",
+    "globals": "^17.13.0",
     "nodemon": "^3.1.10"
   }
 }

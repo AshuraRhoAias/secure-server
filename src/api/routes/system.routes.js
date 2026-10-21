@@ -33,6 +33,16 @@ router.get('/security-summary',
     systemController.getSecuritySummary
 );
 router.delete('/blocked-ips/:ip', systemController.unblockIP);
+router.post('/accounts/mfa-reset',
+    protectionMiddleware.highSecurity(),
+    validate.body({ username: { type: 'string', required: true, min: 1, max: 64 } }),
+    systemController.resetMfa
+);
+router.post('/accounts/unlock',
+    protectionMiddleware.highSecurity(),
+    validate.body({ username: { type: 'string', required: true, min: 1, max: 64 } }),
+    systemController.unlockAccount
+);
 
 // Operaciones sensibles: rate limit muy restrictivo (10 req/min)
 router.post('/integrity-check', protectionMiddleware.highSecurity(), systemController.performIntegrityCheck);
