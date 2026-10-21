@@ -49,7 +49,11 @@ async function buildSnapshot(conn, { decryptCell }) {
                     return decryptCell(table, columns[i], value, rowObject);
                 } catch (error) {
                     // Sin contenido en el mensaje: solo dónde está el problema
-                    throw new Error(`No se pudo descifrar ${table}.${columns[i]} (${columns[pkIndex] || 'id'}=${row[pkIndex]}): ${error.message}`);
+                    const pk = columns[pkIndex] || 'id';
+                    const hint = ENCRYPTED_COLUMNS[table]?.regenerable
+                        ? ` Es un registro regenerable: puedes borrarlo con "DELETE FROM ${table} WHERE ${pk} = ${row[pkIndex]}" y reintentar.`
+                        : ' Si lo escribió un proceso con claves distintas (un script lanzado con otro .env), restaura ese dato desde un backup o corrígelo antes de rotar.';
+                    throw new Error(`No se pudo descifrar ${table}.${columns[i]} (${pk}=${row[pkIndex]}): ${error.message}.${hint}`);
                 }
             }
             return encodeCell(value);

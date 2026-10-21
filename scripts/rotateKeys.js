@@ -4,7 +4,8 @@
 //   npm run rotate-keys -- status                  estado de claves, lock, journal y backups
 //   npm run rotate-keys -- analyze                 ensayo: comprueba que todo se puede descifrar (no cambia nada)
 //   npm run rotate-keys -- rotate --confirm        rotación completa (ver abajo)
-//   npm run rotate-keys -- recover                 termina o deshace una rotación interrumpida
+//   npm run rotate-keys -- recover [--force]       termina o deshace una rotación interrumpida (se niega si
+//                                                  hay una en curso; --force solo si el lock es de otro host y sabes que murió)
 //   npm run rotate-keys -- finish                  reabre tras una rotación con --no-write-env
 //   npm run rotate-keys -- backups                 lista los backups
 //   npm run rotate-keys -- verify <archivo.sbk>    abre un backup con las claves actuales y muestra su contenido
@@ -201,7 +202,7 @@ async function rotate(service, secureEnv) {
 }
 
 async function recover(service, secureEnv) {
-    const outcome = await service.recover({ env: process.env });
+    const outcome = await service.recover({ env: process.env, force: !!flags['--force'] });
     console.log(`🛠️ ${outcome.message || outcome.action}`);
     if (outcome.action === 'finalized' && !outcome.stillLocked) {
         try { secureEnv.reload(envFile); } catch { /* el servidor recargará por su cuenta */ }

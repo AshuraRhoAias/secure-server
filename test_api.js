@@ -108,6 +108,8 @@ stub('src/api/controllers/auth.controller.js', {
 
 const express = require('express');
 const { registerRoutes } = require('./src/api/routes');
+const { createErrorHandler } = require('./src/middleware/error.middleware');
+const loggedErrors = [];
 
 let server;
 let base;
@@ -117,11 +119,9 @@ test.before(async () => {
     const app = express();
     app.use(express.json());
     mounted = registerRoutes(app);
+    app.get('/__boom', () => { throw new Error('detalle interno que no debe filtrarse'); });
     app.use((req, res) => res.status(404).json({ success: false, message: 'Ruta no encontrada' }));
-    app.use((error, req, res, next) => {
-        const status = error.status >= 400 && error.status < 500 ? error.status : 500;
-        res.status(status).json({ success: false });
-    });
+    app.use(createErrorHandler({ logError: (error) => loggedErrors.push(error.message) }));
     await new Promise(resolve => { server = app.listen(0, resolve); });
     base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -213,9 +213,31 @@ test('notes: validación de entrada', async () => {
     assert.strictEqual((await call('PUT', '/api/notes/1', { token: 'token-user', body: { title: '' } })).status, 400);
 });
 
-test('JSON malformado devuelve 400 y no 500', async () => {
-    const res = await call('POST', '/api/notes', { token: 'token-user', raw: '{no es json' });
-    assert.strictEqual(res.status, 400);
+test('JSON malformado devuelve 400 y NO se registra como error del servidor', async () => {
+    loggedErrors.length = 0;
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+        for (let i = 0; i < 3; i++) {
+            const res = await call('POST', '/api/notes', { token: 'token-user', raw: '{no es json' });
+            assert.strictEqual(res.status, 400);
+        }
+    } finally {
+        console.error = originalError;
+    }
+    assert.deepStrictEqual(loggedErrors, [], 'un error del cliente no debe llenar el log de auditoría');
+});
+
+test('un error real (5xx) sí se registra y no filtra detalles al cliente', async () => {
+    loggedErrors.length = 0;
+    const originalError = console.error;
+    console.error = () => {};
+    let res;
+    try { res = await call('GET', '/__boom'); } finally { console.error = originalError; }
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.json.message, 'Error interno del servidor');
+    assert.ok(!JSON.stringify(res.json).includes('detalle interno'));
+    assert.deepStrictEqual(loggedErrors, ['detalle interno que no debe filtrarse']);
 });
 
 // ---------- /api/system ----------

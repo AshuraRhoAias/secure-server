@@ -709,6 +709,32 @@ itDb('guardián: si las claves del entorno no coinciden con la BD, se niega a at
     assert.strictEqual(res.body.code, 'KEYS_OUT_OF_SYNC');
 });
 
+itDb('guardián: otra MÁQUINA (sin archivo de lock local) también se cierra mientras la BD tiene el lock de rotación', async () => {
+    const w = await freshWorld();
+    const guard = new MaintenanceGuard({ maintenance: w.service.maintenance, db, secureEnv, intervalMs: 1e9 });
+    await guard.tick();
+    assert.ok(guard.isOpen());
+
+    // "La otra máquina" ejecuta la rotación: toma el lock de la BD pero el archivo de lock está en SU disco
+    const holder = await db.getConnection();
+    try {
+        const [[got]] = await holder.query("SELECT GET_LOCK('secure_server_rotation', 0) AS got");
+        assert.strictEqual(got.got, 1);
+        assert.ok(!w.service.maintenance.isLocked(), 'aquí no hay archivo de lock');
+
+        await guard.tick();
+        assert.strictEqual(guard.state.maintenance, true, 'debe cerrarse por el lock de la BD');
+        assert.strictEqual(guard.isOpen(), false);
+
+        await holder.query("SELECT RELEASE_LOCK('secure_server_rotation')");
+    } finally {
+        holder.release();
+    }
+
+    await guard.tick();
+    assert.ok(guard.isOpen(), 'al soltar el lock se reabre');
+});
+
 itDb('guardián: la primera vez en modo estable registra la huella actual como referencia', async () => {
     const w = await freshWorld();
     const guard = new MaintenanceGuard({ maintenance: w.service.maintenance, db, secureEnv, intervalMs: 1e9 });
@@ -733,6 +759,26 @@ itDb('un dato que no se puede descifrar aborta TODO sin cambiar nada y reabre', 
     const [[{ n }]] = await db.query('SELECT COUNT(*) AS n FROM crypto_meta');
     assert.strictEqual(n, 0);
     assert.deepStrictEqual(w.service.listBackupFiles(), [], 'no se crea backup de datos corruptos');
+});
+
+itDb('un registro ilegible escrito con otra clave aborta y la pista dice qué hacer (regenerable vs. no)', async () => {
+    const w = await freshWorld();
+    const otraClave = crypto.randomBytes(32).toString('hex');
+    const ajeno = encryptor.withKey(otraClave, () => encryptor.encrypt('escrito por un proceso con otro .env'), { quiet: true });
+
+    const [r] = await db.query("INSERT INTO server_integrity (fingerprint_hash, system_data_encrypted) VALUES ('f', ?)", [ajeno]);
+    await assert.rejects(() => w.service.run({ env: w.env(), drainSeconds: 0 }),
+        new RegExp(`server_integrity\\.system_data_encrypted.*DELETE FROM server_integrity WHERE id = ${r.insertId}`));
+    assert.ok(!w.service.maintenance.isLocked());
+
+    // Tras borrarlo (es regenerable) la rotación sigue adelante
+    await db.query('DELETE FROM server_integrity WHERE id = ?', [r.insertId]);
+    await w.service.run({ env: w.env(), drainSeconds: 0 });
+
+    // En una tabla que NO es regenerable la pista pide restaurar, no borrar
+    await db.query("UPDATE users SET email_encrypted = ? WHERE id = ?", [ajeno, w.ids[0]]);
+    setEnv(require('dotenv').parse(fs.readFileSync(w.paths.envFile)));
+    await assert.rejects(() => w.service.run({ env: w.env(), drainSeconds: 0 }), /users\.email_encrypted.*restaura ese dato desde un backup/);
 });
 
 itDb('un fallo durante el re-cifrado hace rollback: BD intacta, temporales borrados, claves antiguas vigentes', async () => {
@@ -841,6 +887,70 @@ itDb('recover: una rotación que NO llegó a confirmar se deshace y reabre con l
     assert.ok(!w.service.maintenance.isLocked());
     assert.strictEqual(w.service.readJournal().phase, 'ABORTED');
     assertPlainData(await readAll(currentKey()));
+});
+
+// Un pid que seguro NO existe (proceso que ya terminó)
+const deadPid = () => {
+    const r = spawnSync('node', ['-e', 'process.exit(0)']);
+    return r.pid;
+};
+
+itDb('recover se niega mientras la rotación sigue VIVA y no toca ni su lock ni sus temporales', async () => {
+    const w = await freshWorld();
+    const alive = require('child_process').spawn('sleep', ['30']);
+    try {
+        fs.mkdirSync(w.paths.dataDir, { recursive: true });
+        const lockInfo = { operation: 'key-rotation', reason: 'viva', pid: alive.pid, host: os.hostname(), startedAt: new Date().toISOString(), phase: 'PREPARED' };
+        fs.writeFileSync(w.paths.lockFile, JSON.stringify(lockInfo));
+        const temp = `${w.paths.envFile}.pending`;
+        fs.writeFileSync(temp, 'ENCRYPTION_SEED=secreto-de-una-rotacion-viva');
+        w.service.writeJournal({ id: 'viva', phase: 'PREPARED', oldEpoch: 'a', newEpoch: 'b', oldFingerprint: 'x', newFingerprint: 'y', rewraps: [], keyring: { tmp: `${w.paths.keyringFile}.new` }, env: { tmp: temp } });
+
+        await assert.rejects(() => w.service.recover({ env: w.env() }), /en curso \(pid \d+\)/);
+
+        assert.ok(fs.existsSync(w.paths.lockFile), 'el lock de la rotación viva no se toca');
+        assert.ok(fs.existsSync(temp), 'sus temporales no se tocan');
+        assert.strictEqual(w.service.readJournal().phase, 'PREPARED');
+    } finally {
+        alive.kill();
+    }
+});
+
+itDb('recover limpia temporales huérfanos (incluido .env.pending con semillas) cuando el proceso murió antes del journal', async () => {
+    const w = await freshWorld();
+    fs.mkdirSync(w.paths.backupDir, { recursive: true });
+    fs.mkdirSync(w.paths.dataDir, { recursive: true });
+    const strays = [
+        `${w.paths.envFile}.pending`, `${w.paths.keyringFile}.new`,
+        path.join(w.paths.backupDir, 'backup-viejo.sbk.new'), path.join(w.paths.dataDir, 'new-env-E123.txt')
+    ];
+    strays.forEach(f => fs.writeFileSync(f, 'ENCRYPTION_SEED=huerfano'));
+    const real = path.join(w.paths.backupDir, 'backup-real.sbk');
+    fs.writeFileSync(real, 'un backup legítimo no se toca');
+
+    // Lock de un proceso muerto + journal de una rotación anterior ya terminada
+    fs.writeFileSync(w.paths.lockFile, JSON.stringify({ operation: 'key-rotation', pid: deadPid(), host: os.hostname(), startedAt: new Date().toISOString(), phase: 'LOCKED' }));
+    w.service.writeJournal({ id: 'anterior', phase: 'DONE', rewraps: [], keyring: {}, env: {} });
+
+    const outcome = await w.service.recover({ env: w.env() });
+
+    assert.strictEqual(outcome.action, 'already-finished');
+    assert.strictEqual(outcome.removedTemps.length, 4);
+    strays.forEach(f => assert.ok(!fs.existsSync(f), `${path.basename(f)} debería haberse borrado`));
+    assert.ok(fs.existsSync(real), 'los backups reales jamás se borran');
+    assert.ok(!fs.existsSync(w.paths.lockFile));
+});
+
+itDb('recover tras --no-write-env NO reabre: sigue esperando a que se apliquen las variables nuevas', async () => {
+    const w = await freshWorld();
+    const result = await w.service.run({ env: w.env(), drainSeconds: 0, writeEnv: false });
+    assert.ok(w.service.maintenance.isLocked());
+
+    const outcome = await w.service.recover({ env: w.env() });
+
+    assert.strictEqual(outcome.action, 'awaiting-env');
+    assert.ok(w.service.maintenance.isLocked(), 'el servidor debe seguir cerrado');
+    assert.ok(fs.existsSync(result.manualEnvFile), 'el archivo con las variables nuevas debe conservarse');
 });
 
 itDb('--no-write-env: no toca el .env, se queda cerrado y `finish` solo reabre cuando el entorno ya tiene las claves nuevas', async () => {

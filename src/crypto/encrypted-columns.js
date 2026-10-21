@@ -19,7 +19,8 @@ const ENCRYPTED_COLUMNS = {
         ]
     },
     security_logs: { primaryKey: 'id', columns: ['encrypted_details', 'encrypted_timestamp'] },
-    server_integrity: { primaryKey: 'id', columns: ['system_data_encrypted'] },
+    // regenerable: son registros que el servidor vuelve a crear solo; si uno queda ilegible se puede borrar
+    server_integrity: { primaryKey: 'id', columns: ['system_data_encrypted'], regenerable: true },
     encryption_keys: { primaryKey: 'id', columns: ['encrypted_key_data'] },
     user_notes: { primaryKey: 'id', columns: ['title_encrypted', 'content_encrypted'] }
 };

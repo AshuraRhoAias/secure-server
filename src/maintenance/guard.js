@@ -3,7 +3,8 @@ const { Maintenance } = require('./maintenance');
 // Guardián del servidor: decide si este proceso puede atender peticiones.
 //
 // Bloquea (503, falla cerrado) en dos casos:
-//   1. MAINTENANCE     existe el lock de mantenimiento (hay una migración/rotación en curso).
+//   1. MAINTENANCE     existe el lock de mantenimiento (archivo local) o la rotación tiene el lock de
+//                      la BD (lo ven también otras máquinas que comparten la BD).
 //   2. KEYS_OUT_OF_SYNC la huella de la clave que este proceso tiene en memoria no coincide con la
 //                      de la base de datos (crypto_meta). Pasa tras una rotación si este proceso no
 //                      ha cargado las claves nuevas: si atendiera peticiones escribiría datos
@@ -89,10 +90,22 @@ class MaintenanceGuard {
             : { outOfSync: true, detail: 'las claves en el entorno no coinciden con las de la base de datos; actualiza las variables y reinicia' };
     }
 
+    // El lock de la BD (GET_LOCK) lo mantiene la rotación durante toda su ejecución. A diferencia
+    // del archivo de lock (local a UNA máquina), lo ven TODAS las instancias que comparten la BD:
+    // sin esto, una segunda máquina seguiría escribiendo con la clave antigua mientras se rota.
+    async rotationHeldInDatabase() {
+        try {
+            const [rows] = await this.db.query("SELECT IS_USED_LOCK('secure_server_rotation') AS holder");
+            return rows[0]?.holder !== null && rows[0]?.holder !== undefined;
+        } catch {
+            return false; // sin BD no se puede saber; se conserva la señal del archivo
+        }
+    }
+
     async tick() {
         const previous = { ...this.state };
 
-        const locked = this.maintenance.isLocked();
+        const locked = this.maintenance.isLocked() || await this.rotationHeldInDatabase();
         let outOfSync = this.state.outOfSync;
         let detail = this.state.detail;
 

@@ -4843,11 +4843,26 @@ Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de u
 
 ### Límites y qué está probado
 
-- **Probado** (`npm run test:rotation`, 41 tests contra **MariaDB 10.11 real**; se omiten si no hay BD): rotaciones encadenadas, backups en cada mes, fallos antes/durante/después del commit, `COMMIT` ambiguo, `recover`, migración legacy, restauración, modo mantenimiento y guardián, CLI. Además, una prueba manual de punta a punta con el **servidor real** corriendo (login, notas, rotación con peticiones en vuelo, tokens antiguos rechazados). Los tests comprueban con mutaciones deliberadas que detectan los fallos importantes.
-- **No probado:** MySQL 8 propiamente dicho (solo MariaDB), volúmenes grandes, y el filtrado de tráfico real del firewall (se verificó que las reglas se aplican, son idempotentes y se retiran en un entorno de red aislado, no que bloqueen una conexión externa).
-- El snapshot se construye **en memoria**: sirve para bases de datos de hasta cientos de MB. Brotli a calidad 11 es lento (del orden de 1 MB/s): una BD grande tarda minutos en comprimirse, durante los cuales el servidor está cerrado.
+**Probado** (`npm run test:rotation`: 46 tests; se omiten si no hay BD, y entonces las suites salen "verdes" con pruebas omitidas: comprueba que `skipped` sea 0):
+- Contra **MariaDB 10.11 y MySQL 8.0.46 reales** (las tres suites: 82/82 en cada motor, 0 omitidas): rotaciones encadenadas, backups por mes, fallos antes/durante/después del commit, `COMMIT` ambiguo, `recover`, migración legacy, restauración, guardián y CLI. Los tests se verificaron con mutaciones deliberadas.
+- **`kill -9` en 44 instantes aleatorios** de la rotación (incluido justo tras el commit y durante la liberación del lock): en todos, tras `recover`, los datos íntegros y legibles, huella coherente, lock liberado y sin temporales sueltos.
+- **Escrituras concurrentes**: con el servidor real y 8 escritores durante la rotación (≈63 000 peticiones), 0 escrituras confirmadas perdidas o corruptas y 0 respuestas 5xx.
+- **El job mensual real** (`executeMonthlyRotation`) y el servidor real (login, notas, endpoints de administrador).
+
+**Rendimiento medido** (no estimado): una BD de **83 MB** (30 000 filas, 70 000 valores cifrados) tardó **75 s** en rotar, con el servidor cerrado todo ese tiempo, y el proceso llegó a **593 MB de RAM** (≈7 veces el tamaño de la BD, porque el snapshot y su compresión van en memoria). Extrapolando de forma lineal, 1 GB de datos serían ≈15 min de cierre y ≈7 GB de RAM: **este diseño sirve para bases de datos de decenas o pocos cientos de MB**, no para bases grandes. Con carga concurrente el tiempo se multiplica (58 s en lugar de 5 s en una BD pequeña).
+
+**No probado:**
+- Bases de datos grandes (>100 MB), y varias máquinas reales compartiendo la BD (solo se probó el mecanismo con el lock de la BD, no un despliegue multi-host).
+- Que el firewall de mantenimiento bloquee tráfico externo real (se verificó que las reglas se aplican, son idempotentes y se retiran en un entorno de red aislado).
+- La ejecución automática del día 1 con el reloj real (sí se ejecutó el job y se comprobó que el planificador se registra con la próxima fecha).
+- El flujo `--no-write-env` con un panel de hosting real (se probó con las variables aplicadas a mano en el test).
+
+**Cosas a tener en cuenta:**
+- **Ningún proceso con un `.env` distinto debe escribir en la misma BD** (un script lanzado con otras claves, o con claves legacy): deja datos que la rotación no puede descifrar. La rotación aborta sin cambiar nada y el mensaje indica el registro; si es regenerable (`server_integrity`) se puede borrar, si no, hay que restaurarlo.
+- **Varias máquinas**: el guardián ve también el lock de la BD (`GET_LOCK`), así que todas se cierran durante la rotación; las que no tengan las claves nuevas después se quedan en `503 KEYS_OUT_OF_SYNC`. Aun así, lo recomendable es una sola instancia con `AUTO_ROTATION_ENABLED=true`.
+- `recover` se niega si hay una rotación en curso (comprueba que el pid del lock siga vivo en esa máquina) y no toca locks de otro host sin `--force`.
 - Si la BD no soporta SSL en `production`, `database.js` cae silenciosamente a una conexión **sin SSL** (`rejectUnauthorized: false` + *fallback*). Es comportamiento previo, pero conviene revisarlo.
-- Varias instancias del servidor: todas deben poder leer el mismo `.env`/variables; una instancia que no cargue las claves nuevas se queda en `503 KEYS_OUT_OF_SYNC` en vez de dañar datos.
+- El límite de 10 peticiones/min **por IP** en login/registro (y en las operaciones de `highSecurity`) es **un único contador compartido**: varios usuarios detrás de la misma IP (una oficina, un NAT) se bloquean entre sí, y un atacante puede dejar sin login a toda esa IP. Es comportamiento previo.
 
 ---
 

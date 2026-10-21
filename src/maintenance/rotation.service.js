@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const keyProvider = require('../crypto/key-provider');
@@ -9,7 +10,7 @@ const { createArchive, openArchive, readHeader, rewrapArchive } = require('../ba
 const { buildKeyring, openKeyring } = require('../backup/keyring');
 const { getPaths } = require('./paths');
 const { Maintenance } = require('./maintenance');
-const { writeFileAtomic, readJsonIfExists } = require('./fsutil');
+const { writeFileAtomic, readJsonIfExists, isPidAlive } = require('./fsutil');
 
 // ROTACIÓN DE CLAVES Y RE-CIFRADO DE DATOS
 //
@@ -219,7 +220,10 @@ class RotationService {
                         try {
                             plain = oldDecryptor.decrypt(value, rowDates);
                         } catch (error) {
-                            throw new Error(`No se pudo descifrar ${table}.${col} (${pk}=${row[pk]}): ${error.message}. Rotación abortada sin cambios.`);
+                            const hint = spec.regenerable
+                                ? ` Es un registro regenerable: puedes borrarlo con "DELETE FROM ${table} WHERE ${pk} = ${row[pk]}" y reintentar.`
+                                : ' Si lo escribió un proceso con claves distintas (un script lanzado con otro .env), restaura ese dato desde un backup o corrígelo antes de rotar.';
+                            throw new Error(`No se pudo descifrar ${table}.${col} (${pk}=${row[pk]}): ${error.message}. Rotación abortada sin cambios.${hint}`);
                         }
 
                         const reencrypted = this.encryptWith(newKey, plain);
@@ -635,19 +639,54 @@ class RotationService {
 
     // ---------------------------------------------------------------- recuperación
 
+    // Borra temporales huérfanos (un proceso que muere tras crearlos y antes de escribir su journal
+    // los deja ahí; `.env.pending` contiene las semillas nuevas en claro). Solo se llama cuando
+    // ninguna rotación está en curso. `keep` son rutas que NO se deben tocar.
+    cleanStrayTemps(keep = []) {
+        const candidates = [`${this.paths.envFile}.pending`, `${this.paths.keyringFile}.new`];
+        for (const dir of [this.paths.backupDir, this.paths.dataDir]) {
+            if (!fs.existsSync(dir)) continue;
+            for (const f of fs.readdirSync(dir)) {
+                if (f.endsWith('.sbk.new') || /^new-env-.*\.txt$/.test(f) || f.includes('.tmp-')) candidates.push(path.join(dir, f));
+            }
+        }
+        const removed = [];
+        for (const file of candidates.filter(f => !keep.includes(f))) {
+            try { fs.unlinkSync(file); removed.push(path.basename(file)); } catch { /* no existía */ }
+        }
+        return removed;
+    }
+
     // Termina o deshace una rotación interrumpida, según hasta dónde llegó.
-    async recover({ env = process.env } = {}) {
+    async recover({ env = process.env, force = false } = {}) {
         const journal = this.readJournal();
         const lock = this.maintenance.read();
 
+        // Si quien tiene el lock sigue vivo, hay una rotación EN CURSO: tocar sus temporales o su
+        // lock la rompería a mitad. (En otro host no se puede saber; hace falta `force`.)
+        if (lock && lock.pid !== process.pid && !force) {
+            if (lock.host === os.hostname() && isPidAlive(lock.pid)) {
+                throw new Error(`Hay una ${lock.operation} en curso (pid ${lock.pid}). Espera a que termine. Si está colgada, comprueba primero que ese pid es realmente la rotación (los pids se reutilizan), ciérrala y vuelve a ejecutar recover.`);
+            }
+            if (lock.host !== os.hostname()) {
+                throw new Error(`El lock lo tiene un proceso de otro host (${lock.host}): no se puede saber si sigue vivo. Si estás seguro de que murió, usa --force.`);
+            }
+        }
+
         if (!journal) {
-            if (lock) return { action: 'lock-without-journal', lock, message: 'Hay un lock pero ningún journal: comprueba que ningún proceso lo use y borra el lock manualmente.' };
-            return { action: 'nothing', message: 'No hay nada que recuperar' };
+            const removed = this.cleanStrayTemps();
+            if (lock) return { action: 'lock-without-journal', lock, removedTemps: removed, message: 'Hay un lock pero ningún journal: comprueba que ningún proceso lo use y borra el lock manualmente.' };
+            return { action: 'nothing', removedTemps: removed, message: 'No hay nada que recuperar' };
         }
 
         if (journal.phase === 'DONE' || journal.phase === 'ABORTED') {
+            // --no-write-env: la BD ya usa las claves nuevas pero el entorno aún no. NO se reabre.
+            if (journal.phase === 'DONE' && journal.env?.manualFile && fs.existsSync(journal.env.manualFile)) {
+                return { action: 'awaiting-env', stillLocked: true, message: `Aplica las variables de ${journal.env.manualFile} y ejecuta: npm run rotate-keys -- finish` };
+            }
+            const removed = this.cleanStrayTemps();
             if (lock) this.maintenance.release();
-            return { action: 'already-finished', phase: journal.phase, releasedLock: !!lock };
+            return { action: 'already-finished', phase: journal.phase, releasedLock: !!lock, removedTemps: removed };
         }
 
         // PREPARED o COMMITTED: ¿la BD llegó a confirmar? Lo dice la huella guardada en crypto_meta.
