@@ -1,0 +1,6 @@
+# Salida en tiempo de ejecución (no versionar)
+logs/*
+reports/*
+!logs/.gitkeep
+!reports/.gitkeep
+*.tmp
