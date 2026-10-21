@@ -502,7 +502,10 @@ la emite un auditor sobre una *organización*. Aquí no se afirma ninguna de las
 - `docs/openapi.json` — definición de la API para ZAP/Burp (una prueba garantiza que está al día con el código).
 - `SECURITY.md` — política de divulgación de vulnerabilidades.
 - CI (`.github/workflows`): pruebas con MariaDB y ClamAV reales, `npm run lint:security` (a cero avisos), `npm audit`, CodeQL,
-  gitleaks, SBOM CycloneDX y un escaneo DAST con OWASP ZAP (informativo), más Dependabot.
+  gitleaks, SBOM CycloneDX y un escaneo DAST con OWASP ZAP (informativo), más Dependabot. CodeQL excluye dos consultas, con justificación en `.github/codeql/codeql-config.yml`:
+`js/missing-rate-limiting` (el limitador es propio y vive en MariaDB, CodeQL solo reconoce librerías como `express-rate-limit`) y
+`js/file-access-to-http` (el token de Vault se lee de un archivo y se envía a Vault, que es su función). Quien añada una ruta nueva
+debe protegerla con `protectionMiddleware` a mano: ahí CodeQL ya no avisará.
 
 ---
 

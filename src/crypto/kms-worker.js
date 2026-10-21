@@ -26,11 +26,20 @@ function unbind(name, buffer) {
 function loadKek() {
     const file = process.env.KMS_KEK_FILE;
     if (!file) throw new Error('falta KMS_KEK_FILE');
-    const stat = fs.statSync(file);
-    if ((stat.mode & 0o077) !== 0 && process.env.KMS_KEK_ALLOW_LOOSE_PERMS !== 'true') {
-        throw new Error(`${file} es legible por otros usuarios (permisos ${(stat.mode & 0o777).toString(8)}): usa chmod 400`);
+    // Un único descriptor: los permisos se comprueban sobre el MISMO archivo que luego se lee (con statSync + readFileSync
+    // por ruta, el archivo podría cambiarse entre la comprobación y la lectura).
+    const fd = fs.openSync(file, 'r');
+    let text;
+    try {
+        const stat = fs.fstatSync(fd);
+        if (!stat.isFile()) throw new Error(`${file} no es un archivo regular`);
+        if ((stat.mode & 0o077) !== 0 && process.env.KMS_KEK_ALLOW_LOOSE_PERMS !== 'true') {
+            throw new Error(`${file} es legible por otros usuarios (permisos ${(stat.mode & 0o777).toString(8)}): usa chmod 400`);
+        }
+        text = fs.readFileSync(fd, 'utf8').trim();
+    } finally {
+        fs.closeSync(fd);
     }
-    const text = fs.readFileSync(file, 'utf8').trim();
     const key = /^[0-9a-fA-F]{64}$/.test(text) ? Buffer.from(text, 'hex') : Buffer.from(text, 'base64');
     if (key.length !== 32) throw new Error('la KEK debe ser de 32 bytes (64 caracteres hex o base64)');
     return key;

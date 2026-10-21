@@ -1,0 +1,13 @@
+# Configuración de CodeQL (workflow security.yml). Cada exclusión está revisada y justificada: no se desactiva
+# nada "para que pase", y el resto de consultas de security-extended sigue activo.
+name: secure-server
+query-filters:
+  # El limitador de peticiones de este proyecto es propio y está en MariaDB (rate-limiter.service.js, usado por
+  # protection.middleware.js: autoProtect global + highSecurity() en login, registro, MFA y SSO). CodeQL solo
+  # reconoce librerías como express-rate-limit, así que marca como "sin límite" rutas que sí lo tienen.
+  - exclude:
+      id: js/missing-rate-limiting
+  # kms-worker.js lee VAULT_TOKEN_FILE y envía el token a VAULT_ADDR: es exactamente la función de ese código
+  # (autenticarse en Vault). Ambos valores los fija el operador por variables de entorno, no un usuario.
+  - exclude:
+      id: js/file-access-to-http
