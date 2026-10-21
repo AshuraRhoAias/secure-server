@@ -10,6 +10,16 @@ class ProtectionMiddleware {
     autoProtect() {
         return async (req, res, next) => {
             try {
+                // 0. Bypass explícito para pruebas de carga / mantenimiento.
+                //    Por defecto DESACTIVADO: en producción el bloqueo de IP y el
+                //    rate limiting dinámico siguen activos. Sólo se omiten cuando
+                //    se arranca con DISABLE_IP_BLOCKING=true (p. ej. un benchmark
+                //    de tráfico concurrido desde una sola IP).
+                if (process.env.DISABLE_IP_BLOCKING === 'true') {
+                    this.addSecurityHeaders(res);
+                    return next();
+                }
+
                 // 1. Verificar si la IP está bloqueada
                 const isBlocked = await anomalyDetection.isIPBlocked(req.ip);
                 if (isBlocked) {
