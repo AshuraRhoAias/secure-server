@@ -1843,6 +1843,491 @@
           }
         ]
       }
+    },
+    "/api/system/alerts": {
+      "get": {
+        "summary": "Alertas de seguridad automáticas (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "acknowledged",
+                "resolved"
+              ]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/evaluate": {
+      "post": {
+        "summary": "Evalúa las reglas de alerta ahora (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Resumen: creadas, actualizadas, autoresueltas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/{id}/ack": {
+      "post": {
+        "summary": "Reconoce una alerta (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reconocida"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Estado no válido"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/{id}/resolve": {
+      "post": {
+        "summary": "Resuelve una alerta (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resuelta"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Ya resuelta"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/dashboard": {
+      "get": {
+        "summary": "Panel de operación: alertas, eventos, sesiones, archivos, estado (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Foto del estado de seguridad"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/users/{id}/export": {
+      "get": {
+        "summary": "Exporta, descifrados, todos los datos de un usuario (solo admin; queda auditado)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos personales"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/users/{id}/erase": {
+      "post": {
+        "summary": "Solicita borrar los datos de un usuario (otro admin debe aprobarlo)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejecutado (ADMIN_APPROVALS_REQUIRED=1)"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "202": {
+            "description": "Pendiente de aprobación"
+          },
+          "400": {
+            "description": "Confirmación errónea"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Cuenta con privilegios"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "confirmUsername"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  },
+                  "confirmUsername": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/users/{id}/revoke-sessions": {
+      "post": {
+        "summary": "Cierra todas las sesiones de un usuario (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesiones cerradas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/sessions/revoke-all": {
+      "post": {
+        "summary": "Interruptor de emergencia: cierra TODAS las sesiones de TODOS (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sesiones cerradas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "confirm"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "enum": [
+                      "REVOKE-ALL-SESSIONS"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "summary": "Métricas Prometheus (solo admin; opcionalmente un token de servicio METRICS_TOKEN)",
+        "tags": [
+          "Observabilidad"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Texto en formato Prometheus"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
     }
   }
 }

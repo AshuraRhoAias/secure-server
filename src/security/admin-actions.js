@@ -22,4 +22,12 @@ approvals.registerAction('mfa_reset', {
     }
 });
 
+// Borrado de todos los datos de un usuario (derecho de supresión). Irreversible: dos administradores.
+approvals.registerAction('user_erase', {
+    erasesTarget: true,
+    async execute({ targetUserId }) {
+        return require('./privacy.service').eraseUser(targetUserId);
+    }
+});
+
 module.exports = approvals;

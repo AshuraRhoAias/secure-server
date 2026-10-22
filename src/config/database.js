@@ -1,6 +1,8 @@
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 const credentialBuilder = require('./credential-builder');
+const metrics = require('../observability/metrics');
+const tracing = require('../observability/tracing');
 
 // Configuración TLS hacia la base de datos (variable DB_SSL):
 //   verify     TLS y se VERIFICA el certificado del servidor (por defecto en producción)
@@ -91,7 +93,7 @@ class DatabaseConfig {
         let connection;
         try {
             connection = await this.getConnection();
-            const [results] = await connection.execute(sql, params);
+            const [results] = await this.measured(sql, () => connection.execute(sql, params));
             return [results];
         } catch (error) {
             // Se registra el código, no el SQL ni los parámetros (pueden contener datos sensibles)
@@ -102,11 +104,26 @@ class DatabaseConfig {
         }
     }
 
+    // Duración y errores por operación (select/insert/...) y un span si la traza está muestreada. Nunca se guarda el
+    // texto SQL ni los parámetros: solo la operación, de una lista cerrada.
+    async measured(sql, run) {
+        const operation = metrics.sqlOperation(sql);
+        const end = metrics.dbDuration.startTimer({ operation });
+        try {
+            return await tracing.withSpan('db.query', { 'db.system': 'mysql', 'db.operation': operation }, run);
+        } catch (error) {
+            metrics.dbErrors.inc({ operation });
+            throw error;
+        } finally {
+            end();
+        }
+    }
+
     // Varias sentencias sobre UNA misma conexión (p. ej. contador atómico + lectura)
     async withConnection(fn) {
         const connection = await this.getConnection();
         try {
-            return await fn({ query: async (sql, params = []) => [(await connection.execute(sql, params))[0]] });
+            return await fn({ query: async (sql, params = []) => [(await this.measured(sql, () => connection.execute(sql, params)))[0]] });
         } finally {
             connection.release();
         }
@@ -117,7 +134,7 @@ class DatabaseConfig {
         const connection = await this.getConnection();
         try {
             await connection.beginTransaction();
-            const result = await fn({ query: async (sql, params = []) => [(await connection.execute(sql, params))[0]] });
+            const result = await fn({ query: async (sql, params = []) => [(await this.measured(sql, () => connection.execute(sql, params)))[0]] });
             await connection.commit();
             return result;
         } catch (error) {

@@ -76,6 +76,9 @@ const secureCommunications = require('./services/secure-communications.service')
 // Importar tareas programadas
 const scheduleKeyRotation = require('./tasks/scheduleKeyRotation');
 const housekeeping = require('./tasks/securityHousekeeping');
+const alertsService = require('./security/alerts.service');
+const tracing = require('./observability/tracing');
+const metrics = require('./observability/metrics');
 
 class SecureServer {
     constructor() {
@@ -208,6 +211,10 @@ class SecureServer {
         this.configureTrustProxy();
         this.app.disable('x-powered-by');
 
+        // Observabilidad primero, para que mida y correlacione TODO (incluidos los rechazos de las capas siguientes)
+        this.app.use(tracing.middleware());
+        this.app.use(metrics.httpMiddleware());
+
         // Middlewares de seguridad básicos
         this.app.use(helmet({
             contentSecurityPolicy: {
@@ -230,7 +237,7 @@ class SecureServer {
             credentials: true,
             methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
             allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
-            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Disposition', 'Retry-After']
+            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Disposition', 'Retry-After', 'X-Request-Id']
         }));
 
         // Modo mantenimiento / claves desincronizadas: 503 a todo (ver src/maintenance/guard.js)
@@ -386,6 +393,7 @@ class SecureServer {
             console.log('========================================\n');
 
             housekeeping.start();
+            alertsService.start();
 
             // Enviar notificación de inicio (si hay canales configurados)
             this.sendStartupNotification();
@@ -432,6 +440,7 @@ class SecureServer {
             }
 
             housekeeping.stop();
+            alertsService.stop();
 
             // Cerrar servidor
             this.server.close(() => {

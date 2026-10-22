@@ -500,3 +500,29 @@ CREATE TABLE `admin_approvals` (
   KEY `idx_approvals_status` (`status`, `requested_at`),
   KEY `idx_approvals_target` (`target_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Alertas de seguridad automáticas (migración 014)
+CREATE TABLE `security_alerts` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `rule` varchar(64) NOT NULL,
+  `subject` varchar(120) NOT NULL DEFAULT 'global',
+  `dedupe_key` varchar(190) NOT NULL,
+  `severity` enum('low','medium','high','critical') NOT NULL,
+  `title` varchar(160) NOT NULL,
+  `status` enum('open','acknowledged','resolved') NOT NULL DEFAULT 'open',
+  `event_count` int(10) unsigned NOT NULL DEFAULT 1,
+  `first_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `details` text DEFAULT NULL,
+  `acknowledged_by` int(11) DEFAULT NULL,
+  `acknowledged_at` timestamp NULL DEFAULT NULL,
+  `resolved_by` int(11) DEFAULT NULL,
+  `resolved_at` timestamp NULL DEFAULT NULL,
+  `notified_at` timestamp NULL DEFAULT NULL,
+  `notify_error` varchar(120) DEFAULT NULL,
+  `active_key` varchar(190) AS (IF(`status` = 'resolved', NULL, `dedupe_key`)) STORED,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_alerts_active` (`active_key`),
+  KEY `idx_alerts_status` (`status`, `last_seen`),
+  KEY `idx_alerts_rule` (`rule`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

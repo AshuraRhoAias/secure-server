@@ -52,8 +52,10 @@ async function finish(id, row) {
     try {
         const result = await runAction(row);
         await db.query("UPDATE admin_approvals SET status = 'executed', executed_at = NOW(), result = ? WHERE id = ?", [JSON.stringify(result ?? {}), id]);
+        // Si la acción BORRA al usuario objetivo, el evento no puede seguir apuntando a él (sería el vínculo que se borró)
+        const erases = handlers.get(row.action)?.erasesTarget === true;
         await events.record({
-            type: 'ADMIN_APPROVAL_EXECUTED', severity: 'high', riskScore: 40, userId: row.target_user_id,
+            type: 'ADMIN_APPROVAL_EXECUTED', severity: 'high', riskScore: 40, userId: erases ? null : row.target_user_id,
             details: { approvalId: id, action: row.action, requestedBy: row.requested_by, approvedBy: row.approved_by }
         });
         return { status: 'executed', result: result ?? {} };

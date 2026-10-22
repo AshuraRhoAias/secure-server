@@ -9,6 +9,7 @@ const cipher = require('../../files/file-cipher');
 const storage = require('../../files/storage');
 const { receiveUpload, UploadError } = require('../../files/upload');
 const { contentDisposition } = require('../../files/file-types');
+const metrics = require('../../observability/metrics');
 
 const INLINE_CATEGORIES = new Set(['image', 'audio', 'video']); // PDF y texto SIEMPRE como descarga
 
@@ -40,6 +41,8 @@ class FilesController {
         const known = error instanceof UploadError;
         const status = known ? error.status : 500;
         const code = known ? error.code : 'UPLOAD_FAILED';
+        metrics.fileUploads.inc({ result: 'rejected' });
+        metrics.fileRejections.inc({ code: known ? String(code).slice(0, 40) : 'UPLOAD_FAILED' }); // códigos fijos del código, no de la entrada
 
         if (known) {
             await events.record({
@@ -118,6 +121,7 @@ class FilesController {
             if (upload.scannerError) {
                 await events.record({ type: 'SCANNER_UNAVAILABLE', rule: 'SCAN_SKIPPED_OPTIONAL', severity: 'medium', riskScore: 30, req, details: { fileId: row.id, error: upload.scannerError } });
             }
+            metrics.fileUploads.inc({ result: 'stored' });
             await audit.log('FILE_UPLOADED', { fileId: row.id, size: upload.size, mime: upload.mime }, { req });
 
             res.status(201).json({

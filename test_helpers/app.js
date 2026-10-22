@@ -30,8 +30,13 @@ function buildApp() {
     const { createErrorHandler } = require('../src/middleware/error.middleware');
     const { registerRoutes } = require('../src/api/routes');
 
+    const tracing = require('../src/observability/tracing');
+    const metrics = require('../src/observability/metrics');
+
     const app = express();
     app.set('trust proxy', true); // las pruebas simulan IPs distintas con X-Forwarded-For
+    app.use(tracing.middleware());
+    app.use(metrics.httpMiddleware());
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: false, limit: '1mb' }));
     app.use(protection.autoProtect());

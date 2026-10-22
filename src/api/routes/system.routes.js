@@ -62,6 +62,55 @@ router.get('/approvals',
 router.post('/approvals/:id/approve', allow('approvals:decide'), protectionMiddleware.highSecurity(), idParam, systemController.approveApproval);
 router.post('/approvals/:id/reject', allow('approvals:decide'), protectionMiddleware.highSecurity(), idParam, systemController.rejectApproval);
 
+// Alertas automáticas y panel (SOLO admin)
+router.get('/alerts',
+    allow('alerts:read'),
+    validate.query({
+        status: { type: 'enum', values: ['open', 'acknowledged', 'resolved'] },
+        severity: { type: 'enum', values: ['low', 'medium', 'high', 'critical'] },
+        before: { type: 'integer', min: 1 },
+        limit: { type: 'integer', min: 1, max: 500, default: 100 }
+    }),
+    systemController.listAlerts
+);
+router.post('/alerts/evaluate', allow('alerts:manage'), protectionMiddleware.highSecurity(), systemController.evaluateAlerts);
+router.post('/alerts/:id/ack', allow('alerts:manage'), idParam, systemController.acknowledgeAlert);
+router.post('/alerts/:id/resolve', allow('alerts:manage'), idParam, systemController.resolveAlert);
+router.get('/dashboard',
+    allow('dashboard:read'),
+    validate.query({ hours: { type: 'integer', min: 1, max: 720, default: 24 } }),
+    systemController.getDashboard
+);
+
+// Datos personales e incidentes (SOLO admin)
+router.get('/users/:id/export', allow('privacy:export'), protectionMiddleware.highSecurity(), idParam, systemController.exportUserData);
+router.post('/users/:id/erase',
+    allow('privacy:erase'),
+    protectionMiddleware.highSecurity(),
+    idParam,
+    validate.body({
+        reason: { type: 'string', required: true, min: 10, max: 255 },
+        confirmUsername: { type: 'string', required: true, min: 1, max: 64 }
+    }),
+    systemController.requestUserErase
+);
+router.post('/users/:id/revoke-sessions',
+    allow('sessions:revoke-any'),
+    protectionMiddleware.highSecurity(),
+    idParam,
+    validate.body({ reason: { type: 'string', required: true, min: 10, max: 255 } }),
+    systemController.revokeUserSessions
+);
+router.post('/sessions/revoke-all',
+    allow('sessions:revoke-any'),
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        reason: { type: 'string', required: true, min: 10, max: 255 },
+        confirm: { type: 'string', required: true, pattern: /^REVOKE-ALL-SESSIONS$/ }
+    }),
+    systemController.revokeAllSessions
+);
+
 // Operaciones sensibles: rate limit muy restrictivo (10 req/min)
 router.post('/integrity-check', allow('system:operate'), protectionMiddleware.highSecurity(), systemController.performIntegrityCheck);
 router.post('/rotate-keys', allow('system:operate'), protectionMiddleware.highSecurity(), systemController.rotateKeys); // 501: ver el controlador

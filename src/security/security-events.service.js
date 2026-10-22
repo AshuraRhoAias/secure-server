@@ -2,6 +2,8 @@ const db = require('../config/database');
 const { sqlInt } = require('../config/sql');
 const rateLimiter = require('./rate-limiter.service');
 const { normalizeIp, ipSubject } = require('./ip');
+const metrics = require('../observability/metrics');
+const tracing = require('../observability/tracing');
 
 // Tabla de ANÁLISIS de seguridad (`security_events`): una fila por cosa sospechosa que pasa.
 //
@@ -69,6 +71,11 @@ class SecurityEvents {
 
             const sev = SEVERITIES.includes(severity) ? severity : 'low';
             const act = ACTIONS.includes(action) ? action : 'logged';
+            metrics.securityEvents.inc({ type: String(type).slice(0, 64), severity: sev });
+
+            // Correlación: el traceId de la petición que originó el evento (X-Request-Id de la respuesta)
+            const traceId = req?.traceId || tracing.currentTraceId();
+            const fullDetails = traceId ? { ...(details && typeof details === 'object' && !Array.isArray(details) ? details : details == null ? {} : { value: details }), traceId } : details;
 
             await db.query(
                 `INSERT INTO security_events
@@ -89,7 +96,7 @@ class SecurityEvents {
                     status,
                     req?.headers?.['user-agent'] ? String(req.headers['user-agent']).slice(0, 255) : null,
                     address === 'unknown' ? null : countryOf(address),
-                    serializeDetails(details)
+                    serializeDetails(fullDetails)
                 ]
             );
         } catch (error) {

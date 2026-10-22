@@ -7,6 +7,7 @@ const { sqlInt, sqlFragment } = require('../config/sql');
 const events = require('./security-events.service');
 const anomalyDetection = require('./anomaly-detection.service');
 const { ipSubject } = require('./ip');
+const metrics = require('../observability/metrics');
 
 // Autenticación. Todo el estado de seguridad (intentos fallidos, bloqueos, sesiones) está en
 // MySQL (login_attempts, user_sessions, blocked_ips, security_events); no hay Map/Set en memoria.
@@ -184,6 +185,8 @@ class SecureAuthService {
 
         const { refreshToken } = await this.createSecureSession(sessionData);
         const token = await this.generateSecureToken(sessionData);
+        const method = ['otp', 'recovery', 'hwk', 'sso', 'saml'].find(m => (amr || []).includes(m)) || 'pwd';
+        metrics.sessionsCreated.inc({ method });
         await this.recordAttempt({ usernameHash, ip, userId: user.id, success: true });
 
         return {
@@ -601,7 +604,7 @@ class SecureAuthService {
         );
         const session = rows[0];
         if (!session) return this.rejectUnknownRefresh(hash, deviceInfo);
-        if (!session.live || session.is_suspicious) throw invalid();
+        if (!session.live || session.is_suspicious) { metrics.refreshes.inc({ result: 'invalid' }); throw invalid(); }
 
         const [users] = await db.query('SELECT id, username_encrypted FROM users WHERE id = ?', [session.user_id]);
         if (!users[0]) throw invalid();
@@ -618,6 +621,7 @@ class SecureAuthService {
             [this.hashToken(next), cfg.idleSeconds, cfg.idleSeconds, session.id, hash]
         );
         if (updated.affectedRows !== 1) {
+            metrics.refreshes.inc({ result: 'conflict' });
             throw new AuthError('REFRESH_CONFLICT', 'Otra petición acaba de renovar esta sesión: usa el refresh token más reciente', { status: 409 });
         }
 
@@ -629,6 +633,7 @@ class SecureAuthService {
             });
         }
 
+        metrics.refreshes.inc({ result: 'ok' });
         const amr = session.amr ? session.amr.split(',') : ['pwd'];
         const token = await this.generateSecureToken({
             userId: session.user_id, username, sessionUid: session.session_uid, riskLevel: session.risk_level, amr
@@ -652,14 +657,17 @@ class SecureAuthService {
 
         if (old && old.live) {
             if (Number(old.age) <= cfg.reuseGraceSeconds) {
+                metrics.refreshes.inc({ result: 'conflict' });
                 throw new AuthError('REFRESH_CONFLICT', 'Otra petición acaba de renovar esta sesión: usa el refresh token más reciente', { status: 409 });
             }
+            metrics.refreshes.inc({ result: 'reuse' });
             await this.revokeSession(old.user_id, old.id, 'refresh_reuse');
             await events.record({
                 type: 'REFRESH_TOKEN_REUSE', rule: 'REFRESH_REUSE', severity: 'critical', riskScore: 90, action: 'session_revoked',
                 ip: deviceInfo.ipAddress, userId: old.user_id, details: { sessionId: old.id }
             });
         }
+        if (!old) metrics.refreshes.inc({ result: 'invalid' });
         throw new AuthError('INVALID_REFRESH_TOKEN', 'Refresh token no válido o caducado: inicia sesión de nuevo');
     }
 
