@@ -13,6 +13,7 @@
 // Límite honesto: dos CUENTAS no son dos PERSONAS. Si una persona controla ambas, esto no la frena.
 
 const db = require('../config/database');
+const { sqlInt } = require('../config/sql');
 const events = require('./security-events.service');
 
 class ApprovalError extends Error {
@@ -76,9 +77,9 @@ async function request({ action, targetUserId = null, params = {}, reason, reque
     const single = !twoPersonRequired();
     const [inserted] = await db.query(
         `INSERT INTO admin_approvals (action, target_user_id, params, reason, status, requested_by, approved_by, expires_at, decided_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ${single ? 'NOW()' : 'NULL'})`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), IF(?, NOW(), NULL))`,
         [action, targetUserId, JSON.stringify(params), reason.trim().slice(0, 255), single ? 'approved' : 'pending',
-            requestedBy, single ? requestedBy : null, ttl]
+            requestedBy, single ? requestedBy : null, ttl, single ? 1 : 0]
     );
     const id = inserted.insertId;
 
@@ -141,7 +142,7 @@ async function list({ status = null, limit = 100 } = {}) {
          LEFT JOIN users t ON t.id = a.target_user_id
          LEFT JOIN users r ON r.id = a.requested_by
          WHERE (? IS NULL OR a.status = ?)
-         ORDER BY a.id DESC LIMIT ${Math.min(Math.max(Number(limit) || 100, 1), 500)}`,
+         ORDER BY a.id DESC LIMIT ${sqlInt(Math.min(Math.max(Number(limit) || 100, 1), 500), { min: 1, max: 500 })}`,
         [status, status]
     );
     const name = (value) => { try { return value ? tripleEncryptor.decrypt(value) : null; } catch { return null; } };

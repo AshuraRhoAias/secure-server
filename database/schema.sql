@@ -414,6 +414,7 @@ CREATE TABLE IF NOT EXISTS `user_files` (
   `size_bytes` bigint(20) unsigned NOT NULL,
   `sha256` char(64) NOT NULL,
   `scan_status` enum('clean','skipped','unscanned') NOT NULL DEFAULT 'unscanned',
+  `sanitize_status` enum('none','reencoded','inspected') NOT NULL DEFAULT 'none',
   `cipher_version` varchar(10) NOT NULL DEFAULT 'f1',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),

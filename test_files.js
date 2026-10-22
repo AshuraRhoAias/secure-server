@@ -15,6 +15,9 @@ const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 
 const { filesDir } = require('./test_helpers/env');
+// Esta suite prueba almacenamiento, cifrado, límites y Range con archivos sintéticos (relleno con cabecera): el
+// saneamiento de imágenes los rechazaría con razón. El saneamiento tiene su propia suite con archivos reales: test_sanitize.js
+process.env.IMAGE_SANITIZE = 'off';
 const helpers = require('./test_helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 

@@ -5,11 +5,17 @@ const cipher = require('./file-cipher');
 const storage = require('./storage');
 const { scanText } = require('../security/injection-detector');
 const av = require('./av-scanner');
+const { SanitizeStage } = require('./sanitize');
 
 // Recibe una subida multipart/form-data EN STREAMING (nunca se carga el archivo entero en memoria) y la
 // deja cifrada en un archivo temporal. Cadena por la que pasa cada byte:
 //
-//   petición → busboy → [SniffGate: tipo real + límite de tamaño] → [EncryptStream: AES-256-GCM por bloques] → disco
+//   petición → busboy → [SniffGate: tipo real + límite de tamaño] → [antivirus] → [SanitizeStage: recodifica imágenes,
+//            inspecciona PDF] → [EncryptStream: AES-256-GCM por bloques] → disco
+//
+// El antivirus ve lo que ENVIÓ el usuario, antes de sanear: un malware escondido tras una imagen salta como alerta
+// (evento + strike) en vez de desaparecer en silencio al recodificar, y un exploit conocido se descarta antes de que
+// llegue a los decodificadores nativos de imagen.
 //
 // Se rechaza (y se borra lo escrito) cuando:
 //   - no es multipart, o trae más de un archivo / un campo de archivo que no se llama "file"
@@ -17,6 +23,7 @@ const av = require('./av-scanner');
 //   - el CONTENIDO real no es un tipo permitido, o no coincide con la extensión del nombre
 //   - es ejecutable, comprimido, o texto con HTML/scripts incrustados
 //   - supera el tamaño máximo de su categoría
+//   - imagen que no decodifica, o PDF con JavaScript/adjuntos/acciones (ver sanitize.js)
 
 const SNIFF_BYTES = 4096;
 
@@ -221,20 +228,23 @@ function receiveUpload(req) {
             }
 
             const gate = new SniffGate({ filename, limits });
+            const sanitize = new SanitizeStage({ gate, UploadError });
             const encrypt = new cipher.EncryptStream(dataKey);
             const out = storage.createTempWriteStream(storageName);
-            // Antivirus (si está activo): entre la decisión de tipo y el cifrado, para que el archivo en claro nunca se guarde
+            // Antivirus (si está activo): antes del saneamiento, y siempre antes de cifrar/guardar (el archivo en claro nunca
+            // se escribe). El veredicto llega al terminar de leer, y solo entonces el saneador procesa el archivo.
             const scan = av.enabled() ? new av.ScanTee(UploadError) : null;
-            streams.push(gate, ...(scan ? [scan] : []), encrypt, out);
+            streams.push(gate, ...(scan ? [scan] : []), sanitize, encrypt, out);
 
             stream.on('limit', () => fail(new UploadError(413, 'FILE_TOO_LARGE', 'El archivo supera el tamaño máximo permitido')));
 
             filePromise = new Promise((done, failed) => {
-                const stages = scan ? [stream, gate, scan, encrypt, out] : [stream, gate, encrypt, out];
+                const stages = [stream, gate, ...(scan ? [scan] : []), sanitize, encrypt, out];
                 pipeline(...stages, (error) => {
                     if (error) return failed(error);
                     done({
                         size: encrypt.plainBytes, sha256: encrypt.sha256(), mime: gate.mime, category: gate.category,
+                        sanitizeStatus: sanitize.sanitizeStatus,
                         scanStatus: scan ? scan.scanStatus : 'unscanned', scannerError: scan?.scannerError || null
                     });
                 });

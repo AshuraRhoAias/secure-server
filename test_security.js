@@ -234,7 +234,7 @@ test('IP: IPv4 dentro de IPv6 se normaliza y IPv6 se agrupa por /64', () => {
 
 // ============================================================================ SQL: sin interpolación
 
-test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de ${...}', () => {
+test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders()/sqlFragment() dentro de ${...}', () => {
     // Excepciones justificadas: construyen identificadores (tabla/columna) a partir de constantes del
     // código (encrypted-columns.js), jamás de entrada del usuario.
     const TRUSTED = [
@@ -243,7 +243,7 @@ test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de $
         path.join('src', 'notifications') + path.sep
     ];
     const SQL_WORDS = /\b(?:SELECT\s|INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE|FROM\s+\S|WHERE\s+\S|ORDER\s+BY|LIMIT\s+[\d$])/i;
-    const SAFE = /^\s*(?:sqlInt|sqlPlaceholders)\(/;
+    const SAFE = /^\s*(?:sqlInt|sqlPlaceholders|sqlFragment)\(/;
 
     const files = [];
     (function walk(dir) {
@@ -266,6 +266,14 @@ test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de $
         }
     }
     assert.deepStrictEqual(offenders, [], 'SQL construido con interpolación (usa parámetros ? o sqlInt)');
+});
+
+test('sqlFragment: solo devuelve trozos del registro cerrado; cualquier otro nombre o tipo lanza', () => {
+    const { sqlFragment } = require('./src/config/sql');
+    assert.match(sqlFragment('liveSession'), /^revoked_at IS NULL AND expires_at > NOW\(\)/);
+    for (const bad of ['', 'x', 'liveSession; DROP TABLE users', '__proto__', 'constructor', 'toString', null, undefined, 1, {}, ['liveSession']]) {
+        assert.throws(() => sqlFragment(bad), RangeError, String(bad));
+    }
 });
 
 // ============================================================================ INTEGRACIÓN (MySQL real)
@@ -653,7 +661,8 @@ for (const [name, method, route, opts, expectedStatus, expectedRule] of REJECTED
     itDb(`ataque rechazado y registrado — ${name}`, async () => {
         const ip = testIp();
         const user = await registerAndLogin(app.base, { ip });
-        const res = await api(app.base, method, route, { ip, token: user.token, ...opts });
+        // Las firmas en el CUERPO se rechazan por defecto solo en rutas críticas; /api/notes necesita el modo 'block'
+        const res = await withEnv({ INJECTION_BODY_MODE: 'block' }, () => api(app.base, method, route, { ip, token: user.token, ...opts }));
         assert.strictEqual(res.status, expectedStatus);
         assert.strictEqual(res.body.code, 'MALICIOUS_INPUT');
 
@@ -664,6 +673,50 @@ for (const [name, method, route, opts, expectedStatus, expectedRule] of REJECTED
         assert.ok(trail[0].path && trail[0].user_agent !== undefined && trail[0].method);
     });
 }
+
+// ---------------------------------------------------------------- política por ruta (modo por defecto: 'critical')
+
+itDb("cuerpo con firmas de inyección: en rutas NO críticas (notas) se guarda como texto y se REGISTRA; no se rechaza", async () => {
+    const ip = testIp();
+    const user = await registerAndLogin(app.base, { ip });
+    const text = "SELECT * FROM users WHERE a='1' OR '1'='1' -- apuntes de la clase de SQL";
+    const created = await api(app.base, 'POST', '/api/notes', { ip, token: user.token, json: { title: 'apuntes', content: text } });
+    assert.strictEqual(created.status, 201, created.text);
+    const read = await api(app.base, 'GET', `/api/notes/${created.body.note.id}`, { ip, token: user.token });
+    assert.strictEqual(read.body.note.content, text, 'texto legítimo intacto');
+
+    const trail = (await eventsOf(ip, 'INJECTION_ATTEMPT')).filter(e => e.rule?.startsWith('SQLI'));
+    assert.ok(trail.length >= 1, 'queda registrado para analizarlo después');
+    assert.ok(trail.every(e => e.action_taken === 'logged'));
+    assert.strictEqual(await anomaly.isIPBlocked(ip), false, 'y no cuenta como strike que acabe bloqueando a quien escribe sobre SQL');
+});
+
+itDb("cuerpo con firmas de inyección: en rutas críticas (/api/auth) SÍ se rechaza", async () => {
+    const ip = testIp();
+    for (const route of ['/api/auth/login', '/api/auth/register']) {
+        const r = await api(app.base, 'POST', route, { ip, json: { username: "admin' OR '1'='1' --", password: 'x'.repeat(12), email: 'a@example.com' } });
+        assert.strictEqual(r.status, 400, `${route} -> ${r.status}`);
+        assert.strictEqual(r.body.code, 'MALICIOUS_INPUT');
+    }
+    assert.ok((await eventsOf(ip, 'INJECTION_ATTEMPT')).some(e => e.action_taken === 'rejected'));
+});
+
+itDb("INJECTION_BLOCK_PATHS cambia qué rutas son críticas; las firmas en query/cabeceras se rechazan siempre", async () => {
+    const protection = require('./src/middleware/protection.middleware');
+    assert.ok(protection.isCriticalPath('/api/auth/login', ['/api/auth']));
+    assert.ok(protection.isCriticalPath('/api/auth', ['/api/auth']));
+    assert.ok(!protection.isCriticalPath('/api/authors', ['/api/auth']), 'prefijo con frontera: /api/authors no es /api/auth');
+    assert.ok(!protection.isCriticalPath('/api/notes', ['/api/auth']));
+
+    const ip = testIp();
+    const user = await registerAndLogin(app.base, { ip });
+    const attack = { title: "' OR '1'='1", content: 'x' };
+    await withEnv({ INJECTION_BLOCK_PATHS: '/api/notes' }, async () => {
+        assert.strictEqual((await api(app.base, 'POST', '/api/notes', { ip, token: user.token, json: attack })).status, 400);
+    });
+    // Y en una ruta no crítica la query y las cabeceras siguen bloqueándose
+    assert.strictEqual((await api(app.base, 'GET', `/api/notes?x=${encodeURIComponent('1 UNION SELECT 1,2')}`, { ip: testIp(), token: user.token })).status, 403);
+});
 
 itDb('la contaminación de prototipos no deja rastro en el proceso', async () => {
     const ip = testIp();

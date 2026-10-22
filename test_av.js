@@ -12,6 +12,9 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
 const { filesDir } = require('./test_helpers/env');
+// Esta suite prueba la integración del antivirus con archivos sintéticos (relleno con cabecera): el saneamiento de
+// imágenes los rechazaría. El orden antivirus → saneamiento se prueba con una imagen real más abajo.
+process.env.IMAGE_SANITIZE = 'off';
 const helpers = require('./test_helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 const { startFakeClamd, EICAR } = require('./test_helpers/fake-clamd');
@@ -98,6 +101,28 @@ itDb('required: un archivo limpio se escanea ENTERO (mismos bytes y hash) y qued
     assert.strictEqual(listed.body.files.find(f => f.id === res.body.file.id).scanStatus, 'clean');
     const dl = await api(app.base, 'GET', `/api/files/${res.body.file.id}/download`, { token: alice.token, ip: ipA });
     assert.ok(dl.buffer.equals(data));
+});
+
+itDb('el antivirus ve el archivo ORIGINAL: un EICAR escondido tras una imagen real salta como malware, no se pierde al recodificar', async () => {
+    const sharp = require('sharp');
+    const photo = await sharp({ create: { width: 30, height: 30, channels: 3, background: '#468' } }).jpeg().toBuffer();
+    const user = await registerAndLogin(app.base, { ip: testIp() });
+    const ip = testIp();
+    viaFake('required');
+    process.env.IMAGE_SANITIZE = 'on';
+    try {
+        const before = await rows();
+        const res = await upload(bytes(photo, EICAR), 'foto.jpg', user, ip);
+        assert.strictEqual(res.status, 422, res.text);
+        assert.strictEqual(res.body.code, 'MALWARE_DETECTED', 'lo detecta el antivirus, no se limpia en silencio');
+        assert.strictEqual(await rows(), before);
+        assert.strictEqual((await event(ip, 'MALWARE_Eicar-Test-Signature')).length, 1);
+
+        // sin el EICAR: pasa por el antivirus y después se recodifica
+        const ok = await upload(photo, 'foto.jpg', user, ip);
+        assert.strictEqual(ok.status, 201, ok.text);
+        assert.deepStrictEqual([ok.body.file.scanStatus, ok.body.file.sanitizeStatus], ['clean', 'reencoded']);
+    } finally { process.env.IMAGE_SANITIZE = 'off'; }
 });
 
 itDb('malware (EICAR): rechazo 422, sin fila ni archivos, evento CRÍTICO y strike', async () => {

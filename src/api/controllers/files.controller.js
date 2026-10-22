@@ -30,6 +30,7 @@ class FilesController {
             size: Number(row.size_bytes),
             sha256: row.sha256,
             scanStatus: row.scan_status,
+            sanitizeStatus: row.sanitize_status,
             createdAt: row.created_at
         };
     }
@@ -93,8 +94,8 @@ class FilesController {
 
                 const [result] = await tx.query(
                     `INSERT INTO user_files
-                        (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         req.user.id,
                         upload.storageName,
@@ -104,7 +105,8 @@ class FilesController {
                         upload.category,
                         upload.size,
                         upload.sha256,
-                        upload.scanStatus
+                        upload.scanStatus,
+                        upload.sanitizeStatus
                     ]
                 );
 
@@ -122,7 +124,7 @@ class FilesController {
                 success: true,
                 file: {
                     id: Number(row.id), name: upload.filename, mimeType: upload.mime, category: upload.category,
-                    size: upload.size, sha256: upload.sha256, scanStatus: upload.scanStatus
+                    size: upload.size, sha256: upload.sha256, scanStatus: upload.scanStatus, sanitizeStatus: upload.sanitizeStatus
                 }
             });
         } catch (error) {
@@ -138,7 +140,7 @@ class FilesController {
     async list(req, res) {
         const { limit, before, category } = req.validated.query;
         const [rows] = await db.query(
-            `SELECT id, filename_encrypted, mime_type, category, size_bytes, sha256, scan_status, created_at
+            `SELECT id, filename_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status, created_at
              FROM user_files
              WHERE user_id = ? AND (? IS NULL OR category = ?) AND (? IS NULL OR id < ?)
              ORDER BY id DESC
@@ -157,7 +159,7 @@ class FilesController {
 
     async findOwned(req) {
         const [rows] = await db.query(
-            `SELECT id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status, created_at
+            `SELECT id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status, created_at
              FROM user_files WHERE id = ? AND user_id = ?`,
             [req.params.id, req.user.id]
         );

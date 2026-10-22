@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const geoip = require('geoip-lite');
 const credentialBuilder = require('../config/credential-builder');
-const { sqlInt } = require('../config/sql');
+const { sqlInt, sqlFragment } = require('../config/sql');
 const events = require('./security-events.service');
 const anomalyDetection = require('./anomaly-detection.service');
 const { ipSubject } = require('./ip');
@@ -544,11 +544,6 @@ class SecureAuthService {
         return { refreshToken };
     }
 
-    // Condición de sesión viva, siempre la misma: no revocada, no caducada por inactividad ni por el tope absoluto
-    static get LIVE_SESSION() {
-        return 'revoked_at IS NULL AND expires_at > NOW() AND (absolute_expires_at IS NULL OR absolute_expires_at > NOW())';
-    }
-
     async validateToken(token) {
         try {
             // Algoritmo fijado: un token firmado con otro algoritmo (o "none") se rechaza
@@ -556,12 +551,11 @@ class SecureAuthService {
             if (decoded.typ) throw new Error('Token no válido como sesión'); // los retos de MFA no son sesiones
 
             const db = require('../config/database');
-            const live = SecureAuthService.LIVE_SESSION;
             const [sessions] = decoded.v === 2
                 ? await db.query(`SELECT id, user_id, risk_level, is_suspicious, last_used_at < DATE_SUB(NOW(), INTERVAL 60 SECOND) AS stale
-                                  FROM user_sessions WHERE session_uid = ? AND ${live}`, [String(decoded.sessionId)])
+                                  FROM user_sessions WHERE session_uid = ? AND ${sqlFragment('liveSession')}`, [String(decoded.sessionId)])
                 : await db.query(`SELECT id, user_id, risk_level, is_suspicious, 0 AS stale
-                                  FROM user_sessions WHERE jwt_token_hash = ? AND ${live}`, [this.hashToken(token)]);
+                                  FROM user_sessions WHERE jwt_token_hash = ? AND ${sqlFragment('liveSession')}`, [this.hashToken(token)]);
 
             const session = sessions[0];
             // La sesión debe existir Y pertenecer al usuario que dice el token
@@ -601,7 +595,7 @@ class SecureAuthService {
 
         const [rows] = await db.query(
             `SELECT id, user_id, session_uid, risk_level, amr, ip_address, is_suspicious, absolute_expires_at,
-                    (${SecureAuthService.LIVE_SESSION}) AS live
+                    (${sqlFragment('liveSession')}) AS live
              FROM user_sessions WHERE refresh_hash = ?`,
             [hash]
         );
@@ -650,7 +644,7 @@ class SecureAuthService {
         const db = require('../config/database');
         const cfg = this.sessionConfig;
         const [rows] = await db.query(
-            `SELECT id, user_id, TIMESTAMPDIFF(SECOND, refreshed_at, NOW()) AS age, (${SecureAuthService.LIVE_SESSION}) AS live
+            `SELECT id, user_id, TIMESTAMPDIFF(SECOND, refreshed_at, NOW()) AS age, (${sqlFragment('liveSession')}) AS live
              FROM user_sessions WHERE prev_refresh_hash = ?`,
             [hash]
         );
@@ -675,7 +669,7 @@ class SecureAuthService {
         const db = require('../config/database');
         const [result] = await db.query(
             `UPDATE user_sessions SET expires_at = NOW(), revoked_at = NOW(), revoked_reason = ?
-             WHERE id = ? AND user_id = ? AND ${SecureAuthService.LIVE_SESSION}`,
+             WHERE id = ? AND user_id = ? AND ${sqlFragment('liveSession')}`,
             [reason, sqlInt(sessionId, { min: 1, max: 2 ** 31 - 1 }), userId]
         );
         return result.affectedRows;
@@ -687,7 +681,7 @@ class SecureAuthService {
         const except = exceptSessionId == null ? null : Number(exceptSessionId);
         const [result] = await db.query(
             `UPDATE user_sessions SET expires_at = NOW(), revoked_at = NOW(), revoked_reason = ?
-             WHERE user_id = ? AND ${SecureAuthService.LIVE_SESSION} AND (? IS NULL OR id <> ?)`,
+             WHERE user_id = ? AND ${sqlFragment('liveSession')} AND (? IS NULL OR id <> ?)`,
             [reason, userId, except, except]
         );
         return result.affectedRows;
@@ -697,7 +691,7 @@ class SecureAuthService {
         const db = require('../config/database');
         const [rows] = await db.query(
             `SELECT id, ip_address, user_agent, location_country, risk_level, amr, created_at, last_used_at, expires_at, absolute_expires_at
-             FROM user_sessions WHERE user_id = ? AND ${SecureAuthService.LIVE_SESSION} ORDER BY id DESC LIMIT 100`,
+             FROM user_sessions WHERE user_id = ? AND ${sqlFragment('liveSession')} ORDER BY id DESC LIMIT 100`,
             [userId]
         );
         return rows.map(row => ({

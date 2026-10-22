@@ -11,6 +11,8 @@ const os = require('os');
 const path = require('path');
 
 const { filesDir } = require('./test_helpers/env');
+// Archivos sintéticos (relleno con cabecera): se prueba la copia, no el saneamiento de imágenes (ver test_sanitize.js)
+process.env.IMAGE_SANITIZE = 'off';
 const helpers = require('./test_helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
