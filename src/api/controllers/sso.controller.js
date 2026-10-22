@@ -53,15 +53,18 @@ class SsoController {
             // Aplicación web: se redirige a una URL FIJA (de la configuración, nunca de la petición) con el token en el fragmento
             if (process.env.SSO_POST_LOGIN_URL) {
                 const target = new URL(process.env.SSO_POST_LOGIN_URL);
-                target.hash = new URLSearchParams({ token: result.token, expiresAt: result.expiresAt.toISOString() }).toString();
+                target.hash = new URLSearchParams({
+                    token: result.token, refreshToken: result.refreshToken, expiresAt: result.expiresAt.toISOString()
+                }).toString();
                 res.set('Cache-Control', 'no-store');
                 return res.redirect(302, target.toString());
             }
 
             res.set('Cache-Control', 'no-store');
             res.json({
-                success: true, message: 'Autenticación exitosa', token: result.token, expiresAt: result.expiresAt,
-                riskLevel: result.riskLevel, authMethods: result.amr
+                success: true, message: 'Autenticación exitosa', token: result.token, refreshToken: result.refreshToken,
+                expiresAt: result.expiresAt, expiresIn: result.expiresIn, refreshExpiresAt: result.refreshExpiresAt,
+                sessionExpiresAt: result.sessionExpiresAt, riskLevel: result.riskLevel, authMethods: result.amr
             });
         } catch (error) {
             await this.recordFailure(req, error);

@@ -189,12 +189,78 @@ class AuthController {
         res.json({
             success: true,
             message: 'Autenticación exitosa',
-            token: authResult.token,
-            expiresAt: authResult.expiresAt,
+            ...this.tokenFields(authResult),
             riskLevel: authResult.riskLevel,
             authMethods: authResult.amr,
             encryptionVersion: this.getCurrentEncryptionVersion()
         });
+    }
+
+    // token = JWT de acceso (corto); refreshToken = para pedir otro sin volver a iniciar sesión (POST /api/auth/refresh)
+    tokenFields(result) {
+        return {
+            token: result.token,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt,
+            expiresIn: result.expiresIn,
+            refreshExpiresAt: result.refreshExpiresAt,
+            sessionExpiresAt: result.sessionExpiresAt
+        };
+    }
+
+    // Renueva el token de acceso con el refresh token (que rota). Sin sesión previa: el refresh ES la credencial.
+    async refresh(req, res) {
+        const ip = normalizeIp(req.ip);
+        try {
+            const result = await secureAuthService.refreshSession(req.body.refreshToken, this.deviceContext(req, ip));
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, ...this.tokenFields(result), authMethods: result.amr, riskLevel: result.riskLevel });
+        } catch (error) {
+            if (error instanceof AuthError) {
+                res.set('Cache-Control', 'no-store');
+                return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+            }
+            console.error('❌ Error renovando sesión:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    // Sesiones abiertas del usuario (dispositivo, país, último uso) para que reconozca las que no son suyas
+    async listSessions(req, res) {
+        try {
+            const sessions = await secureAuthService.listSessions(req.user.id, req.user.sessionId);
+            res.json({ success: true, sessions });
+        } catch (error) {
+            console.error('❌ Error listando sesiones:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    async revokeSession(req, res) {
+        try {
+            const closed = await secureAuthService.revokeSession(req.user.id, req.validated.params.id, 'user_revoked');
+            if (!closed) return res.status(404).json({ success: false, message: 'Sesión no encontrada', code: 'NOT_FOUND' });
+            await events.record({ type: 'SESSION_REVOKED', severity: 'info', req, userId: req.user.id, details: { sessionId: req.validated.params.id } });
+            res.json({ success: true, message: 'Sesión cerrada' });
+        } catch (error) {
+            console.error('❌ Error cerrando la sesión:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    // "Cerrar todas las sesiones": la actual incluida, salvo que se pida conservarla con { keepCurrent: true }
+    async logoutAll(req, res) {
+        try {
+            const keepCurrent = req.body?.keepCurrent === true;
+            const closed = await secureAuthService.revokeAllSessions(req.user.id, {
+                exceptSessionId: keepCurrent ? req.user.sessionId : null, reason: 'user_logout_all'
+            });
+            await events.record({ type: 'LOGOUT_ALL', severity: 'info', req, userId: req.user.id, details: { closed, keepCurrent } });
+            res.json({ success: true, message: `Se cerraron ${closed} sesión(es)`, closed, keptCurrent: keepCurrent });
+        } catch (error) {
+            console.error('❌ Error cerrando todas las sesiones:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
     }
 
     async failedAuth(res, error, { usernameHash, ip, where }) {
@@ -381,19 +447,7 @@ class AuthController {
 
     async logout(req, res) {
         try {
-            // Invalidar sesión
-            const db = require('../../config/database');
-            const authHeader = req.headers.authorization;
-
-            if (authHeader && authHeader.startsWith('Bearer ')) {
-                const token = authHeader.substring(7);
-                const tokenHash = secureAuthService.hashToken(token);
-
-                await db.query(
-                    'UPDATE user_sessions SET expires_at = NOW() WHERE jwt_token_hash = ?',
-                    [tokenHash]
-                );
-            }
+            await secureAuthService.revokeSession(req.user.id, req.user.sessionId, 'user_logout');
 
             // Log del logout
             await this.logUserAction('USER_LOGOUT', {

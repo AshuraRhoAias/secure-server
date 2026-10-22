@@ -42,6 +42,15 @@ router.post('/login/mfa',
     authController.loginMfa
 );
 
+// Renovar el token de acceso: la credencial es el refresh token (opaco, 256 bits, de un solo uso)
+router.post('/refresh',
+    validate.body({
+        refreshToken: { type: 'string', required: true, max: 100, pattern: /^rt_[A-Za-z0-9_-]{43}$/ },
+        deviceInfo: { type: 'object' }
+    }),
+    authController.refresh
+);
+
 // Rutas protegidas (requieren autenticación)
 router.use(authMiddleware.verifyJWT);
 
@@ -58,6 +67,9 @@ router.post('/mfa/disable', protectionMiddleware.highSecurity(), validate.body(r
 router.post('/mfa/recovery-codes', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaRegenerateCodes);
 
 router.post('/logout', authController.logout);
+router.post('/logout-all', validate.body({ keepCurrent: { type: 'boolean' } }), authController.logoutAll);
+router.get('/sessions', authController.listSessions);
+router.delete('/sessions/:id', validate.params({ id: { type: 'integer', required: true, min: 1 } }), authController.revokeSession);
 router.get('/profile', authController.getProfile);
 
 // Mezcla rutas públicas (register/login) y protegidas (logout/profile): gestiona su propia protección

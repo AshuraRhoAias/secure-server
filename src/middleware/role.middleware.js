@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const permissions = require('../security/permissions');
 
 // Control de acceso por rol. Debe usarse DESPUÉS de authMiddleware.verifyJWT.
 //
@@ -6,8 +7,20 @@ const db = require('../config/database');
 //
 // El rol se lee de la base de datos en cada petición (no del JWT), así que
 // quitar un rol a un usuario surte efecto de inmediato.
+// Roles y permisos: src/security/permissions.js.
 class RoleMiddleware {
+    // Compatibilidad: acceso por rol. Para rutas nuevas, mejor requirePermission().
     requireRole(...allowedRoles) {
+        return this.guard((role) => allowedRoles.includes(role));
+    }
+
+    // Acceso por permiso (ver src/security/permissions.js). Un permiso desconocido lanza AL DEFINIR la ruta.
+    requirePermission(permission) {
+        permissions.can('user', permission); // valida el nombre ya
+        return this.guard((role) => permissions.can(role, permission));
+    }
+
+    guard(isAllowed) {
         return async (req, res, next) => {
             try {
                 if (!req.user?.id) {
@@ -21,7 +34,7 @@ class RoleMiddleware {
                 const [rows] = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
                 const role = rows[0]?.role;
 
-                if (!role || !allowedRoles.includes(role)) {
+                if (!role || !permissions.isKnownRole(role) || !isAllowed(role)) {
                     return res.status(403).json({
                         success: false,
                         message: 'No tienes permisos para esta operación',
@@ -29,14 +42,14 @@ class RoleMiddleware {
                     });
                 }
 
-                // Con MFA_REQUIRED_FOR_ADMINS=true un administrador solo opera si inició sesión con segundo
-                // factor (otp/recovery) o por SSO (el proveedor de identidad ya lo gestiona)
-                if (role === 'admin' && process.env.MFA_REQUIRED_FOR_ADMINS === 'true') {
+                // Con MFA_REQUIRED_FOR_ADMINS=true cualquier rol con privilegios solo opera si inició sesión con
+                // segundo factor (otp/recovery/passkey) o por SSO/SAML (el proveedor de identidad ya lo gestiona)
+                if (permissions.isPrivileged(role) && process.env.MFA_REQUIRED_FOR_ADMINS === 'true') {
                     const amr = req.user.amr || [];
-                    if (!amr.some(method => ['otp', 'recovery', 'sso'].includes(method))) {
+                    if (!amr.some(method => ['otp', 'recovery', 'hwk', 'sso', 'saml'].includes(method))) {
                         return res.status(403).json({
                             success: false,
-                            message: 'Los administradores necesitan autenticación en dos pasos',
+                            message: 'Los roles con privilegios necesitan autenticación en dos pasos',
                             code: 'MFA_REQUIRED'
                         });
                     }

@@ -272,7 +272,9 @@ itDb('desactivar y regenerar códigos exigen contraseña Y segundo factor (una s
 
 itDb('admins: con MFA_REQUIRED_FOR_ADMINS solo operan con segundo factor; y un admin puede reiniciar el MFA de otro', async () => {
     const saved = process.env.MFA_REQUIRED_FOR_ADMINS;
+    const savedApprovals = process.env.ADMIN_APPROVALS_REQUIRED;
     process.env.MFA_REQUIRED_FOR_ADMINS = 'true';
+    process.env.ADMIN_APPROVALS_REQUIRED = '1'; // la aprobación de dos admins se prueba en test_rbac.js
     try {
         const ip = testIp();
         const adminPwdOnly = await registerAndLogin(app.base, { ip });
@@ -288,13 +290,14 @@ itDb('admins: con MFA_REQUIRED_FOR_ADMINS solo operan con segundo factor; y un a
 
         // dispositivo perdido y sin códigos: el admin reinicia el MFA de otro usuario
         const lost = await userWithMfa();
-        const reset = await api(app.base, 'POST', '/api/system/accounts/mfa-reset', { ip: admin.ip, token: session, json: { username: lost.username } });
+        const reset = await api(app.base, 'POST', '/api/system/accounts/mfa-reset', { ip: admin.ip, token: session, json: { username: lost.username, reason: 'Dispositivo perdido y sin códigos de recuperación' } });
         assert.strictEqual(reset.status, 200);
         assert.strictEqual((await loginStep1(lost)).body.mfaRequired, undefined);
-        assert.strictEqual((await api(app.base, 'POST', '/api/system/accounts/mfa-reset', { ip: admin.ip, token: session, json: { username: 'no-existe-' + Date.now() } })).status, 404);
+        assert.strictEqual((await api(app.base, 'POST', '/api/system/accounts/mfa-reset', { ip: admin.ip, token: session, json: { username: 'no-existe-' + Date.now(), reason: 'Dispositivo perdido y sin códigos de recuperación' } })).status, 404);
         assert.strictEqual((await api(app.base, 'POST', '/api/system/accounts/mfa-reset', { ip: lost.ip, token: (await loginStep1(lost).then(r => registerAndLogin(app.base, { ip: lost.ip }))).token, json: { username: lost.username } })).status, 403);
     } finally {
         if (saved === undefined) delete process.env.MFA_REQUIRED_FOR_ADMINS; else process.env.MFA_REQUIRED_FOR_ADMINS = saved;
+        if (savedApprovals === undefined) delete process.env.ADMIN_APPROVALS_REQUIRED; else process.env.ADMIN_APPROVALS_REQUIRED = savedApprovals;
     }
 });
 

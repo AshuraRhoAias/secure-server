@@ -94,7 +94,7 @@ async function registerAndLogin(base, { ip, username = uniqueName(), password = 
     if (reg.status !== 201) throw new Error(`registro falló: ${reg.status} ${reg.text}`);
     const login = await api(base, 'POST', '/api/auth/login', { ip, json: { username, password } });
     if (login.status !== 200) throw new Error(`login falló: ${login.status} ${login.text}`);
-    return { username, password, token: login.body.token, userId: reg.body.userId };
+    return { username, password, token: login.body.token, refreshToken: login.body.refreshToken, userId: reg.body.userId };
 }
 
 // IP de documentación (RFC 5737) distinta por prueba: así cada prueba tiene sus propios contadores

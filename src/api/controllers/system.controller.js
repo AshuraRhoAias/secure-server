@@ -6,6 +6,7 @@ const audit = require('../../services/audit.service');
 const { getNetworkPosture } = require('../../security/network-hardening.check');
 const securityEvents = require('../../security/security-events.service');
 const { sqlInt } = require('../../config/sql');
+const approvals = require('../../security/admin-actions');
 
 class SystemController {
     constructor() {
@@ -235,7 +236,8 @@ class SystemController {
         }
     }
 
-    // Dispositivo perdido y sin códigos de recuperación: un administrador desactiva el MFA de ese usuario
+    // Dispositivo perdido y sin códigos de recuperación. Un administrador SOLICITA el reinicio y otro lo APRUEBA
+    // (ADMIN_APPROVALS_REQUIRED=1 lo ejecuta al momento). Ver security/admin-approvals.service.js
     async resetMfa(req, res) {
         try {
             const db = require('../../config/database');
@@ -243,14 +245,56 @@ class SystemController {
             const [rows] = await db.query('SELECT id FROM users WHERE username_hash = ?', [secureAuth.generateUsernameHash(req.body.username)]);
             if (rows.length === 0) return res.status(404).json({ success: false, message: 'Usuario no encontrado', code: 'NOT_FOUND' });
 
-            await require('../../security/mfa.service').disable(rows[0].id);
-            await audit.log('MFA_RESET_BY_ADMIN', { userId: rows[0].id }, { req, severity: 'high', riskScore: 40 });
-            await securityEvents.record({ type: 'MFA_RESET_BY_ADMIN', severity: 'high', riskScore: 40, req, userId: rows[0].id, details: { by: req.user.id } });
-            res.json({ success: true, message: 'MFA desactivado para ese usuario' });
+            const outcome = await approvals.request({
+                action: 'mfa_reset', targetUserId: rows[0].id, reason: req.body.reason, requestedBy: req.user.id
+            });
+            await audit.log('MFA_RESET_REQUESTED', { userId: rows[0].id, approvalId: outcome.id, status: outcome.status }, { req, severity: 'high', riskScore: 40 });
+
+            if (outcome.status === 'pending') {
+                return res.status(202).json({
+                    success: true, approvalId: outcome.id, status: 'pending',
+                    message: 'Solicitud creada: otro administrador debe aprobarla con POST /api/system/approvals/:id/approve'
+                });
+            }
+            res.json({ success: true, approvalId: outcome.id, status: outcome.status, message: 'MFA desactivado para ese usuario' });
         } catch (error) {
-            console.error('❌ Error reiniciando MFA:', error.code || error.message);
-            res.status(500).json({ success: false, message: 'Error reiniciando el MFA' });
+            this.approvalFailure(res, error, 'Error reiniciando el MFA');
         }
+    }
+
+    async listApprovals(req, res) {
+        try {
+            const list = await approvals.list({ status: req.validated?.query?.status || null });
+            res.json({ success: true, approvals: list });
+        } catch (error) {
+            this.approvalFailure(res, error, 'Error listando solicitudes');
+        }
+    }
+
+    async approveApproval(req, res) {
+        try {
+            const outcome = await approvals.approve(req.validated.params.id, req.user.id);
+            await audit.log('ADMIN_APPROVAL_APPROVED', { approvalId: outcome.id, action: outcome.action }, { req, severity: 'high', riskScore: 30 });
+            res.json({ success: true, ...outcome });
+        } catch (error) {
+            this.approvalFailure(res, error, 'Error aprobando la solicitud');
+        }
+    }
+
+    async rejectApproval(req, res) {
+        try {
+            res.json({ success: true, ...(await approvals.reject(req.validated.params.id, req.user.id)) });
+        } catch (error) {
+            this.approvalFailure(res, error, 'Error rechazando la solicitud');
+        }
+    }
+
+    approvalFailure(res, error, fallback) {
+        if (error instanceof approvals.ApprovalError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error(`❌ ${fallback}:`, error.code || error.message);
+        res.status(500).json({ success: false, message: fallback });
     }
 
     async getBlockedIPs(req, res) {

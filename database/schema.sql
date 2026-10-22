@@ -136,7 +136,7 @@ CREATE TABLE `users` (
   `username_encrypted` longtext DEFAULT NULL,
   `risk_level_encrypted` longtext DEFAULT NULL,
   `encrypted_metadata` longtext DEFAULT NULL,
-  `role` enum('user','admin') NOT NULL DEFAULT 'user',
+  `role` enum('user','auditor','operator','admin') NOT NULL DEFAULT 'user',
   `mfa_secret_encrypted` longtext DEFAULT NULL,
   `mfa_enabled` tinyint(1) NOT NULL DEFAULT 0,
   `mfa_last_step` bigint(20) unsigned DEFAULT NULL
@@ -152,13 +152,22 @@ CREATE TABLE `user_sessions` (
   `id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
   `jwt_token_hash` varchar(255) NOT NULL,
+  `session_uid` char(36) DEFAULT NULL,
+  `refresh_hash` char(64) DEFAULT NULL,
+  `prev_refresh_hash` char(64) DEFAULT NULL,
+  `refreshed_at` timestamp NULL DEFAULT NULL,
   `ip_address` varchar(45) DEFAULT NULL,
   `user_agent` text DEFAULT NULL,
   `device_fingerprint` varchar(255) DEFAULT NULL,
   `risk_level` enum('low','medium','high') DEFAULT 'low',
   `location_country` varchar(2) DEFAULT NULL,
   `is_suspicious` tinyint(1) DEFAULT 0,
-  `expires_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `absolute_expires_at` timestamp NULL DEFAULT NULL,
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  `amr` varchar(60) DEFAULT NULL,
+  `revoked_at` timestamp NULL DEFAULT NULL,
+  `revoked_reason` varchar(40) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -221,7 +230,10 @@ ALTER TABLE `user_sessions`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_sessions_user_id` (`user_id`),
   ADD KEY `idx_sessions_expires` (`expires_at`),
-  ADD KEY `idx_sessions_suspicious` (`is_suspicious`);
+  ADD KEY `idx_sessions_suspicious` (`is_suspicious`),
+  ADD UNIQUE KEY `uq_sessions_uid` (`session_uid`),
+  ADD KEY `idx_sessions_refresh` (`refresh_hash`),
+  ADD KEY `idx_sessions_prev_refresh` (`prev_refresh_hash`);
 
 --
 -- AUTO_INCREMENT de las tablas volcadas
@@ -467,3 +479,23 @@ COMMIT;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
+-- Aprobación de dos administradores (migración 012)
+CREATE TABLE `admin_approvals` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `target_user_id` int(11) DEFAULT NULL,
+  `params` text DEFAULT NULL,
+  `reason` varchar(255) NOT NULL,
+  `status` enum('pending','approved','executed','failed','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  `requested_by` int(11) NOT NULL,
+  `approved_by` int(11) DEFAULT NULL,
+  `requested_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `decided_at` timestamp NULL DEFAULT NULL,
+  `executed_at` timestamp NULL DEFAULT NULL,
+  `result` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_approvals_status` (`status`, `requested_at`),
+  KEY `idx_approvals_target` (`target_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

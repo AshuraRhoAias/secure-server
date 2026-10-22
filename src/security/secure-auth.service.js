@@ -26,6 +26,12 @@ const intEnv = (name, fallback) => {
     return Number.isInteger(n) && n > 0 ? n : fallback;
 };
 
+// Número positivo (admite decimales: ACCESS_TOKEN_MINUTES=0.5 son 30 s)
+const numEnv = (name, fallback) => {
+    const n = Number(process.env[name]);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
 const MFA_CHALLENGE_SECONDS = 5 * 60;
 
 // Hash bcrypt de una cadena aleatoria desechada, para igualar el tiempo cuando el usuario no existe
@@ -51,8 +57,19 @@ class SecureAuthService {
         };
     }
 
-    get sessionTtlHours() {
-        return intEnv('SESSION_TTL_HOURS', 24 * 5);
+    // Sesiones: JWT de acceso CORTO + refresh token opaco que rota en cada uso.
+    //   ACCESS_TOKEN_MINUTES (15)     vida del JWT de acceso: lo que puede robar quien lea una petición
+    //   REFRESH_IDLE_DAYS (7)         sin renovar durante este tiempo, la sesión caduca (se desliza con cada uso)
+    //   SESSION_ABSOLUTE_DAYS (30)    tope: pasado este tiempo hay que iniciar sesión de nuevo, se renueve o no
+    //   REFRESH_REUSE_GRACE_SECONDS   dos pestañas que renuevan a la vez no son un robo (409, sin revocar)
+    get sessionConfig() {
+        const absoluteSeconds = Math.round(numEnv('SESSION_ABSOLUTE_DAYS', 30) * 86400);
+        return {
+            accessSeconds: Math.max(1, Math.round(numEnv('ACCESS_TOKEN_MINUTES', 15) * 60)),
+            idleSeconds: Math.min(Math.round(numEnv('REFRESH_IDLE_DAYS', 7) * 86400), absoluteSeconds),
+            absoluteSeconds,
+            reuseGraceSeconds: intEnv('REFRESH_REUSE_GRACE_SECONDS', 10)
+        };
     }
 
     // Paso 1 del login: usuario y contraseña. Si el usuario tiene MFA, NO se crea sesión: se devuelve un
@@ -146,7 +163,7 @@ class SecureAuthService {
         await this.checkIpFailures(ip);
     }
 
-    // Crea la sesión y el token. `amr` dice CÓMO se autenticó (pwd, otp, recovery, sso): el middleware de
+    // Crea la sesión y los tokens. `amr` dice CÓMO se autenticó (pwd, otp, recovery, sso): el middleware de
     // roles puede exigir otp para administradores.
     async completeLogin({ user, usernameHash, deviceInfo, amr }) {
         const ip = deviceInfo.ipAddress;
@@ -161,21 +178,36 @@ class SecureAuthService {
             userAgent: deviceInfo.userAgent,
             riskLevel: risk.level,
             amr,
+            sessionUid: crypto.randomUUID(),
             createdAt: Date.now()
         };
 
+        const { refreshToken } = await this.createSecureSession(sessionData);
         const token = await this.generateSecureToken(sessionData);
-        await this.createSecureSession(token, sessionData);
         await this.recordAttempt({ usernameHash, ip, userId: user.id, success: true });
 
         return {
             success: true,
             userId: user.id,
-            token,
             amr,
-            expiresAt: new Date(Date.now() + this.sessionTtlHours * 3600 * 1000),
             riskLevel: risk.level,
-            requiresVerification: false
+            requiresVerification: false,
+            ...this.tokenResponse({ token, refreshToken })
+        };
+    }
+
+    // Lo que el cliente necesita saber de los tokens (login y refresh devuelven lo mismo)
+    tokenResponse({ token, refreshToken, absoluteExpiresAt = null }) {
+        const cfg = this.sessionConfig;
+        const now = Date.now();
+        const absolute = absoluteExpiresAt ? new Date(absoluteExpiresAt) : new Date(now + cfg.absoluteSeconds * 1000);
+        return {
+            token,
+            refreshToken,
+            expiresIn: cfg.accessSeconds,
+            expiresAt: new Date(now + cfg.accessSeconds * 1000),
+            refreshExpiresAt: new Date(Math.min(now + cfg.idleSeconds * 1000, absolute.getTime())),
+            sessionExpiresAt: absolute
         };
     }
 
@@ -461,40 +493,60 @@ class SecureAuthService {
 
     // ------------------------------------------------------------------ tokens y sesiones
 
+    // JWT de acceso: corto, y ligado a su sesión (sessionId = session_uid de la fila). `v: 2` lo distingue de los
+    // tokens largos anteriores, que se siguen aceptando hasta que caduquen (se buscan por su hash).
     async generateSecureToken(sessionData) {
         const payload = {
             userId: sessionData.userId,
             username: sessionData.username,
-            sessionId: crypto.randomUUID(),
+            sessionId: sessionData.sessionUid,
             riskLevel: sessionData.riskLevel,
-            amr: sessionData.amr || ['pwd']
+            amr: sessionData.amr || ['pwd'],
+            v: 2
         };
 
         return jwt.sign(payload, credentialBuilder.generateJWTSecret(), {
             algorithm: 'HS256',
-            expiresIn: `${this.sessionTtlHours}h`
+            expiresIn: this.sessionConfig.accessSeconds
         });
     }
 
-    async createSecureSession(token, sessionData) {
+    newRefreshToken() {
+        return `rt_${crypto.randomBytes(32).toString('base64url')}`; // 256 bits: no se puede adivinar
+    }
+
+    async createSecureSession(sessionData) {
         const db = require('../config/database');
         const geo = geoip.lookup(sessionData.ipAddress);
+        const cfg = this.sessionConfig;
+        const refreshToken = this.newRefreshToken();
 
         await db.query(
             `INSERT INTO user_sessions
-                (user_id, jwt_token_hash, ip_address, user_agent, device_fingerprint, risk_level, location_country, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR))`,
+                (user_id, jwt_token_hash, session_uid, refresh_hash, ip_address, user_agent, device_fingerprint, risk_level,
+                 location_country, amr, expires_at, absolute_expires_at, last_used_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), DATE_ADD(NOW(), INTERVAL ? SECOND), NOW())`,
             [
                 sessionData.userId,
-                this.hashToken(token),
+                this.hashToken(sessionData.sessionUid),   // la columna es NOT NULL: ya no hay un token largo que hashear
+                sessionData.sessionUid,
+                this.hashToken(refreshToken),
                 String(sessionData.ipAddress || '').slice(0, 45),
                 String(sessionData.userAgent || 'Unknown').slice(0, 500),
                 sessionData.deviceFingerprint,
                 sessionData.riskLevel,
                 geo ? geo.country : null,
-                this.sessionTtlHours
+                (sessionData.amr || ['pwd']).join(',').slice(0, 60),
+                cfg.idleSeconds,
+                cfg.absoluteSeconds
             ]
         );
+        return { refreshToken };
+    }
+
+    // Condición de sesión viva, siempre la misma: no revocada, no caducada por inactividad ni por el tope absoluto
+    static get LIVE_SESSION() {
+        return 'revoked_at IS NULL AND expires_at > NOW() AND (absolute_expires_at IS NULL OR absolute_expires_at > NOW())';
     }
 
     async validateToken(token) {
@@ -504,15 +556,22 @@ class SecureAuthService {
             if (decoded.typ) throw new Error('Token no válido como sesión'); // los retos de MFA no son sesiones
 
             const db = require('../config/database');
-            const [sessions] = await db.query(
-                'SELECT id, user_id, risk_level, is_suspicious FROM user_sessions WHERE jwt_token_hash = ? AND expires_at > NOW()',
-                [this.hashToken(token)]
-            );
+            const live = SecureAuthService.LIVE_SESSION;
+            const [sessions] = decoded.v === 2
+                ? await db.query(`SELECT id, user_id, risk_level, is_suspicious, last_used_at < DATE_SUB(NOW(), INTERVAL 60 SECOND) AS stale
+                                  FROM user_sessions WHERE session_uid = ? AND ${live}`, [String(decoded.sessionId)])
+                : await db.query(`SELECT id, user_id, risk_level, is_suspicious, 0 AS stale
+                                  FROM user_sessions WHERE jwt_token_hash = ? AND ${live}`, [this.hashToken(token)]);
 
             const session = sessions[0];
             // La sesión debe existir Y pertenecer al usuario que dice el token
             if (!session || Number(session.user_id) !== Number(decoded.userId)) throw new Error('Sesión inválida o expirada');
             if (session.is_suspicious) throw new Error('Sesión marcada como sospechosa');
+
+            // "Visto por última vez": como mucho una escritura por minuto y sesión
+            if (session.stale) {
+                db.query('UPDATE user_sessions SET last_used_at = NOW() WHERE id = ?', [session.id]).catch(() => {});
+            }
 
             return {
                 valid: true,
@@ -527,6 +586,133 @@ class SecureAuthService {
             const known = ['Sesión inválida o expirada', 'Sesión marcada como sospechosa'];
             return { valid: false, error: known.includes(error.message) ? error.message : 'Token inválido o expirado' };
         }
+    }
+
+    // ------------------------------------------------------------------ renovación (refresh)
+    //
+    // El refresh token rota en cada uso: el anterior queda en prev_refresh_hash. Si alguien presenta un refresh YA
+    // usado fuera de la gracia, o lo robaron o hay un cliente roto: en ambos casos se revoca la sesión entera
+    // (quien tenga el token nuevo tampoco sigue). Dentro de la gracia es una carrera entre dos pestañas: 409.
+    async refreshSession(refreshToken, deviceInfo = {}) {
+        const db = require('../config/database');
+        const cfg = this.sessionConfig;
+        const hash = this.hashToken(String(refreshToken));
+        const invalid = () => new AuthError('INVALID_REFRESH_TOKEN', 'Refresh token no válido o caducado: inicia sesión de nuevo');
+
+        const [rows] = await db.query(
+            `SELECT id, user_id, session_uid, risk_level, amr, ip_address, is_suspicious, absolute_expires_at,
+                    (${SecureAuthService.LIVE_SESSION}) AS live
+             FROM user_sessions WHERE refresh_hash = ?`,
+            [hash]
+        );
+        const session = rows[0];
+        if (!session) return this.rejectUnknownRefresh(hash, deviceInfo);
+        if (!session.live || session.is_suspicious) throw invalid();
+
+        const [users] = await db.query('SELECT id, username_encrypted FROM users WHERE id = ?', [session.user_id]);
+        if (!users[0]) throw invalid();
+        const tripleEncryptor = require('../crypto/tripleEncryptor');
+        const username = tripleEncryptor.decrypt(users[0].username_encrypted);
+
+        // Rotación ATÓMICA: si dos peticiones llegan con el mismo token, solo una cambia la fila
+        const next = this.newRefreshToken();
+        const [updated] = await db.query(
+            `UPDATE user_sessions
+                SET prev_refresh_hash = refresh_hash, refresh_hash = ?, refreshed_at = NOW(), last_used_at = NOW(),
+                    expires_at = LEAST(DATE_ADD(NOW(), INTERVAL ? SECOND), COALESCE(absolute_expires_at, DATE_ADD(NOW(), INTERVAL ? SECOND)))
+              WHERE id = ? AND refresh_hash = ? AND revoked_at IS NULL`,
+            [this.hashToken(next), cfg.idleSeconds, cfg.idleSeconds, session.id, hash]
+        );
+        if (updated.affectedRows !== 1) {
+            throw new AuthError('REFRESH_CONFLICT', 'Otra petición acaba de renovar esta sesión: usa el refresh token más reciente', { status: 409 });
+        }
+
+        // Renovar desde otra red no se bloquea (los móviles cambian de red), pero queda registrado
+        if (deviceInfo.ipAddress && session.ip_address && ipSubject(deviceInfo.ipAddress) !== ipSubject(session.ip_address)) {
+            await events.record({
+                type: 'SESSION_REFRESH_NEW_ORIGIN', severity: 'low', riskScore: 15, ip: deviceInfo.ipAddress, userId: session.user_id,
+                details: { sessionId: session.id }
+            });
+        }
+
+        const amr = session.amr ? session.amr.split(',') : ['pwd'];
+        const token = await this.generateSecureToken({
+            userId: session.user_id, username, sessionUid: session.session_uid, riskLevel: session.risk_level, amr
+        });
+
+        return {
+            success: true, userId: session.user_id, amr, riskLevel: session.risk_level,
+            ...this.tokenResponse({ token, refreshToken: next, absoluteExpiresAt: session.absolute_expires_at })
+        };
+    }
+
+    async rejectUnknownRefresh(hash, deviceInfo) {
+        const db = require('../config/database');
+        const cfg = this.sessionConfig;
+        const [rows] = await db.query(
+            `SELECT id, user_id, TIMESTAMPDIFF(SECOND, refreshed_at, NOW()) AS age, (${SecureAuthService.LIVE_SESSION}) AS live
+             FROM user_sessions WHERE prev_refresh_hash = ?`,
+            [hash]
+        );
+        const old = rows[0];
+
+        if (old && old.live) {
+            if (Number(old.age) <= cfg.reuseGraceSeconds) {
+                throw new AuthError('REFRESH_CONFLICT', 'Otra petición acaba de renovar esta sesión: usa el refresh token más reciente', { status: 409 });
+            }
+            await this.revokeSession(old.user_id, old.id, 'refresh_reuse');
+            await events.record({
+                type: 'REFRESH_TOKEN_REUSE', rule: 'REFRESH_REUSE', severity: 'critical', riskScore: 90, action: 'session_revoked',
+                ip: deviceInfo.ipAddress, userId: old.user_id, details: { sessionId: old.id }
+            });
+        }
+        throw new AuthError('INVALID_REFRESH_TOKEN', 'Refresh token no válido o caducado: inicia sesión de nuevo');
+    }
+
+    // ------------------------------------------------------------------ cerrar sesiones
+
+    async revokeSession(userId, sessionId, reason = 'user_logout') {
+        const db = require('../config/database');
+        const [result] = await db.query(
+            `UPDATE user_sessions SET expires_at = NOW(), revoked_at = NOW(), revoked_reason = ?
+             WHERE id = ? AND user_id = ? AND ${SecureAuthService.LIVE_SESSION}`,
+            [reason, sqlInt(sessionId, { min: 1, max: 2 ** 31 - 1 }), userId]
+        );
+        return result.affectedRows;
+    }
+
+    // Todas las sesiones del usuario (opcionalmente menos la actual). Devuelve cuántas cerró.
+    async revokeAllSessions(userId, { exceptSessionId = null, reason = 'user_logout_all' } = {}) {
+        const db = require('../config/database');
+        const except = exceptSessionId == null ? null : Number(exceptSessionId);
+        const [result] = await db.query(
+            `UPDATE user_sessions SET expires_at = NOW(), revoked_at = NOW(), revoked_reason = ?
+             WHERE user_id = ? AND ${SecureAuthService.LIVE_SESSION} AND (? IS NULL OR id <> ?)`,
+            [reason, userId, except, except]
+        );
+        return result.affectedRows;
+    }
+
+    async listSessions(userId, currentSessionId = null) {
+        const db = require('../config/database');
+        const [rows] = await db.query(
+            `SELECT id, ip_address, user_agent, location_country, risk_level, amr, created_at, last_used_at, expires_at, absolute_expires_at
+             FROM user_sessions WHERE user_id = ? AND ${SecureAuthService.LIVE_SESSION} ORDER BY id DESC LIMIT 100`,
+            [userId]
+        );
+        return rows.map(row => ({
+            id: row.id,
+            current: Number(row.id) === Number(currentSessionId),
+            ipAddress: row.ip_address,
+            userAgent: row.user_agent,
+            country: row.location_country,
+            riskLevel: row.risk_level,
+            authMethods: row.amr ? row.amr.split(',') : ['pwd'],
+            createdAt: row.created_at,
+            lastUsedAt: row.last_used_at,
+            expiresAt: row.expires_at,
+            sessionExpiresAt: row.absolute_expires_at
+        }));
     }
 
     // Tareas de mantenimiento (las lanza el servicio de limpieza)

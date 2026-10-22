@@ -7,7 +7,7 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || require('path').join(__dirname, '../.env') });
 
-const VALID_ROLES = ['user', 'admin'];
+const VALID_ROLES = require('../src/security/permissions').ROLES;
 
 function parseArgs(argv) {
     const args = {};
@@ -21,7 +21,7 @@ async function main() {
     const { 'user-id': userId, role } = parseArgs(process.argv.slice(2));
 
     if (!userId || !/^\d+$/.test(userId) || !VALID_ROLES.includes(role)) {
-        console.error('Uso: npm run set-role -- --user-id <id> --role <user|admin>');
+        console.error('Uso: npm run set-role -- --user-id <id> --role <user|auditor|operator|admin>');
         process.exit(1);
     }
 

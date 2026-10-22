@@ -257,8 +257,11 @@ class OidcService {
         );
         if (found.length > 0) {
             await db.query('UPDATE user_identities SET last_login_at = NOW() WHERE identity_hash = ?', [identityHash]);
-            if (claimedRole && claimedRole !== found[0].role) await db.query('UPDATE users SET role = ? WHERE id = ?', [claimedRole, found[0].id]);
-            return { id: found[0].id, username: tripleEncryptor.decrypt(found[0].username_encrypted), role: claimedRole || found[0].role, provisioned: false };
+            // El proveedor solo concede o retira 'admin'; los roles auditor/operator (asignados con set-role) no se degradan
+            const roleNow = found[0].role;
+            const nextRole = claimedRole === 'admin' ? 'admin' : (roleNow === 'admin' ? 'user' : roleNow);
+            if (claimedRole && nextRole !== roleNow) await db.query('UPDATE users SET role = ? WHERE id = ?', [nextRole, found[0].id]);
+            return { id: found[0].id, username: tripleEncryptor.decrypt(found[0].username_encrypted), role: claimedRole ? nextRole : roleNow, provisioned: false };
         }
 
         if (!c.autoProvision) throw new SsoError('SSO_USER_NOT_PROVISIONED', 'Tu usuario no está dado de alta', { status: 403, rule: 'SSO_USER_NOT_PROVISIONED' });
