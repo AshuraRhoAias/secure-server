@@ -43,6 +43,7 @@ const FORBIDDEN_EXTENSIONS = new Set([
     'htaccess', 'htpasswd', 'config', 'ini', 'reg', 'iso', 'dmg'
 ]);
 
+// eslint-disable-next-line security/detect-unsafe-regex -- un único `.*` final, sin cuantificadores anidados; el nombre ya está acotado a 120 caracteres
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 const startsWith = (buf, bytes, offset = 0) => bytes.every((b, i) => buf[offset + i] === b);
@@ -142,7 +143,7 @@ function sanitizeFilename(raw) {
 
     name = name
         .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')                                       // controles (incluye NUL, CR, LF)
-        .replace(/[​-‏‪-‮⁠-⁤⁦-⁩﻿]/g, '');      // invisibles y "bidi" (‮ invierte la extensión que se ve)
+        .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '');      // invisibles y bidi (U+202E invierte la extension que se ve)
 
     name = name.split(/[\\/]/).pop();             // solo el nombre, sin ruta (ambos separadores)
     name = name.replace(/[<>:"|?*]/g, '_');       // ilegales en Windows

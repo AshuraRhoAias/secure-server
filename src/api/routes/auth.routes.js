@@ -30,10 +30,73 @@ router.post('/login',
     authController.login
 );
 
+// Segundo paso del login cuando la cuenta tiene MFA
+router.post('/login/mfa',
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        mfaToken: { type: 'string', required: true, max: 2000 },
+        otp: { type: 'string', pattern: /^\d{6}$/ },
+        recoveryCode: { type: 'string', max: 32, pattern: /^[A-Za-z2-7-]{16,23}$/ },
+        deviceInfo: { type: 'object' }
+    }),
+    authController.loginMfa
+);
+
+// Segundo paso con passkey / llave de seguridad (WebAuthn): 1) opciones con el reto  2) la firma
+router.post('/login/webauthn/options',
+    protectionMiddleware.highSecurity(),
+    validate.body({ mfaToken: { type: 'string', required: true, max: 2000 }, deviceInfo: { type: 'object' } }),
+    authController.loginWebauthnOptions
+);
+router.post('/login/webauthn',
+    protectionMiddleware.highSecurity(),
+    validate.body({ mfaToken: { type: 'string', required: true, max: 2000 }, credential: { type: 'object', required: true }, deviceInfo: { type: 'object' } }),
+    authController.loginWebauthn
+);
+
+// Renovar el token de acceso: la credencial es el refresh token (opaco, 256 bits, de un solo uso)
+router.post('/refresh',
+    validate.body({
+        refreshToken: { type: 'string', required: true, max: 100, pattern: /^rt_[A-Za-z0-9_-]{43}$/ },
+        deviceInfo: { type: 'object' }
+    }),
+    authController.refresh
+);
+
 // Rutas protegidas (requieren autenticación)
 router.use(authMiddleware.verifyJWT);
 
+// Autenticación en dos pasos (TOTP)
+const reauth = {
+    password: { type: 'string', required: true, min: 1, max: 128, trim: false },
+    otp: { type: 'string', pattern: /^\d{6}$/ },
+    recoveryCode: { type: 'string', max: 32, pattern: /^[A-Za-z2-7-]{16,23}$/ }
+};
+router.get('/mfa', authController.mfaStatus);
+router.post('/mfa/setup', protectionMiddleware.highSecurity(), authController.mfaSetup);
+router.post('/mfa/enable', protectionMiddleware.highSecurity(), validate.body({ otp: { type: 'string', required: true, pattern: /^\d{6}$/ } }), authController.mfaEnable);
+router.post('/mfa/disable', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaDisable);
+router.post('/mfa/recovery-codes', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaRegenerateCodes);
+
+// Passkeys / llaves de seguridad. Añadir o quitar una exige contraseña (+ segundo factor si ya hay uno)
+router.get('/webauthn/credentials', authController.webauthnList);
+router.post('/webauthn/register/options', protectionMiddleware.highSecurity(), validate.body(reauth), authController.webauthnRegisterOptions);
+router.post('/webauthn/register',
+    protectionMiddleware.highSecurity(),
+    validate.body({ credential: { type: 'object', required: true }, name: { type: 'string', max: 60 } }),
+    authController.webauthnRegister
+);
+router.delete('/webauthn/credentials/:id',
+    protectionMiddleware.highSecurity(),
+    validate.params({ id: { type: 'integer', required: true, min: 1 } }),
+    validate.body(reauth),
+    authController.webauthnRemove
+);
+
 router.post('/logout', authController.logout);
+router.post('/logout-all', validate.body({ keepCurrent: { type: 'boolean' } }), authController.logoutAll);
+router.get('/sessions', authController.listSessions);
+router.delete('/sessions/:id', validate.params({ id: { type: 'integer', required: true, min: 1 } }), authController.revokeSession);
 router.get('/profile', authController.getProfile);
 
 // Mezcla rutas públicas (register/login) y protegidas (logout/profile): gestiona su propia protección

@@ -363,5 +363,59 @@ auto-puntuación retirados, `src/notifications/` fuera del control de versiones,
 | `quick-fix.js` reescribía `anomaly-detection`/`secure-auth`/`auth.controller` con código antiguo | Eliminado |
 | Sin índice único en `users.username_hash` (registro concurrente duplicaba) | Migración 006 + 409 en carrera (prueba con 3 registros simultáneos) |
 
-**Pendiente (ver `docs/SEGURIDAD.md` §10):** MFA, SSO, KMS/HSM, antivirus de archivos, backup de
-`FILES_DIR`, pentest externo.
+**Pendiente:** ver la sección H (lo que quedaba aquí se resolvió en la entrega siguiente).
+
+---
+
+## H. Intervención 2026-10-21 (4.ª entrega): lo que seguía pendiente
+
+Rama `repo/sharp-noether-tbr0bz`. Detalle y límites honestos en `docs/SEGURIDAD.md` §10–§22.
+
+| Pendiente | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| MFA | TOTP (RFC 6238) + 10 códigos de recuperación, anti-reutilización atómica, reto de 5 min que no vale como sesión, `MFA_REQUIRED_FOR_ADMINS` | Sin WebAuthn |
+| SSO | OpenID Connect (code + PKCE), state/nonce en BD, defensa mix-up, solo algoritmos asimétricos, sin enlazado por email | Sin SAML; probado contra un IdP simulado |
+| KMS/HSM | Secretos del `.env` envueltos (`file`, Vault Transit, AWS KMS); arranque falla cerrado; rotación compatible | Protege el `.env`/backups, no la memoria del proceso en marcha |
+| Antivirus | ClamAV `INSTREAM` durante el cifrado, `off/optional/required`, `npm run rescan-files` | Basado en firmas |
+| Copias de `FILES_DIR` | Incremental, verificación por hash, retención, restauración, cruce BD↔disco | La prueba de restauración periódica es tuya |
+| Pentest/certificaciones | Paquete de preparación: ESLint security, CodeQL, gitleaks, SBOM, ZAP, OpenAPI, sqlmap, matriz ASVS/SOC 2/ISO | **No sustituye** a un pentest externo ni a una auditoría |
+| Bloqueo de cuenta abusable | Bloqueo por (usuario, origen) + global con orígenes de confianza + desbloqueo admin | Ataque distribuido + dueño desde origen nuevo: ≤15 min o desbloqueo admin |
+
+Hallazgos reales durante el trabajo: la copia sobrescribía una copia buena con un original truncado (corregido); la descarga de un
+archivo ausente/truncado cortaba la conexión (ahora se autentica el primer bloque antes de enviar cabeceras); caracteres
+bidireccionales literales en `file-types.js` detectados por el lint (corregido).
+
+---
+
+## I. Intervención 2026-10-27 (5.ª entrega): lo que faltaba tras la puntuación 7,5/10
+
+Misma rama y PR. Detalle y límites en `docs/SEGURIDAD.md` §15–§22.
+
+| Petición | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| Sesiones más cortas **sin** iniciar sesión a cada cambio + cerrar todas | JWT de 15 min + refresh token opaco con rotación y detección de reutilización (revoca la sesión), inactividad 7 d / tope 30 d, `logout-all`, lista y cierre de sesiones | El cliente debe guardar bien el refresh token y serializar las renovaciones |
+| Los 5 puntos de seguridad | **KMS por archivo** (`KMS_DATA_KEYS`, `kms1:` ligado al archivo, CLI migrate/unmigrate/rewrap); **WebAuthn**, **SAML 2.0** y **roles finos** (`user/auditor/operator/admin`); **aprobación de dos administradores** (reset MFA, borrado); **imágenes recodificadas** y **PDF sin contenido activo**; detector de inyección solo bloquea en rutas críticas | Probado contra simuladores, no contra IdP/KMS reales; solo imágenes y PDF se sanean |
+| Operación y observabilidad **solo admin** | Alertas automáticas + webhook firmado + panel JSON; métricas Prometheus y trazas OTLP con `X-Request-Id`; exportar/borrar datos personales; plan de respuesta a incidentes y custodia de claves | Sin interfaz web propia; las copias existentes conservan los datos borrados hasta caducar |
+| Cobertura y fuzzing | `npm run coverage` (c8) con umbral en CI; `test_fuzz.js` (fast-check, 18 propiedades, incluye **todas las rutas del OpenAPI** con 3 roles) y `fuzz.yml` nocturno | Property-based, no un fuzzer guiado por cobertura; la cobertura no mide corrección |
+| CI | Acciones fijadas por SHA, permisos mínimos, cancelación de ejecuciones obsoletas, *timeouts*, `dependency-review`, puerta de ZAP (riesgo alto), trabajo `production-install` | Los workflows no se han podido ejecutar fuera de GitHub |
+| Quitar nodemon en producción | Solo `devDependencies`; `npm run dev` se niega con `NODE_ENV=production`; `install.js --production` usa `--omit=dev`; `check:prod-deps` en CI | — |
+
+**Hallazgos reales del fuzzing** (corregidos, con prueba fija): un id de sesión enorme (`/api/auth/sessions/99999999999999999999`) daba 500 porque el validador aceptaba
+enteros no seguros; un cuerpo multipart sin cierre **tumbaba el proceso entero** (busboy emite `error` directamente en el stream del archivo sin listener).
+Otros hallazgos de esta entrega: node-saml aceptaba `Recipient`/`Destination`/`Status`
+distintos (comprobaciones propias añadidas), y la erradicación de un usuario dejaba un evento de aprobación con su `user_id`.
+
+---
+
+## J. Intervención 2026-10-27 (6.ª entrega): interfaz web y escalabilidad
+
+Misma rama y PR. Detalle en `docs/SEGURIDAD.md` §23 y §24.
+
+| Petición | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| Interfaz web React/Next.js para operación y observabilidad | `web/`: Next.js 16 + React 19. BFF con cookie `httpOnly` cifrada (los tokens no llegan al JavaScript), lista cerrada de rutas, CSRF, CSP con nonce; panel, alertas, aprobaciones, eventos (CSV), IP, usuarios/sesiones, datos personales, métricas y sistema. 43 pruebas unitarias + 15 de extremo a extremo con el API real y Chromium; job `web` en el CI | Solo admin; sin passkeys ni SSO en la interfaz; sondeo, no tiempo real |
+| Mejorar la escalabilidad | `src/cluster.js` (workers, relanzado, reinicio en caliente, cierre ordenado, métricas agregadas); líder único para las tareas periódicas; `/health/ready`; limitador de una sentencia; caché de 1 s de IP bloqueadas; medido con `benchmarks/scale-bench.js`: **×1,9 con 2 workers y ×2,2–2,3 con 4** en 4 vCPU compartidos, +12 % en proceso único | Medido en UNA máquina de 4 vCPU; `FILES_DIR` sigue siendo disco local (volumen compartido con varias máquinas); el cuello pasa a MariaDB |
+
+**Correcciones a lo dicho antes**: la documentación afirmaba «~3 consultas por petición protegida»; medido con el registro de MariaDB eran 4 (ahora 2–3). Hallazgos reales: un
+`GET_LOCK` en una conexión retenida habría tumbado el proceso al caerse la conexión (sin listener de `error`); en el cluster, prom-client solo responde a la agregación si el worker construye un
+`AggregatorRegistry` (daba 500); el reparto round-robin perdía conexiones al reiniciar en caliente (ahora socket compartido); y cerrar las conexiones ociosas al instante daba resets.

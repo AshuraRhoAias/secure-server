@@ -6,7 +6,13 @@
 //   1700000000.123456 IP 10.0.0.1 > 10.0.0.2: ICMP echo request, id 7, seq 1, length 64
 //       0x0000:  4500 0054 1c46 4000 4001 ...      <- volcado hex desde la cabecera IP
 
+// Las líneas de tcpdump miden decenas de bytes; se descarta cualquier línea de más de MAX_LINE para que ninguna
+// entrada anómala pueda alargar el análisis con estas expresiones.
+const MAX_LINE = 1024;
+
+// eslint-disable-next-line security/detect-unsafe-regex -- línea acotada a MAX_LINE; el `.*?` lazy va seguido de literales fijos
 const HEADER_RE = /^(\d+(?:\.\d+)?) .*?\bIP (\S+) > (\S+): ICMP echo (request|reply), id (\d+), seq (\d+), length (\d+)/;
+// eslint-disable-next-line security/detect-unsafe-regex -- línea acotada a MAX_LINE; el grupo repetido es el último elemento (nunca hay vuelta atrás)
 const HEX_LINE_RE = /^\s+0x[0-9a-f]+:\s+((?:[0-9a-f]{2,4}\s?)+)/i;
 
 class TcpdumpParser {
@@ -16,6 +22,7 @@ class TcpdumpParser {
     }
 
     push(line) {
+        if (line.length > MAX_LINE) return;
         const header = HEADER_RE.exec(line);
         if (header) {
             this.flush();

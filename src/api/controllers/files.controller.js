@@ -1,7 +1,8 @@
-const { pipeline } = require('stream');
+const { pipeline, Readable } = require('stream');
 const db = require('../../config/database');
 const { sqlInt } = require('../../config/sql');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
+const fileKeys = require('../../crypto/file-keys');
 const audit = require('../../services/audit.service');
 const events = require('../../security/security-events.service');
 const anomalyDetection = require('../../security/anomaly-detection.service');
@@ -9,6 +10,7 @@ const cipher = require('../../files/file-cipher');
 const storage = require('../../files/storage');
 const { receiveUpload, UploadError } = require('../../files/upload');
 const { contentDisposition } = require('../../files/file-types');
+const metrics = require('../../observability/metrics');
 
 const INLINE_CATEGORIES = new Set(['image', 'audio', 'video']); // PDF y texto SIEMPRE como descarga
 
@@ -29,6 +31,8 @@ class FilesController {
             category: row.category,
             size: Number(row.size_bytes),
             sha256: row.sha256,
+            scanStatus: row.scan_status,
+            sanitizeStatus: row.sanitize_status,
             createdAt: row.created_at
         };
     }
@@ -38,6 +42,8 @@ class FilesController {
         const known = error instanceof UploadError;
         const status = known ? error.status : 500;
         const code = known ? error.code : 'UPLOAD_FAILED';
+        metrics.fileUploads.inc({ result: 'rejected' });
+        metrics.fileRejections.inc({ code: known ? String(code).slice(0, 40) : 'UPLOAD_FAILED' }); // códigos fijos del código, no de la entrada
 
         if (known) {
             await events.record({
@@ -45,7 +51,7 @@ class FilesController {
                 riskScore: error.severity === 'high' ? 70 : error.severity === 'medium' ? 40 : 10,
                 action: 'rejected', req, status, details: { code }
             });
-            if (error.severity === 'high') await anomalyDetection.strike(req.ip, 'upload', { threshold: 5 });
+            if (['high', 'critical'].includes(error.severity)) await anomalyDetection.strike(req.ip, 'upload', { threshold: 5 });
         } else {
             console.error('❌ Error en subida de archivo:', error.code || error.message);
         }
@@ -79,6 +85,9 @@ class FilesController {
 
             upload = await receiveUpload(req);
 
+            // La llamada al KMS (red) va ANTES de la transacción: no se mantienen bloqueos de base de datos mientras se espera
+            const keyEncrypted = await fileKeys.protect(upload.storageName, upload.dataKey);
+
             const row = await db.transaction(async (tx) => {
                 // Se bloquea la fila del usuario: dos subidas simultáneas no pueden saltarse la cuota
                 await tx.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
@@ -92,17 +101,19 @@ class FilesController {
 
                 const [result] = await tx.query(
                     `INSERT INTO user_files
-                        (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         req.user.id,
                         upload.storageName,
                         tripleEncryptor.encrypt(upload.filename),
-                        tripleEncryptor.encrypt(upload.dataKey.toString('hex')),   // clave del archivo, envuelta con la maestra
+                        keyEncrypted,                       // clave del archivo, envuelta con la maestra o con el KMS
                         upload.mime,
                         upload.category,
                         upload.size,
-                        upload.sha256
+                        upload.sha256,
+                        upload.scanStatus,
+                        upload.sanitizeStatus
                     ]
                 );
 
@@ -111,13 +122,17 @@ class FilesController {
                 return { id: result.insertId };
             });
 
+            if (upload.scannerError) {
+                await events.record({ type: 'SCANNER_UNAVAILABLE', rule: 'SCAN_SKIPPED_OPTIONAL', severity: 'medium', riskScore: 30, req, details: { fileId: row.id, error: upload.scannerError } });
+            }
+            metrics.fileUploads.inc({ result: 'stored' });
             await audit.log('FILE_UPLOADED', { fileId: row.id, size: upload.size, mime: upload.mime }, { req });
 
             res.status(201).json({
                 success: true,
                 file: {
                     id: Number(row.id), name: upload.filename, mimeType: upload.mime, category: upload.category,
-                    size: upload.size, sha256: upload.sha256
+                    size: upload.size, sha256: upload.sha256, scanStatus: upload.scanStatus, sanitizeStatus: upload.sanitizeStatus
                 }
             });
         } catch (error) {
@@ -133,7 +148,7 @@ class FilesController {
     async list(req, res) {
         const { limit, before, category } = req.validated.query;
         const [rows] = await db.query(
-            `SELECT id, filename_encrypted, mime_type, category, size_bytes, sha256, created_at
+            `SELECT id, filename_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status, created_at
              FROM user_files
              WHERE user_id = ? AND (? IS NULL OR category = ?) AND (? IS NULL OR id < ?)
              ORDER BY id DESC
@@ -152,7 +167,7 @@ class FilesController {
 
     async findOwned(req) {
         const [rows] = await db.query(
-            `SELECT id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, created_at
+            `SELECT id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256, scan_status, sanitize_status, created_at
              FROM user_files WHERE id = ? AND user_id = ?`,
             [req.params.id, req.user.id]
         );
@@ -182,10 +197,27 @@ class FilesController {
         }
 
         const name = tripleEncryptor.decrypt(row.filename_encrypted);
-        const key = Buffer.from(tripleEncryptor.decrypt(row.key_encrypted), 'hex');
+        let key;
+        try {
+            key = await fileKeys.recover(row.storage_name, row.key_encrypted);
+        } catch (error) {
+            return this.keyUnavailable(req, res, row, error);
+        }
         const start = range ? range.start : 0;
         const end = range ? range.end : size - 1;
         const inline = req.validated?.query?.inline === true && INLINE_CATEGORIES.has(row.category);
+
+        // Se descifra y AUTENTICA el primer bloque ANTES de enviar cabeceras: si el archivo falta, está truncado o
+        // alterado desde el principio, se responde con un error normal en vez de cortar la conexión a mitad.
+        const iterator = cipher.decryptRange({
+            filePath: storage.finalPath(row.storage_name), key, plainSize: size, start, end
+        })[Symbol.asyncIterator]();
+        let first;
+        try {
+            first = await iterator.next();
+        } catch (error) {
+            return this.integrityFailure(req, res, row, error);
+        }
 
         res.status(range ? 206 : 200);
         res.set({
@@ -205,26 +237,50 @@ class FilesController {
         // Se audita la descarga completa o el primer rango (un vídeo en streaming pide muchos rangos)
         if (start === 0) await audit.log('FILE_DOWNLOADED', { fileId: Number(row.id), ranged: Boolean(range) }, { req });
 
-        if (req.method === 'HEAD' || size === 0) return res.end();
+        if (req.method === 'HEAD' || first.done) {
+            await iterator.return?.();
+            return res.end();
+        }
 
-        const stream = cipher.createDecryptStream({
-            filePath: storage.finalPath(row.storage_name), key, plainSize: size, start, end
-        });
+        // Primer bloque (ya autenticado) + el resto bajo demanda
+        const stream = Readable.from((async function* () {
+            yield first.value;
+            for (;;) {
+                const next = await iterator.next();
+                if (next.done) return;
+                yield next.value;
+            }
+        })(), { objectMode: false });
+
         pipeline(stream, res, (error) => {
             if (!error) return;
-            // El archivo en disco no coincide con lo que se subió (alterado, truncado o perdido)
-            console.error(`❌ Archivo ${row.id} ilegible o alterado: ${error.message}`);
-            events.record({
-                type: 'FILE_INTEGRITY_FAILURE', rule: 'FILE_CORRUPT', severity: 'critical', riskScore: 90,
-                req, userId: req.user.id, details: { fileId: Number(row.id) }
-            });
-            if (!res.headersSent) {
-                // Aún no salió ningún byte: se puede responder con un error normal
-                for (const header of ['Content-Length', 'Content-Range', 'Content-Disposition', 'Content-Type', 'X-Content-SHA256']) res.removeHeader(header);
-                return res.status(500).json({ success: false, message: 'El archivo no se pudo leer', code: 'FILE_CORRUPT' });
-            }
-            res.destroy(); // los bytes ya enviados eran auténticos, pero la respuesta queda truncada a propósito
+            // Falló un bloque POSTERIOR al primero: ya salieron bytes (auténticos), la respuesta se corta a propósito
+            this.recordIntegrityFailure(req, row, error);
         });
+    }
+
+    recordIntegrityFailure(req, row, error) {
+        console.error(`❌ Archivo ${row.id} ilegible o alterado: ${error.message}`);
+        return events.record({
+            type: 'FILE_INTEGRITY_FAILURE', rule: 'FILE_CORRUPT', severity: 'critical', riskScore: 90,
+            req, userId: req.user.id, details: { fileId: Number(row.id) }
+        });
+    }
+
+    // Error ANTES de enviar nada: respuesta normal (sin rutas ni detalles del servidor)
+    async integrityFailure(req, res, row, error) {
+        await this.recordIntegrityFailure(req, row, error);
+        res.status(500).json({ success: false, message: 'El archivo no se pudo leer', code: 'FILE_CORRUPT' });
+    }
+
+    // El KMS no entregó la clave del archivo (caído, sin permisos o blob manipulado): 503, nunca un detalle del proveedor
+    async keyUnavailable(req, res, row, error) {
+        console.error(`❌ Clave del archivo ${row.id} no disponible:`, error.message);
+        await events.record({
+            type: 'FILE_KEY_UNAVAILABLE', rule: 'KMS_DATA_KEY', severity: 'high', riskScore: 60,
+            req, userId: req.user.id, details: { fileId: Number(row.id) }
+        });
+        res.status(503).json({ success: false, message: 'El archivo no está disponible en este momento', code: 'FILE_KEY_UNAVAILABLE' });
     }
 
     async remove(req, res) {

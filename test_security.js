@@ -234,7 +234,7 @@ test('IP: IPv4 dentro de IPv6 se normaliza y IPv6 se agrupa por /64', () => {
 
 // ============================================================================ SQL: sin interpolación
 
-test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de ${...}', () => {
+test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders()/sqlFragment() dentro de ${...}', () => {
     // Excepciones justificadas: construyen identificadores (tabla/columna) a partir de constantes del
     // código (encrypted-columns.js), jamás de entrada del usuario.
     const TRUSTED = [
@@ -243,7 +243,7 @@ test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de $
         path.join('src', 'notifications') + path.sep
     ];
     const SQL_WORDS = /\b(?:SELECT\s|INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE|FROM\s+\S|WHERE\s+\S|ORDER\s+BY|LIMIT\s+[\d$])/i;
-    const SAFE = /^\s*(?:sqlInt|sqlPlaceholders)\(/;
+    const SAFE = /^\s*(?:sqlInt|sqlPlaceholders|sqlFragment)\(/;
 
     const files = [];
     (function walk(dir) {
@@ -266,6 +266,14 @@ test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders() dentro de $
         }
     }
     assert.deepStrictEqual(offenders, [], 'SQL construido con interpolación (usa parámetros ? o sqlInt)');
+});
+
+test('sqlFragment: solo devuelve trozos del registro cerrado; cualquier otro nombre o tipo lanza', () => {
+    const { sqlFragment } = require('./src/config/sql');
+    assert.match(sqlFragment('liveSession'), /^revoked_at IS NULL AND expires_at > NOW\(\)/);
+    for (const bad of ['', 'x', 'liveSession; DROP TABLE users', '__proto__', 'constructor', 'toString', null, undefined, 1, {}, ['liveSession']]) {
+        assert.throws(() => sqlFragment(bad), RangeError, String(bad));
+    }
 });
 
 // ============================================================================ INTEGRACIÓN (MySQL real)
@@ -653,7 +661,8 @@ for (const [name, method, route, opts, expectedStatus, expectedRule] of REJECTED
     itDb(`ataque rechazado y registrado — ${name}`, async () => {
         const ip = testIp();
         const user = await registerAndLogin(app.base, { ip });
-        const res = await api(app.base, method, route, { ip, token: user.token, ...opts });
+        // Las firmas en el CUERPO se rechazan por defecto solo en rutas críticas; /api/notes necesita el modo 'block'
+        const res = await withEnv({ INJECTION_BODY_MODE: 'block' }, () => api(app.base, method, route, { ip, token: user.token, ...opts }));
         assert.strictEqual(res.status, expectedStatus);
         assert.strictEqual(res.body.code, 'MALICIOUS_INPUT');
 
@@ -664,6 +673,50 @@ for (const [name, method, route, opts, expectedStatus, expectedRule] of REJECTED
         assert.ok(trail[0].path && trail[0].user_agent !== undefined && trail[0].method);
     });
 }
+
+// ---------------------------------------------------------------- política por ruta (modo por defecto: 'critical')
+
+itDb("cuerpo con firmas de inyección: en rutas NO críticas (notas) se guarda como texto y se REGISTRA; no se rechaza", async () => {
+    const ip = testIp();
+    const user = await registerAndLogin(app.base, { ip });
+    const text = "SELECT * FROM users WHERE a='1' OR '1'='1' -- apuntes de la clase de SQL";
+    const created = await api(app.base, 'POST', '/api/notes', { ip, token: user.token, json: { title: 'apuntes', content: text } });
+    assert.strictEqual(created.status, 201, created.text);
+    const read = await api(app.base, 'GET', `/api/notes/${created.body.note.id}`, { ip, token: user.token });
+    assert.strictEqual(read.body.note.content, text, 'texto legítimo intacto');
+
+    const trail = (await eventsOf(ip, 'INJECTION_ATTEMPT')).filter(e => e.rule?.startsWith('SQLI'));
+    assert.ok(trail.length >= 1, 'queda registrado para analizarlo después');
+    assert.ok(trail.every(e => e.action_taken === 'logged'));
+    assert.strictEqual(await anomaly.isIPBlocked(ip), false, 'y no cuenta como strike que acabe bloqueando a quien escribe sobre SQL');
+});
+
+itDb("cuerpo con firmas de inyección: en rutas críticas (/api/auth) SÍ se rechaza", async () => {
+    const ip = testIp();
+    for (const route of ['/api/auth/login', '/api/auth/register']) {
+        const r = await api(app.base, 'POST', route, { ip, json: { username: "admin' OR '1'='1' --", password: 'x'.repeat(12), email: 'a@example.com' } });
+        assert.strictEqual(r.status, 400, `${route} -> ${r.status}`);
+        assert.strictEqual(r.body.code, 'MALICIOUS_INPUT');
+    }
+    assert.ok((await eventsOf(ip, 'INJECTION_ATTEMPT')).some(e => e.action_taken === 'rejected'));
+});
+
+itDb("INJECTION_BLOCK_PATHS cambia qué rutas son críticas; las firmas en query/cabeceras se rechazan siempre", async () => {
+    const protection = require('./src/middleware/protection.middleware');
+    assert.ok(protection.isCriticalPath('/api/auth/login', ['/api/auth']));
+    assert.ok(protection.isCriticalPath('/api/auth', ['/api/auth']));
+    assert.ok(!protection.isCriticalPath('/api/authors', ['/api/auth']), 'prefijo con frontera: /api/authors no es /api/auth');
+    assert.ok(!protection.isCriticalPath('/api/notes', ['/api/auth']));
+
+    const ip = testIp();
+    const user = await registerAndLogin(app.base, { ip });
+    const attack = { title: "' OR '1'='1", content: 'x' };
+    await withEnv({ INJECTION_BLOCK_PATHS: '/api/notes' }, async () => {
+        assert.strictEqual((await api(app.base, 'POST', '/api/notes', { ip, token: user.token, json: attack })).status, 400);
+    });
+    // Y en una ruta no crítica la query y las cabeceras siguen bloqueándose
+    assert.strictEqual((await api(app.base, 'GET', `/api/notes?x=${encodeURIComponent('1 UNION SELECT 1,2')}`, { ip: testIp(), token: user.token })).status, 403);
+});
 
 itDb('la contaminación de prototipos no deja rastro en el proceso', async () => {
     const ip = testIp();
@@ -886,5 +939,72 @@ itDb('inundación de eventos: el tope por (IP, tipo) protege la tabla y deja una
         assert.strictEqual((await eventsOf(ip, 'OTRO_TIPO')).length, 1);
         for (let i = 0; i < 15; i++) await events.record({ type: 'IP_BLOCKED', ip });
         assert.strictEqual((await eventsOf(ip, 'IP_BLOCKED')).length, 15);
+    });
+});
+
+// ---------------------------------------------------------------- bloqueo de cuenta que NO se puede usar contra su dueño
+
+itDb('el atacante se bloquea A SÍ MISMO: el dueño sigue entrando desde su sitio y desde sitios nuevos', async () => {
+    const home = testIp(), attacker = testIp(), elsewhere = testIp();
+    const owner = await registerAndLogin(app.base, { ip: home });
+
+    for (let i = 0; i < 5; i++) assert.strictEqual((await badLogin(attacker, owner.username)).status, 401);
+    const blockedAttacker = await badLogin(attacker, owner.username, owner.password);
+    assert.strictEqual(blockedAttacker.status, 429);
+    assert.strictEqual(blockedAttacker.body.code, 'ACCOUNT_LOCKED');
+
+    // El dueño, con su contraseña, entra: desde su IP habitual y desde una nueva
+    assert.strictEqual((await badLogin(home, owner.username, owner.password)).status, 200);
+    assert.strictEqual((await badLogin(elsewhere, owner.username, owner.password)).status, 200);
+
+    const trail = await eventsOf(attacker, 'LOGIN_BLOCKED');
+    assert.strictEqual(trail[0].action_taken, 'locked_account');
+    assert.strictEqual(JSON.parse(trail[0].details).scope, 'source');
+});
+
+itDb('ataque distribuido: se bloquean los orígenes DESCONOCIDOS, no los de confianza; un admin puede liberar', async () => {
+    await withEnv({ LOCKOUT_GLOBAL_FAILURES: '8' }, async () => {
+        const home = testIp();
+        const owner = await registerAndLogin(app.base, { ip: home });
+
+        // 8 fallos desde 8 IP distintas (ninguna llega a 5, así que no hay bloqueo por origen)
+        const botnet = Array.from({ length: 8 }, () => testIp());
+        for (const ip of botnet) assert.strictEqual((await badLogin(ip, owner.username)).status, 401);
+
+        const stranger = testIp();
+        const lockedStranger = await badLogin(stranger, owner.username, owner.password);
+        assert.strictEqual(lockedStranger.status, 429);
+        assert.strictEqual(JSON.parse((await eventsOf(stranger, 'LOGIN_BLOCKED'))[0].details).scope, 'global');
+        assert.ok(Number(lockedStranger.headers.get('retry-after')) > 0);
+
+        // La IP desde la que el dueño ya había entrado NO se ve afectada, y entrar reinicia el contador
+        assert.strictEqual((await badLogin(home, owner.username, owner.password)).status, 200);
+        assert.strictEqual((await badLogin(stranger, owner.username, owner.password)).status, 200, 'tras un login legítimo el bloqueo global se reinicia');
+    });
+});
+
+itDb('liberación por un administrador: reinicia los contadores y NO convierte a nadie en origen de confianza', async () => {
+    await withEnv({ LOCKOUT_GLOBAL_FAILURES: '6' }, async () => {
+        const ipAdmin = testIp(), home = testIp();
+        const admin = await registerAndLogin(app.base, { ip: ipAdmin });
+        const owner = await registerAndLogin(app.base, { ip: home });
+        await db.query("UPDATE users SET role = 'admin' WHERE id = ?", [admin.userId]);
+
+        const attacker = testIp();
+        for (let i = 0; i < 5; i++) await badLogin(attacker, owner.username);
+        assert.strictEqual((await badLogin(attacker, owner.username, owner.password)).status, 429);
+
+        // un usuario normal no puede liberar
+        assert.strictEqual((await api(app.base, 'POST', '/api/system/accounts/unlock', { ip: home, token: owner.token, json: { username: owner.username } })).status, 403);
+
+        const unlocked = await api(app.base, 'POST', '/api/system/accounts/unlock', { ip: ipAdmin, token: admin.token, json: { username: owner.username } });
+        assert.strictEqual(unlocked.status, 200);
+        assert.strictEqual((await badLogin(attacker, owner.username)).status, 401, 'el contador por origen se reinició');
+
+        // El origen del atacante no ha pasado a ser "de confianza": si vuelve el ataque distribuido, sigue bloqueado
+        for (let i = 0; i < 6; i++) await badLogin(testIp(), owner.username);
+        const again = await badLogin(attacker, owner.username, owner.password);
+        assert.strictEqual(again.status, 429);
+        assert.ok((await db.query("SELECT 1 FROM security_events WHERE event_type = 'ACCOUNT_UNLOCKED'"))[0].length >= 1);
     });
 });

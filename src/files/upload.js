@@ -4,11 +4,18 @@ const types = require('./file-types');
 const cipher = require('./file-cipher');
 const storage = require('./storage');
 const { scanText } = require('../security/injection-detector');
+const av = require('./av-scanner');
+const { SanitizeStage } = require('./sanitize');
 
 // Recibe una subida multipart/form-data EN STREAMING (nunca se carga el archivo entero en memoria) y la
 // deja cifrada en un archivo temporal. Cadena por la que pasa cada byte:
 //
-//   petición → busboy → [SniffGate: tipo real + límite de tamaño] → [EncryptStream: AES-256-GCM por bloques] → disco
+//   petición → busboy → [SniffGate: tipo real + límite de tamaño] → [antivirus] → [SanitizeStage: recodifica imágenes,
+//            inspecciona PDF] → [EncryptStream: AES-256-GCM por bloques] → disco
+//
+// El antivirus ve lo que ENVIÓ el usuario, antes de sanear: un malware escondido tras una imagen salta como alerta
+// (evento + strike) en vez de desaparecer en silencio al recodificar, y un exploit conocido se descarta antes de que
+// llegue a los decodificadores nativos de imagen.
 //
 // Se rechaza (y se borra lo escrito) cuando:
 //   - no es multipart, o trae más de un archivo / un campo de archivo que no se llama "file"
@@ -16,16 +23,18 @@ const { scanText } = require('../security/injection-detector');
 //   - el CONTENIDO real no es un tipo permitido, o no coincide con la extensión del nombre
 //   - es ejecutable, comprimido, o texto con HTML/scripts incrustados
 //   - supera el tamaño máximo de su categoría
+//   - imagen que no decodifica, o PDF con JavaScript/adjuntos/acciones (ver sanitize.js)
 
 const SNIFF_BYTES = 4096;
 
 class UploadError extends Error {
-    constructor(status, code, message, { severity = 'low', rule = null } = {}) {
+    constructor(status, code, message, { severity = 'low', rule = null, detail = null } = {}) {
         super(message);
         this.status = status;
         this.code = code;
         this.severity = severity;
         this.rule = rule || code;
+        this.detail = detail;
     }
 }
 
@@ -172,14 +181,27 @@ function receiveUpload(req) {
             let drained = 0;
             req.on('data', (chunk) => { drained += chunk.length; if (drained > limits.maxAny) req.destroy(); });
             req.resume();
-            storage.removeTemp(storageName).catch(() => {});
+            // El temporal se borra DESPUÉS de que el stream de escritura termine de cerrarse: un fs.WriteStream destruido mientras su
+            // open() sigue pendiente crea el archivo un instante DESPUÉS (si el borrado va antes, queda un .part huérfano; en CI, con
+            // la máquina cargada, pasaba). Y la respuesta al cliente espera a que el temporal ya no exista.
+            const out = streams[streams.length - 1];
+            const closed = out && typeof out.once === 'function' && !out.closed
+                ? new Promise(resolve => { out.once('close', resolve); setTimeout(resolve, 1000).unref(); })
+                : Promise.resolve();
+            const cleaned = closed.then(() => storage.removeTemp(storageName)).catch(() => {});
 
             // Errores del sistema (ENOSPC, EACCES, ENOTDIR...) son del SERVIDOR (500); el resto, de la petición (400)
             const serverSide = /^E[A-Z]+$/.test(error?.code || '');
-            reject(error instanceof UploadError ? error : new UploadError(serverSide ? 500 : 400, 'UPLOAD_FAILED', 'No se pudo procesar la subida'));
+            const rejection = error instanceof UploadError ? error : new UploadError(serverSide ? 500 : 400, 'UPLOAD_FAILED', 'No se pudo procesar la subida');
+            cleaned.then(() => reject(rejection));
         };
 
         bb.on('file', (field, stream, info) => {
+            // busboy hace `stream.emit('error', 'Unexpected end of form')` DIRECTAMENTE si el cuerpo termina sin cerrar el multipart.
+            // Sin un listener permanente (pipeline los retira al terminar) sería una excepción no capturada que tumba el proceso:
+            // lo encontró el fuzzing (test_fuzz.js, cuerpo multipart sin boundary de cierre). Solo se absorbe: el motivo real lo
+            // informa el pipeline (o `fail` si ya se rechazó antes), para no pisar un 413/415 con un 400 genérico.
+            stream.on('error', () => {});
             try {
                 handleFile(field, stream, info);
             } catch (error) {
@@ -219,16 +241,25 @@ function receiveUpload(req) {
             }
 
             const gate = new SniffGate({ filename, limits });
+            const sanitize = new SanitizeStage({ gate, UploadError });
             const encrypt = new cipher.EncryptStream(dataKey);
             const out = storage.createTempWriteStream(storageName);
-            streams.push(gate, encrypt, out);
+            // Antivirus (si está activo): antes del saneamiento, y siempre antes de cifrar/guardar (el archivo en claro nunca
+            // se escribe). El veredicto llega al terminar de leer, y solo entonces el saneador procesa el archivo.
+            const scan = av.enabled() ? new av.ScanTee(UploadError) : null;
+            streams.push(gate, ...(scan ? [scan] : []), sanitize, encrypt, out);
 
             stream.on('limit', () => fail(new UploadError(413, 'FILE_TOO_LARGE', 'El archivo supera el tamaño máximo permitido')));
 
             filePromise = new Promise((done, failed) => {
-                pipeline(stream, gate, encrypt, out, (error) => {
+                const stages = [stream, gate, ...(scan ? [scan] : []), sanitize, encrypt, out];
+                pipeline(...stages, (error) => {
                     if (error) return failed(error);
-                    done({ size: encrypt.plainBytes, sha256: encrypt.sha256(), mime: gate.mime, category: gate.category });
+                    done({
+                        size: encrypt.plainBytes, sha256: encrypt.sha256(), mime: gate.mime, category: gate.category,
+                        sanitizeStatus: sanitize.sanitizeStatus,
+                        scanStatus: scan ? scan.scanStatus : 'unscanned', scannerError: scan?.scannerError || null
+                    });
                 });
             });
             filePromise.catch(fail);
