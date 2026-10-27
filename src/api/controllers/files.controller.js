@@ -2,6 +2,7 @@ const { pipeline, Readable } = require('stream');
 const db = require('../../config/database');
 const { sqlInt } = require('../../config/sql');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
+const fileKeys = require('../../crypto/file-keys');
 const audit = require('../../services/audit.service');
 const events = require('../../security/security-events.service');
 const anomalyDetection = require('../../security/anomaly-detection.service');
@@ -84,6 +85,9 @@ class FilesController {
 
             upload = await receiveUpload(req);
 
+            // La llamada al KMS (red) va ANTES de la transacción: no se mantienen bloqueos de base de datos mientras se espera
+            const keyEncrypted = await fileKeys.protect(upload.storageName, upload.dataKey);
+
             const row = await db.transaction(async (tx) => {
                 // Se bloquea la fila del usuario: dos subidas simultáneas no pueden saltarse la cuota
                 await tx.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
@@ -103,7 +107,7 @@ class FilesController {
                         req.user.id,
                         upload.storageName,
                         tripleEncryptor.encrypt(upload.filename),
-                        tripleEncryptor.encrypt(upload.dataKey.toString('hex')),   // clave del archivo, envuelta con la maestra
+                        keyEncrypted,                       // clave del archivo, envuelta con la maestra o con el KMS
                         upload.mime,
                         upload.category,
                         upload.size,
@@ -193,7 +197,12 @@ class FilesController {
         }
 
         const name = tripleEncryptor.decrypt(row.filename_encrypted);
-        const key = Buffer.from(tripleEncryptor.decrypt(row.key_encrypted), 'hex');
+        let key;
+        try {
+            key = await fileKeys.recover(row.storage_name, row.key_encrypted);
+        } catch (error) {
+            return this.keyUnavailable(req, res, row, error);
+        }
         const start = range ? range.start : 0;
         const end = range ? range.end : size - 1;
         const inline = req.validated?.query?.inline === true && INLINE_CATEGORIES.has(row.category);
@@ -262,6 +271,16 @@ class FilesController {
     async integrityFailure(req, res, row, error) {
         await this.recordIntegrityFailure(req, row, error);
         res.status(500).json({ success: false, message: 'El archivo no se pudo leer', code: 'FILE_CORRUPT' });
+    }
+
+    // El KMS no entregó la clave del archivo (caído, sin permisos o blob manipulado): 503, nunca un detalle del proveedor
+    async keyUnavailable(req, res, row, error) {
+        console.error(`❌ Clave del archivo ${row.id} no disponible:`, error.message);
+        await events.record({
+            type: 'FILE_KEY_UNAVAILABLE', rule: 'KMS_DATA_KEY', severity: 'high', riskScore: 60,
+            req, userId: req.user.id, details: { fileId: Number(row.id) }
+        });
+        res.status(503).json({ success: false, message: 'El archivo no está disponible en este momento', code: 'FILE_KEY_UNAVAILABLE' });
     }
 
     async remove(req, res) {

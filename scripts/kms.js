@@ -6,6 +6,9 @@
 //   npm run kms -- migrate-env [--file .env]    envuelve en el sitio las semillas y secretos del .env
 //        [--vars A,B,C] [--no-backup] [--rewrap]    (--rewrap: pasa de un KMS a otro)
 //   npm run kms -- unwrap-env [--file .env]     escribe por stdout el .env en CLARO (salida de emergencia)
+//   npm run kms -- migrate-files [--dry-run]    pasa las claves de los archivos de la clave maestra al KMS (kms1:)
+//   npm run kms -- unmigrate-files [--dry-run]  las devuelve a la clave maestra (salida de emergencia)
+//   npm run kms -- rewrap-files [--dry-run]     re-envuelve las kms1: con el KMS_PROVIDER actual (cambio de KMS / de clave)
 
 const fs = require('fs');
 const path = require('path');
@@ -99,15 +102,74 @@ function unwrapEnv() {
     process.stdout.write(replaceInEnvText(text, Object.fromEntries(targets.map((n, i) => [n, plain[i]]))));
 }
 
-const commands = { status, wrap, 'migrate-env': migrateEnv, 'unwrap-env': unwrapEnv };
-try {
-    if (commands[command]) {
-        commands[command]();
-    } else {
-        console.log('Uso: npm run kms -- status | wrap NOMBRE | migrate-env [--file .env] [--vars A,B] [--no-backup] [--rewrap] | unwrap-env [--file .env]');
-        process.exitCode = command ? 2 : 0;
+// Claves de archivo: se procesa fila a fila y se comprueba la ida y vuelta ANTES de escribir; el UPDATE solo se aplica si la
+// fila sigue igual (si un proceso la cambió entre medias, se salta y se cuenta). Repetible: lo ya migrado no se toca.
+async function migrateFiles(mode) {
+    require('dotenv').config({ path: envFile });
+    const db = require('../src/config/database');
+    const fileKeys = require('../src/crypto/file-keys');
+    const tripleEncryptor = require('../src/crypto/tripleEncryptor');
+    const dataKeys = require('../src/crypto/kms-data-keys');
+    const dry = flag('--dry-run');
+    if (mode !== 'unmigrate' && !process.env.KMS_PROVIDER) throw new Error('define KMS_PROVIDER (file | vault | aws)');
+
+    const stats = { processed: 0, skipped: 0, changed: 0, raced: 0, failed: [] };
+    let lastId = 0;
+    try {
+        for (;;) {
+            const [rows] = await db.query('SELECT id, storage_name, key_encrypted FROM user_files WHERE id > ? ORDER BY id LIMIT 200', [lastId]);
+            if (rows.length === 0) break;
+            for (const row of rows) {
+                lastId = row.id;
+                stats.processed++;
+                const external = dataKeys.isKmsKey(row.key_encrypted);
+                if ((mode === 'migrate' && external) || (mode === 'unmigrate' && !external) || (mode === 'rewrap' && !external)) { stats.skipped++; continue; }
+
+                try {
+                    const key = await fileKeys.recover(row.storage_name, row.key_encrypted);
+                    const next = mode === 'unmigrate'
+                        ? tripleEncryptor.encrypt(key.toString('hex'))
+                        : await dataKeys.wrapDataKey(row.storage_name, key);
+
+                    dataKeys.clearCache();
+                    const back = await fileKeys.recover(row.storage_name, next);
+                    if (!back.equals(key)) throw new Error('la clave no sobrevivió a la ida y vuelta');
+
+                    if (dry) { stats.changed++; continue; }
+                    const [result] = await db.query('UPDATE user_files SET key_encrypted = ? WHERE id = ? AND key_encrypted = ?', [next, row.id, row.key_encrypted]);
+                    if (result.affectedRows === 1) stats.changed++; else stats.raced++;
+                } catch (error) {
+                    stats.failed.push(Number(row.id)); // una fila ilegible no bloquea las demás; nunca se escribe nada de ella
+                    console.error(`⚠️ Archivo ${row.id}: ${error.message}`);
+                }
+            }
+        }
+    } finally {
+        await db.pool.end();
     }
-} catch (error) {
-    console.error(`❌ ${error.message}`);
-    process.exitCode = 1;
+    console.log(`${dry ? '(simulación) ' : ''}Archivos revisados: ${stats.processed} · ${stats.changed} ${dry ? 'se cambiarían' : 'cambiados'} · ${stats.skipped} ya estaban · ${stats.raced} modificados por otro proceso (repite el comando)`);
+    if (stats.failed.length) {
+        console.error(`❌ ${stats.failed.length} fallaron: ${stats.failed.slice(0, 50).join(', ')}${stats.failed.length > 50 ? ', …' : ''}`);
+        process.exitCode = 1;
+    }
 }
+
+const commands = {
+    status, wrap, 'migrate-env': migrateEnv, 'unwrap-env': unwrapEnv,
+    'migrate-files': () => migrateFiles('migrate'),
+    'unmigrate-files': () => migrateFiles('unmigrate'),
+    'rewrap-files': () => migrateFiles('rewrap')
+};
+(async () => {
+    try {
+        if (commands[command]) {
+            await commands[command]();
+        } else {
+            console.log('Uso: npm run kms -- status | wrap NOMBRE | migrate-env [--file .env] [--vars A,B] [--no-backup] [--rewrap] | unwrap-env [--file .env] | migrate-files | unmigrate-files | rewrap-files [--dry-run]');
+            process.exitCode = command ? 2 : 0;
+        }
+    } catch (error) {
+        console.error(`❌ ${error.message}`);
+        process.exitCode = 1;
+    }
+})();

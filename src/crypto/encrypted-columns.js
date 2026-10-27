@@ -35,4 +35,9 @@ const ENCRYPTED_COLUMNS = {
 // (hoy ninguna; añade aquí `tabla.columna: 'motivo'` si alguna vez hace falta)
 const IGNORED = {};
 
-module.exports = { ENCRYPTED_COLUMNS, IGNORED };
+// Valores que NO están cifrados con la clave maestra sino por un sistema externo (hoy: clave de archivo envuelta por el
+// KMS, "kms1:"). La rotación y el snapshot los dejan tal cual.
+const EXTERNAL_PREFIXES = ['kms1:'];
+const isExternal = (value) => typeof value === 'string' && EXTERNAL_PREFIXES.some(prefix => value.startsWith(prefix));
+
+module.exports = { ENCRYPTED_COLUMNS, IGNORED, EXTERNAL_PREFIXES, isExternal };

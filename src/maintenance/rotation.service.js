@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const keyProvider = require('../crypto/key-provider');
-const { ENCRYPTED_COLUMNS } = require('../crypto/encrypted-columns');
+const { ENCRYPTED_COLUMNS, isExternal } = require('../crypto/encrypted-columns');
 const { buildSnapshot, restoreSnapshot, summarize } = require('../backup/snapshot');
 const { createArchive, openArchive, readHeader, rewrapArchive } = require('../backup/archive');
 const { buildKeyring, openKeyring } = require('../backup/keyring');
@@ -214,6 +214,7 @@ class RotationService {
                     for (const col of cols) {
                         const value = row[col];
                         if (value === null || value === undefined) continue;
+                        if (isExternal(value)) continue; // la protege el KMS, no la clave maestra
 
                         if (this.tryDecryptWith(newKey, value) !== null) { stats.alreadyMigrated++; continue; }
 
@@ -265,7 +266,7 @@ class RotationService {
             }
             for (const row of rows) {
                 for (const col of spec.columns) {
-                    if (row[col] === null) continue;
+                    if (row[col] === null || isExternal(row[col])) continue;
                     const plain = this.tryDecryptWith(newKey, row[col]);
                     if (plain === null) throw new Error(`Verificación fallida: ${table}.${col} (${spec.primaryKey}=${row[spec.primaryKey]}) no se descifra con la clave nueva`);
                     const expected = expectedHashes.get(`${table}:${row[spec.primaryKey]}:${col}`);

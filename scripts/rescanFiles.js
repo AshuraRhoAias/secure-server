@@ -13,7 +13,7 @@
 require('dotenv').config({ path: process.env.ENV_FILE || require('path').join(__dirname, '../.env') });
 
 const db = require('../src/config/database');
-const tripleEncryptor = require('../src/crypto/tripleEncryptor');
+const fileKeys = require('../src/crypto/file-keys');
 const cipher = require('../src/files/file-cipher');
 const storage = require('../src/files/storage');
 const av = require('../src/files/av-scanner');
@@ -34,7 +34,7 @@ async function main() {
 
     const summary = { scanned: 0, clean: 0, infected: [], errors: [], deleted: 0 };
     for (const file of files) {
-        const key = Buffer.from(tripleEncryptor.decrypt(file.key_encrypted), 'hex');
+        const key = await fileKeys.recover(file.storage_name, file.key_encrypted);
         const verdict = await av.scanBuffers(cipher.decryptRange({
             filePath: storage.finalPath(file.storage_name), key, plainSize: Number(file.size_bytes)
         }));

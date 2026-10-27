@@ -519,8 +519,20 @@ itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archi
         [userId, crypto.randomUUID(), encCurrent('mi-archivo.png'), encCurrent(dataKey.toString('hex')), plain.length, sha(plain)]
     );
 
+    // Y otro cuya clave la guarda el KMS (kms1:): no depende de la clave maestra, la rotación no debe tocarla ni intentar descifrarla
+    const kmsBlob = 'kms1:file:' + crypto.randomBytes(40).toString('base64url');
+    await db.query(
+        `INSERT INTO user_files (user_id, storage_name, filename_encrypted, key_encrypted, mime_type, category, size_bytes, sha256)
+         VALUES (?, ?, ?, ?, 'image/png', 'image', 1, ?)`,
+        [userId, crypto.randomUUID(), encCurrent('con-kms.png'), kmsBlob, sha(plain)]
+    );
+
     await w.service.run({ env: w.env(), drainSeconds: 0 });
     const newSet = newKeyFromFile(w.paths.envFile);
+
+    const [[kmsRow]] = await db.query("SELECT key_encrypted, filename_encrypted FROM user_files WHERE key_encrypted LIKE 'kms1:%'");
+    assert.strictEqual(kmsRow.key_encrypted, kmsBlob, 'la rotación deja intacta la clave del KMS');
+    assert.strictEqual(decWith(newSet.encryption, kmsRow.filename_encrypted), 'con-kms.png', 'pero sí re-envuelve el nombre');
 
     // La nota antigua ahora es v4 y se lee con la clave nueva
     const [[afterNote]] = await db.query('SELECT title_encrypted, content_encrypted FROM user_notes WHERE id = ?', [inserted.insertId]);
@@ -529,7 +541,7 @@ itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archi
     assert.strictEqual(decWith(newSet.encryption, afterNote.content_encrypted), 'contenido heredado');
 
     // El archivo: nombre y clave re-envueltos con la clave nueva (y ya no con la antigua)…
-    const [[row]] = await db.query('SELECT filename_encrypted, key_encrypted FROM user_files');
+    const [[row]] = await db.query("SELECT filename_encrypted, key_encrypted FROM user_files WHERE key_encrypted NOT LIKE 'kms1:%'");
     assert.strictEqual(decWith(newSet.encryption, row.filename_encrypted), 'mi-archivo.png');
     const unwrapped = Buffer.from(decWith(newSet.encryption, row.key_encrypted), 'hex');
     assert.ok(unwrapped.equals(dataKey));
