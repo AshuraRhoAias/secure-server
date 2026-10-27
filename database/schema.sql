@@ -559,3 +559,12 @@ CREATE TABLE `webauthn_challenges` (
   KEY `idx_webauthn_challenge_exp` (`expires_at`),
   CONSTRAINT `webauthn_challenges_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Caché de SAML: AuthnRequest pendientes y aserciones ya usadas (migración 016)
+CREATE TABLE `saml_cache` (
+  `cache_key` varchar(190) NOT NULL,
+  `cache_value` varchar(512) NOT NULL,
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`cache_key`),
+  KEY `idx_saml_cache_exp` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -29,13 +29,14 @@
     "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\"",
     "test:security": "node --test test_security.js",
     "test:files": "node --test test_files.js",
-    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_kms.js test_files.js test_sanitize.js test_ops.js test_av.js test_files_backup.js",
+    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_files.js test_sanitize.js test_ops.js test_av.js test_files_backup.js",
     "test:mfa": "node --test test_mfa.js",
     "test:sessions": "node --test test_sessions.js",
     "test:rbac": "node --test test_rbac.js",
     "test:sanitize": "node --test test_sanitize.js",
     "test:ops": "node --test test_ops.js",
     "test:webauthn": "node --test test_webauthn.js",
+    "test:saml": "node --test test_saml.js",
     "test:sso": "node --test test_sso.js",
     "kms": "node scripts/kms.js",
     "test:kms": "node --test test_kms.js",
@@ -59,7 +60,9 @@
   "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1155.0",
+    "@node-saml/node-saml": "^5.2.0",
     "@simplewebauthn/server": "^14.0.3",
+    "@xmldom/xmldom": "^0.8.15",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "busboy": "^1.6.0",
@@ -90,6 +93,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-security": "^3.0.1",
     "globals": "^17.13.0",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "xml-crypto": "^6.4.0"
   }
 }

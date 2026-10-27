@@ -187,6 +187,7 @@ test('el cargador monta cada *.routes.js en /api/<nombre>', () => {
         '/api/files': 'protected',
         '/api/metrics': 'custom',
         '/api/notes': 'protected',
+        '/api/saml': 'public',
         '/api/sso': 'public',
         '/api/system': 'protected'
     });

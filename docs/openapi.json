@@ -2624,6 +2624,148 @@
           }
         }
       }
+    },
+    "/api/saml/status": {
+      "get": {
+        "summary": "¿SAML activado?",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ enabled }"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/metadata": {
+      "get": {
+        "summary": "Metadatos SAML del proveedor de servicio (entityID, URL ACS, certificado)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "XML application/samlmetadata+xml"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/login": {
+      "get": {
+        "summary": "Inicia el login SAML: 302 al IdP (o JSON con ?format=json)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ url }"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "302": {
+            "description": "Redirección al IdP"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          },
+          "503": {
+            "description": "Mal configurado"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/acs": {
+      "post": {
+        "summary": "ACS: recibe la respuesta firmada del IdP y abre sesión (amr \"saml\")",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión (o 303 a SAML_POST_LOGIN_URL)"
+          },
+          "401": {
+            "description": "Respuesta no válida (firma, audiencia, repetición...)"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "303": {
+            "description": "Redirección a la URL fija de la aplicación"
+          },
+          "400": {
+            "description": "Respuesta mal formada"
+          },
+          "403": {
+            "description": "Dominio o usuario no permitido"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "SAMLResponse"
+                ],
+                "properties": {
+                  "SAMLResponse": {
+                    "type": "string",
+                    "description": "XML en base64"
+                  },
+                  "RelayState": {
+                    "type": "string",
+                    "description": "Se ignora"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

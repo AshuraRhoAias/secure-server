@@ -5,6 +5,8 @@ const db = require('../config/database');
 const tripleEncryptor = require('../crypto/tripleEncryptor');
 const secureAuth = require('../security/secure-auth.service');
 const { ipSubject } = require('../security/ip');
+const { SsoError } = require('./errors');
+const { resolveFederatedUser } = require('./federated-users');
 
 // SSO por OpenID Connect (flujo "authorization code" + PKCE). Funciona con cualquier proveedor que
 // publique /.well-known/openid-configuration: Microsoft Entra ID (Azure AD), Okta, Auth0, Keycloak,
@@ -26,15 +28,6 @@ const ASYMMETRIC_ALGS = ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', '
 const STATE_TTL_MINUTES = 10;
 const HTTP_TIMEOUT_MS = 8000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
-
-class SsoError extends Error {
-    constructor(code, message, { status = 400, rule = code } = {}) {
-        super(message);
-        this.code = code;
-        this.status = status;
-        this.rule = rule;
-    }
-}
 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const b64url = (buffer) => Buffer.from(buffer).toString('base64url');
@@ -245,59 +238,13 @@ class OidcService {
         return isAdmin ? 'admin' : 'user';
     }
 
-    // Busca el usuario local de esta identidad o lo crea. NUNCA se enlaza por email con una cuenta existente.
+    // Busca el usuario local de esta identidad o lo crea. NUNCA se enlaza por email con una cuenta existente (ver federated-users.js).
     async resolveUser(claims) {
         const c = config();
-        const identityHash = sha256(`${c.issuer}|${claims.sub}`);
-        const claimedRole = this.roleFromClaims(claims);
-
-        const [found] = await db.query(
-            `SELECT u.id, u.username_encrypted, u.role FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.identity_hash = ?`,
-            [identityHash]
-        );
-        if (found.length > 0) {
-            await db.query('UPDATE user_identities SET last_login_at = NOW() WHERE identity_hash = ?', [identityHash]);
-            // El proveedor solo concede o retira 'admin'; los roles auditor/operator (asignados con set-role) no se degradan
-            const roleNow = found[0].role;
-            const nextRole = claimedRole === 'admin' ? 'admin' : (roleNow === 'admin' ? 'user' : roleNow);
-            if (claimedRole && nextRole !== roleNow) await db.query('UPDATE users SET role = ? WHERE id = ?', [nextRole, found[0].id]);
-            return { id: found[0].id, username: tripleEncryptor.decrypt(found[0].username_encrypted), role: claimedRole ? nextRole : roleNow, provisioned: false };
-        }
-
-        if (!c.autoProvision) throw new SsoError('SSO_USER_NOT_PROVISIONED', 'Tu usuario no está dado de alta', { status: 403, rule: 'SSO_USER_NOT_PROVISIONED' });
-
-        const email = typeof claims.email === 'string' ? claims.email.toLowerCase() : '';
-        if (c.allowedDomains.length > 0 && !c.allowedDomains.includes(email.split('@')[1] || '')) {
-            throw new SsoError('SSO_DOMAIN_NOT_ALLOWED', 'Tu dominio no tiene acceso', { status: 403, rule: 'SSO_DOMAIN_NOT_ALLOWED' });
-        }
-
-        const username = `sso_${identityHash.slice(0, 20)}`;
-        const usernameHash = secureAuth.generateUsernameHash(username);
-        const role = claimedRole || 'user';
-
-        try {
-            const created = await db.transaction(async (tx) => {
-                const [result] = await tx.query(
-                    `INSERT INTO users (username_encrypted, username_hash, email_encrypted, password_hash, device_fingerprint,
-                                        risk_level_encrypted, encrypted_metadata, encryption_version, role, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-                    [
-                        tripleEncryptor.encrypt(username), usernameHash, tripleEncryptor.encrypt(email),
-                        // Contraseña imposible de adivinar: esta cuenta solo entra por SSO
-                        await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
-                        '', tripleEncryptor.encrypt('low'),
-                        tripleEncryptor.encrypt(JSON.stringify({ provisionedBy: 'sso', issuer: c.issuer, at: new Date().toISOString() })),
-                        'v4.0.0', role
-                    ]
-                );
-                await tx.query('INSERT INTO user_identities (user_id, issuer, identity_hash, last_login_at) VALUES (?, ?, ?, NOW())', [result.insertId, c.issuer.slice(0, 255), identityHash]);
-                return result.insertId;
-            });
-            return { id: created, username, role, provisioned: true };
-        } catch (error) {
-            if (error.code === 'ER_DUP_ENTRY') return this.resolveUser(claims); // dos primeros logins a la vez: gana uno
-            throw error;
-        }
+        return resolveFederatedUser({
+            issuerKey: c.issuer, subject: claims.sub, email: claims.email, claimedRole: this.roleFromClaims(claims),
+            autoProvision: c.autoProvision, allowedDomains: c.allowedDomains, provisionedBy: 'sso'
+        });
     }
 
     // Borra estados caducados (la limpieza periódica lo llama)
