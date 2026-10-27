@@ -106,7 +106,7 @@ const loginStep2 = (mfaToken, body, ip) => api(app.base, 'POST', '/api/auth/logi
 itDb('alta: setup devuelve secreto, otpauth y QR; enable exige un código válido y entrega 10 códigos de recuperación', async () => {
     const ip = testIp();
     const user = await registerAndLogin(app.base, { ip });
-    assert.deepStrictEqual((await api(app.base, 'GET', '/api/auth/mfa', { ip, token: user.token })).body.mfa, { enabled: false, pendingSetup: false, recoveryCodesRemaining: 0 });
+    assert.deepStrictEqual((await api(app.base, 'GET', '/api/auth/mfa', { ip, token: user.token })).body.mfa, { enabled: false, totp: false, passkeys: 0, pendingSetup: false, recoveryCodesRemaining: 0 });
 
     const setup = await api(app.base, 'POST', '/api/auth/mfa/setup', { ip, token: user.token });
     assert.strictEqual(setup.status, 200);
@@ -128,7 +128,7 @@ itDb('alta: setup devuelve secreto, otpauth y QR; enable exige un código válid
     assert.strictEqual(ok.body.recoveryCodes.length, 10);
     assert.strictEqual(new Set(ok.body.recoveryCodes).size, 10);
 
-    assert.deepStrictEqual((await api(app.base, 'GET', '/api/auth/mfa', { ip, token: user.token })).body.mfa, { enabled: true, pendingSetup: false, recoveryCodesRemaining: 10 });
+    assert.deepStrictEqual((await api(app.base, 'GET', '/api/auth/mfa', { ip, token: user.token })).body.mfa, { enabled: true, totp: true, passkeys: 0, pendingSetup: false, recoveryCodesRemaining: 10 });
     assert.strictEqual((await api(app.base, 'POST', '/api/auth/mfa/setup', { ip, token: user.token })).status, 409, 'no se puede re-iniciar con MFA activo');
     assert.strictEqual((await api(app.base, 'POST', '/api/auth/mfa/enable', { ip, token: user.token, json: { otp: totp.totp(setup.body.secret) } })).status, 409);
 

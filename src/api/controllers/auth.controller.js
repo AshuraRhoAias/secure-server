@@ -3,6 +3,7 @@ const { AuthError } = secureAuthService;
 const { normalizeIp } = require('../../security/ip');
 const mfaService = require('../../security/mfa.service');
 const { MfaError } = mfaService;
+const webauthn = require('../../security/webauthn.service');
 const events = require('../../security/security-events.service');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
 const bcrypt = require('bcryptjs');
@@ -141,7 +142,8 @@ class AuthController {
                     mfaRequired: true,
                     message: 'Se requiere el segundo factor',
                     mfaToken: authResult.mfaToken,
-                    mfaTokenExpiresIn: authResult.mfaTokenExpiresIn
+                    mfaTokenExpiresIn: authResult.mfaTokenExpiresIn,
+                    methods: authResult.mfaMethods
                 });
             }
 
@@ -168,6 +170,107 @@ class AuthController {
         } catch (error) {
             await this.failedAuth(res, error, { usernameHash, ip, where: 'login-mfa' });
         }
+    }
+
+    // Paso 2 con passkey. A) opciones (reto)  B) firma
+    async loginWebauthnOptions(req, res) {
+        const ip = normalizeIp(req.ip);
+        try {
+            const options = await secureAuthService.beginWebauthnLogin(req.body.mfaToken, this.deviceContext(req, ip));
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, options });
+        } catch (error) {
+            if (error instanceof webauthn.WebauthnError) return this.webauthnFailure(res, error);
+            await this.failedAuth(res, error, { usernameHash: 'unknown', ip, where: 'login-webauthn-options' });
+        }
+    }
+
+    async loginWebauthn(req, res) {
+        const ip = normalizeIp(req.ip);
+        let usernameHash = 'unknown';
+        try {
+            try { usernameHash = require('jsonwebtoken').decode(req.body.mfaToken)?.uh || 'unknown'; } catch { /* se valida dentro */ }
+            const authResult = await secureAuthService.verifyWebauthnChallenge(req.body.mfaToken, req.body.credential, this.deviceContext(req, ip));
+            await this.finishLogin(res, authResult, { usernameHash, ip });
+        } catch (error) {
+            if (error instanceof webauthn.WebauthnError) return this.webauthnFailure(res, error);
+            await this.failedAuth(res, error, { usernameHash, ip, where: 'login-webauthn' });
+        }
+    }
+
+    // ------------------------------------------------------------------ gestionar passkeys (sesión iniciada)
+
+    // Contraseña SIEMPRE; y, si ya hay un segundo factor, también un código válido: una sesión robada no puede
+    // añadir su propia llave para quedarse (ni quitar la del dueño).
+    async requireManageReauth(req) {
+        if (!(await mfaService.passwordMatches(req.user.id, req.body.password))) {
+            throw new MfaError('INVALID_CREDENTIALS', 'Credenciales inválidas', 401);
+        }
+        if (await mfaService.hasSecondFactor(req.user.id)) {
+            const { otp, recoveryCode } = req.body;
+            if (!(otp || recoveryCode) || !(await mfaService.verify(req.user.id, { otp, recoveryCode })).ok) {
+                throw new MfaError('INVALID_OTP', 'Código incorrecto', 401);
+            }
+        }
+    }
+
+    async webauthnList(req, res) {
+        try {
+            const rows = await webauthn.listCredentials(req.user.id);
+            res.json({ success: true, enabled: webauthn.enabled(), credentials: rows.map(webauthn.publicCredential) });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRegisterOptions(req, res) {
+        try {
+            await this.requireManageReauth(req);
+            const options = await webauthn.beginRegistration(req.user.id, req.user.username);
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, options });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRegister(req, res) {
+        try {
+            const hadFactor = await mfaService.hasSecondFactor(req.user.id);
+            const { id } = await webauthn.finishRegistration(req.user.id, req.body.credential, req.body.name);
+            // La primera llave es el primer segundo factor: sin códigos de recuperación, perderla dejaría a la persona fuera
+            const recoveryCodes = hadFactor ? undefined : await mfaService.regenerateRecoveryCodes(req.user.id);
+            await events.record({ type: 'WEBAUTHN_REGISTERED', severity: 'low', riskScore: 10, req, userId: req.user.id, details: { credentialRow: id } });
+            res.status(201).json({
+                success: true, id,
+                ...(recoveryCodes && { recoveryCodes, message: 'Guarda estos códigos de recuperación: no se volverán a mostrar.' })
+            });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRemove(req, res) {
+        try {
+            await this.requireManageReauth(req);
+            if (!(await webauthn.removeCredential(req.user.id, req.validated.params.id))) {
+                return res.status(404).json({ success: false, message: 'Llave no encontrada', code: 'NOT_FOUND' });
+            }
+            // Si era el último factor, los códigos de recuperación ya no protegen nada
+            if (!(await mfaService.hasSecondFactor(req.user.id))) await mfaService.clearRecoveryCodes(req.user.id);
+            await events.record({ type: 'WEBAUTHN_REMOVED', severity: 'medium', riskScore: 20, req, userId: req.user.id, details: { credentialRow: req.validated.params.id } });
+            res.json({ success: true, message: 'Llave eliminada' });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    webauthnFailure(res, error) {
+        if (error instanceof webauthn.WebauthnError || error instanceof MfaError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error('❌ Error en WebAuthn:', error.code || error.message);
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 
     deviceContext(req, ip) {

@@ -42,6 +42,18 @@ router.post('/login/mfa',
     authController.loginMfa
 );
 
+// Segundo paso con passkey / llave de seguridad (WebAuthn): 1) opciones con el reto  2) la firma
+router.post('/login/webauthn/options',
+    protectionMiddleware.highSecurity(),
+    validate.body({ mfaToken: { type: 'string', required: true, max: 2000 }, deviceInfo: { type: 'object' } }),
+    authController.loginWebauthnOptions
+);
+router.post('/login/webauthn',
+    protectionMiddleware.highSecurity(),
+    validate.body({ mfaToken: { type: 'string', required: true, max: 2000 }, credential: { type: 'object', required: true }, deviceInfo: { type: 'object' } }),
+    authController.loginWebauthn
+);
+
 // Renovar el token de acceso: la credencial es el refresh token (opaco, 256 bits, de un solo uso)
 router.post('/refresh',
     validate.body({
@@ -65,6 +77,21 @@ router.post('/mfa/setup', protectionMiddleware.highSecurity(), authController.mf
 router.post('/mfa/enable', protectionMiddleware.highSecurity(), validate.body({ otp: { type: 'string', required: true, pattern: /^\d{6}$/ } }), authController.mfaEnable);
 router.post('/mfa/disable', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaDisable);
 router.post('/mfa/recovery-codes', protectionMiddleware.highSecurity(), validate.body(reauth), authController.mfaRegenerateCodes);
+
+// Passkeys / llaves de seguridad. Añadir o quitar una exige contraseña (+ segundo factor si ya hay uno)
+router.get('/webauthn/credentials', authController.webauthnList);
+router.post('/webauthn/register/options', protectionMiddleware.highSecurity(), validate.body(reauth), authController.webauthnRegisterOptions);
+router.post('/webauthn/register',
+    protectionMiddleware.highSecurity(),
+    validate.body({ credential: { type: 'object', required: true }, name: { type: 'string', max: 60 } }),
+    authController.webauthnRegister
+);
+router.delete('/webauthn/credentials/:id',
+    protectionMiddleware.highSecurity(),
+    validate.params({ id: { type: 'integer', required: true, min: 1 } }),
+    validate.body(reauth),
+    authController.webauthnRemove
+);
 
 router.post('/logout', authController.logout);
 router.post('/logout-all', validate.body({ keepCurrent: { type: 'boolean' } }), authController.logoutAll);

@@ -95,25 +95,29 @@ class SecureAuthService {
                 userId: user.id,
                 mfaRequired: true,
                 mfaToken: this.signMfaChallenge(user, usernameHash),
-                mfaTokenExpiresIn: MFA_CHALLENGE_SECONDS
+                mfaTokenExpiresIn: MFA_CHALLENGE_SECONDS,
+                mfaMethods: user.mfaMethods
             };
         }
 
         return this.completeLogin({ user, usernameHash, deviceInfo, amr: ['pwd'] });
     }
 
-    // Paso 2 del login con MFA
-    async verifyMfaChallenge(mfaToken, { otp, recoveryCode }, deviceInfo) {
-        const mfa = require('./mfa.service');
-        const ip = deviceInfo.ipAddress;
-
-        let challenge;
+    decodeMfaChallenge(mfaToken) {
         try {
-            challenge = jwt.verify(mfaToken, credentialBuilder.generateJWTSecret(), { algorithms: ['HS256'] });
+            const challenge = jwt.verify(mfaToken, credentialBuilder.generateJWTSecret(), { algorithms: ['HS256'] });
             if (challenge.typ !== 'mfa') throw new Error('tipo');
+            return challenge;
         } catch {
             throw new AuthError('INVALID_MFA_TOKEN', 'El reto de verificación no es válido o caducó: vuelve a iniciar sesión');
         }
+    }
+
+    // Paso 2 del login con MFA (código TOTP o de recuperación)
+    async verifyMfaChallenge(mfaToken, { otp, recoveryCode }, deviceInfo) {
+        const mfa = require('./mfa.service');
+        const ip = deviceInfo.ipAddress;
+        const challenge = this.decodeMfaChallenge(mfaToken);
 
         // El segundo factor comparte el bloqueo de cuenta con la contraseña
         await this.assertNotLocked(challenge.uh, ip);
@@ -133,6 +137,30 @@ class SecureAuthService {
 
         const user = { id: challenge.userId, username: challenge.username };
         return this.completeLogin({ user, usernameHash: challenge.uh, deviceInfo, amr: ['pwd', result.method === 'recovery' ? 'recovery' : 'otp'] });
+    }
+
+    // Paso 2 con passkey, parte A: opciones (reto) para que el navegador firme
+    async beginWebauthnLogin(mfaToken, deviceInfo) {
+        const challenge = this.decodeMfaChallenge(mfaToken);
+        await this.assertNotLocked(challenge.uh, deviceInfo.ipAddress);
+        return require('./webauthn.service').beginAuthentication(challenge.userId);
+    }
+
+    // Parte B: la firma. Un intento fallido cuenta igual que una contraseña o un código erróneos (mismo bloqueo).
+    async verifyWebauthnChallenge(mfaToken, response, deviceInfo) {
+        const webauthn = require('./webauthn.service');
+        const ip = deviceInfo.ipAddress;
+        const challenge = this.decodeMfaChallenge(mfaToken);
+        await this.assertNotLocked(challenge.uh, ip);
+
+        const result = await webauthn.verifyAuthentication(challenge.userId, response);
+        if (!result.ok) {
+            await this.failLogin({ usernameHash: challenge.uh, ip, userId: challenge.userId, rule: result.rule || 'BAD_WEBAUTHN', reason: 'bad_mfa' });
+            throw new AuthError('INVALID_WEBAUTHN', 'No se pudo verificar la llave de seguridad');
+        }
+
+        const user = { id: challenge.userId, username: challenge.username };
+        return this.completeLogin({ user, usernameHash: challenge.uh, deviceInfo, amr: ['pwd', 'hwk'] });
     }
 
     signMfaChallenge(user, usernameHash) {
@@ -220,7 +248,9 @@ class SecureAuthService {
 
         const usernameHash = this.generateUsernameHash(username);
         const [users] = await db.query(
-            'SELECT id, username_encrypted, password_hash, mfa_enabled FROM users WHERE username_hash = ?',
+            `SELECT id, username_encrypted, password_hash, mfa_enabled,
+                    (SELECT COUNT(*) FROM webauthn_credentials w WHERE w.user_id = users.id) AS passkeys
+             FROM users WHERE username_hash = ?`,
             [usernameHash]
         );
 
@@ -229,7 +259,11 @@ class SecureAuthService {
         const passwordOk = await bcrypt.compare(String(password), user ? user.password_hash : DUMMY_HASH);
         if (!user || !passwordOk) return null;
 
-        return { id: user.id, username: tripleEncryptor.decrypt(user.username_encrypted), mfaEnabled: Boolean(user.mfa_enabled) };
+        // Segundo factor = TOTP y/o passkeys. Los códigos de recuperación valen para cualquiera de los dos.
+        const totp = Boolean(user.mfa_enabled);
+        const passkeys = Number(user.passkeys) > 0;
+        const methods = [totp && 'totp', passkeys && require('./webauthn.service').enabled() && 'webauthn', (totp || passkeys) && 'recovery'].filter(Boolean);
+        return { id: user.id, username: tripleEncryptor.decrypt(user.username_encrypted), mfaEnabled: totp || passkeys, mfaMethods: methods };
     }
 
     generateUsernameHash(username) {

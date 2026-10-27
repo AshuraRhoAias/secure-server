@@ -2328,6 +2328,302 @@
           }
         ]
       }
+    },
+    "/api/auth/login/webauthn/options": {
+      "post": {
+        "summary": "Login con passkey (paso 2, A): opciones con el reto",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Opciones WebAuthn"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "WebAuthn no activado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mfaToken"
+                ],
+                "properties": {
+                  "mfaToken": {
+                    "type": "string"
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login/webauthn": {
+      "post": {
+        "summary": "Login con passkey (paso 2, B): la firma",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Bloqueado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mfaToken",
+                  "credential"
+                ],
+                "properties": {
+                  "mfaToken": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "type": "object"
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/credentials": {
+      "get": {
+        "summary": "Passkeys registradas del usuario (sin claves)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/webauthn/register/options": {
+      "post": {
+        "summary": "Registrar passkey (A): opciones; exige contraseña (+ segundo factor si ya hay)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Opciones WebAuthn"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "WebAuthn no activado"
+          },
+          "409": {
+            "description": "Máximo de llaves"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/register": {
+      "post": {
+        "summary": "Registrar passkey (B): respuesta del autenticador; la primera entrega códigos de recuperación",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Registrada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "201": {
+            "description": "Registrada"
+          },
+          "400": {
+            "description": "Reto o firma no válidos"
+          },
+          "409": {
+            "description": "Ya registrada"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "credential"
+                ],
+                "properties": {
+                  "credential": {
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/credentials/{id}": {
+      "delete": {
+        "summary": "Quitar una passkey; exige contraseña (+ segundo factor)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eliminada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "No existe"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

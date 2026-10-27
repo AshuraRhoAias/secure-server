@@ -526,3 +526,36 @@ CREATE TABLE `security_alerts` (
   KEY `idx_alerts_status` (`status`, `last_seen`),
   KEY `idx_alerts_rule` (`rule`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Passkeys / llaves de seguridad WebAuthn (migración 015)
+CREATE TABLE `webauthn_credentials` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `credential_id` varchar(512) NOT NULL,
+  `public_key` text NOT NULL,
+  `counter` bigint(20) unsigned NOT NULL DEFAULT 0,
+  `transports` varchar(100) DEFAULT NULL,
+  `device_type` enum('singleDevice','multiDevice') NOT NULL DEFAULT 'singleDevice',
+  `backed_up` tinyint(1) NOT NULL DEFAULT 0,
+  `aaguid` char(36) DEFAULT NULL,
+  `name` varchar(60) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_webauthn_credential` (`credential_id`),
+  KEY `idx_webauthn_user` (`user_id`),
+  CONSTRAINT `webauthn_credentials_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `webauthn_challenges` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `challenge` varchar(128) NOT NULL,
+  `purpose` enum('register','login') NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_webauthn_challenge` (`challenge`),
+  KEY `idx_webauthn_challenge_exp` (`expires_at`),
+  CONSTRAINT `webauthn_challenges_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

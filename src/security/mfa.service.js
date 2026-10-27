@@ -35,7 +35,20 @@ class MfaService {
         const state = await this.getState(userId);
         const [[codes]] = await db.query(
             'SELECT COUNT(*) AS remaining FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [userId]);
-        return { enabled: Boolean(state?.mfa_enabled), pendingSetup: Boolean(state?.mfa_secret_encrypted && !state.mfa_enabled), recoveryCodesRemaining: Number(codes.remaining) };
+        const passkeys = await require('./webauthn.service').countCredentials(userId);
+        return {
+            enabled: Boolean(state?.mfa_enabled) || passkeys > 0,          // hay algún segundo factor
+            totp: Boolean(state?.mfa_enabled),
+            passkeys,
+            pendingSetup: Boolean(state?.mfa_secret_encrypted && !state.mfa_enabled),
+            recoveryCodesRemaining: Number(codes.remaining)
+        };
+    }
+
+    // ¿Tiene el usuario algún segundo factor activo (TOTP o passkeys)?
+    async hasSecondFactor(userId) {
+        const state = await this.getState(userId);
+        return Boolean(state?.mfa_enabled) || (await require('./webauthn.service').countCredentials(userId)) > 0;
     }
 
     // Paso 1 del alta: genera un secreto NUEVO (no activo todavía) y lo devuelve una sola vez
@@ -82,11 +95,11 @@ class MfaService {
     }
 
     // Verifica un código TOTP O uno de recuperación. Devuelve { ok, method }.
+    // Los códigos de recuperación valen aunque el único factor sean passkeys; el TOTP solo si está activo.
     async verify(userId, { otp, recoveryCode }) {
         const state = await this.getState(userId);
-        if (!state?.mfa_enabled || !state.mfa_secret_encrypted) return { ok: false };
-
         if (recoveryCode) {
+            if (!(await this.hasSecondFactor(userId))) return { ok: false };
             const [result] = await db.query(
                 'UPDATE user_recovery_codes SET used_at = NOW() WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',
                 [userId, totp.hashRecoveryCode(recoveryCode)]
@@ -94,6 +107,7 @@ class MfaService {
             return result.affectedRows === 1 ? { ok: true, method: 'recovery' } : { ok: false };
         }
 
+        if (!state?.mfa_enabled || !state.mfa_secret_encrypted) return { ok: false };
         const secret = tripleEncryptor.decrypt(state.mfa_secret_encrypted);
         const check = totp.verifyTotp(secret, otp, { lastStep: state.mfa_last_step });
         if (!check.ok) return { ok: false, replay: Boolean(check.replay) };
@@ -106,12 +120,19 @@ class MfaService {
         return result.affectedRows === 1 ? { ok: true, method: 'totp' } : { ok: false, replay: true };
     }
 
-    // Desactivar exige contraseña (la comprueba el controlador) Y un segundo factor válido
+    // Desactivar exige contraseña (la comprueba el controlador) Y un segundo factor válido. Quita TODOS los factores.
     async disable(userId) {
         await db.transaction(async (tx) => {
             await tx.query('UPDATE users SET mfa_enabled = 0, mfa_secret_encrypted = NULL, mfa_last_step = NULL WHERE id = ?', [userId]);
             await tx.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [userId]);
+            // "Sin MFA" significa sin NINGÚN segundo factor: también se quitan las passkeys
+            await tx.query('DELETE FROM webauthn_credentials WHERE user_id = ?', [userId]);
+            await tx.query('DELETE FROM webauthn_challenges WHERE user_id = ?', [userId]);
         });
+    }
+
+    async clearRecoveryCodes(userId) {
+        await db.query('DELETE FROM user_recovery_codes WHERE user_id = ?', [userId]);
     }
 
     async passwordMatches(userId, password) {
