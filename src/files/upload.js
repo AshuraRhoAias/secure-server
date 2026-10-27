@@ -181,11 +181,19 @@ function receiveUpload(req) {
             let drained = 0;
             req.on('data', (chunk) => { drained += chunk.length; if (drained > limits.maxAny) req.destroy(); });
             req.resume();
-            storage.removeTemp(storageName).catch(() => {});
+            // El temporal se borra DESPUÉS de que el stream de escritura termine de cerrarse: un fs.WriteStream destruido mientras su
+            // open() sigue pendiente crea el archivo un instante DESPUÉS (si el borrado va antes, queda un .part huérfano; en CI, con
+            // la máquina cargada, pasaba). Y la respuesta al cliente espera a que el temporal ya no exista.
+            const out = streams[streams.length - 1];
+            const closed = out && typeof out.once === 'function' && !out.closed
+                ? new Promise(resolve => { out.once('close', resolve); setTimeout(resolve, 1000).unref(); })
+                : Promise.resolve();
+            const cleaned = closed.then(() => storage.removeTemp(storageName)).catch(() => {});
 
             // Errores del sistema (ENOSPC, EACCES, ENOTDIR...) son del SERVIDOR (500); el resto, de la petición (400)
             const serverSide = /^E[A-Z]+$/.test(error?.code || '');
-            reject(error instanceof UploadError ? error : new UploadError(serverSide ? 500 : 400, 'UPLOAD_FAILED', 'No se pudo procesar la subida'));
+            const rejection = error instanceof UploadError ? error : new UploadError(serverSide ? 500 : 400, 'UPLOAD_FAILED', 'No se pudo procesar la subida');
+            cleaned.then(() => reject(rejection));
         };
 
         bb.on('file', (field, stream, info) => {
