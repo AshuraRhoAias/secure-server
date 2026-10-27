@@ -784,3 +784,24 @@ itDb('eventos y auditoría: subida, descarga y borrado quedan registrados (cifra
     assert.ok(rejected[0].n >= 10);
     void events;
 });
+
+// Hallazgo del fuzzing: busboy emite 'error' DIRECTAMENTE en el stream del archivo si el multipart no se cierra; sin listener
+// permanente era una excepción no capturada (el proceso entero caía). Ahora es un 400 y el servidor sigue atendiendo.
+itDb('multipart sin boundary de cierre (con archivo aceptable o rechazado) → 400/415, sin tumbar el servidor', async () => {
+    const boundary = '----sincierre' + crypto.randomBytes(4).toString('hex');
+    const open = (name) => Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\n\r\n`);
+    for (const [name, body] of [
+        ['foto.jpg', bytes([0xff, 0xd8, 0xff, 0xe0, 0, 0x10], 'JFIF\0', filler(500))],   // se acepta el tipo, el cuerpo se corta
+        ['mal.exe', bytes('MZ', filler(300))],                                           // se rechaza antes de que el cuerpo termine
+        ['vacio.txt', Buffer.alloc(0)]
+    ]) {
+        const res = await api(app.base, 'POST', '/api/files', {
+            token: alice.token, ip: ipA, raw: Buffer.concat([open(name), body]),
+            headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }
+        });
+        assert.ok([400, 415].includes(res.status), `${name}: ${res.status} ${res.text}`);
+    }
+    // Pasado un momento (el error de busboy llega de forma asíncrona) el servidor sigue vivo
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.strictEqual((await api(app.base, 'GET', '/health')).status, 200);
+});

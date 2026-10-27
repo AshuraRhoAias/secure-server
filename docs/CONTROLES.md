@@ -20,8 +20,8 @@ tabla de eventos de seguridad. Fronteras de confianza: Internet → API; API →
 
 | Amenaza | Vector | Mitigación | Estado |
 |---|---|---|---|
-| **S**poofing | Robo/adivinación de contraseña | bcrypt(12), bloqueo por usuario+origen y global, rate limit, MFA TOTP, SSO | ✅ |
-| **S**poofing | Sesión robada | Sesión en BD con revocación, expiración, `amr` por sesión; operaciones sensibles piden contraseña + 2.º factor | ✅ |
+| **S**poofing | Robo/adivinación de contraseña | bcrypt(12), bloqueo por usuario+origen y global, rate limit, MFA TOTP y passkeys (WebAuthn), SSO OIDC y SAML | ✅ |
+| **S**poofing | Sesión robada | JWT de 15 min + refresh token con rotación y detección de reutilización (revoca la sesión), caducidad por inactividad (7 d) y absoluta (30 d), «cerrar todas las sesiones», `amr` por sesión; operaciones sensibles piden contraseña + 2.º factor | ✅ |
 | **S**poofing | Confusión de algoritmo / token falsificado (JWT, id_token) | `HS256` fijado; id_token solo algoritmos asimétricos; nonce, state, PKCE | ✅ |
 | **T**ampering | Inyección SQL / NoSQL / XSS / traversal / CRLF | Consultas parametrizadas, validación estricta, detector con strikes, prueba que impide SQL con interpolación | ✅ |
 | **T**ampering | Alterar datos o archivos en reposo | AES-256-GCM autenticado (campos y bloques de archivo); alteración ⇒ error + evento crítico | ✅ |
@@ -31,7 +31,12 @@ tabla de eventos de seguridad. Fronteras de confianza: Internet → API; API →
 | **I**nformation disclosure | Enumeración de usuarios | Mismo mensaje y mismo coste (bcrypt) exista o no el usuario; el bloqueo se comporta igual | 🟡 (el registro devuelve 409 si el usuario existe) |
 | **D**enial of service | Fuerza bruta de login para bloquear a la víctima | Bloqueo por (usuario, origen); el global no afecta a orígenes de confianza; liberación por admin | 🟡 (ataque distribuido desde muchas IP + víctima desde un origen nuevo: espera ≤ 15 min) |
 | **D**enial of service | Inundación de peticiones / eventos / subidas | Límites en BD por IP/usuario, tope de eventos, cuotas, cola de BD acotada, `requestTimeout` | 🟡 (L7 volumétrico requiere WAF/CDN delante) |
-| **E**levation of privilege | Pasar a admin | Rol leído de la BD en cada petición; `MFA_REQUIRED_FOR_ADMINS`; contaminación de prototipos bloqueada | ✅ |
+| **E**levation of privilege | Pasar a admin | Rol leído de la BD en cada petición; permisos explícitos con denegación por defecto (`user`/`auditor`/`operator`/`admin`); `MFA_REQUIRED_FOR_ADMINS`; contaminación de prototipos bloqueada | ✅ |
+| **E**levation of privilege | Un admin comprometido (o malintencionado) | Reset de MFA y borrado de datos exigen la aprobación de **otro** administrador (sin auto-aprobación, atómico, con caducidad); revocación masiva con confirmación; alertas automáticas | ✅ (con un solo admin hay que usar `ADMIN_APPROVALS_REQUIRED=1`, sin esa protección) |
+| **E**levation of privilege | Sesión robada que añade su propia llave/dispositivo | Alta y baja de passkeys exigen contraseña + 2.º factor existente | ✅ |
+| **T**ampering | Robo de la BD **y** de las semillas del servidor para abrir archivos | `KMS_DATA_KEYS`: la clave de cada archivo la envuelve el KMS/HSM, ligada al archivo | 🟡 (opcional; el KMS pasa a ser punto de fallo: caché y 503 controlado) |
+| **T**ampering | Archivo «políglota» o con metadatos/GPS ocultos; PDF con JavaScript | Imágenes decodificadas y recodificadas (sharp); PDF con contenido activo rechazado, incluidos object streams comprimidos y nombres ofuscados | ✅ (solo imágenes y PDF) |
+| **R**epudiation | Reutilización de refresh token / llave clonada | Eventos críticos `REFRESH_TOKEN_REUSE`, `WEBAUTHN_CLONE_SUSPECTED` + alerta automática `EVENT_CRITICAL` | ✅ |
 | **E**levation of privilege | Subir un ejecutable/script | Tipo real por magic bytes, lista cerrada, antivirus, `attachment`+`nosniff`+CSP sandbox al servir | ✅ (el antivirus es opcional: `FILE_SCAN`) |
 
 Fuera de modelo (la API no puede defenderlo sola): compromiso del servidor con ejecución de código, del proveedor de identidad,
@@ -45,16 +50,16 @@ del KMS, de la cuenta de GitHub o de la cadena de suministro más allá de `npm 
 |---|---|---|---|
 | **V1** Arquitectura | 🟡 | Este documento; `docs/SEGURIDAD.md`; defensa en capas | Diagrama de flujo de datos formal, revisión periódica |
 | **V2** Autenticación | ✅ | bcrypt(12) sin recortar la contraseña, 10–72 bytes (`auth.controller`); bloqueo (`secure-auth.service`); TOTP RFC 6238 con anti-reutilización y códigos de recuperación (`mfa.service`, `totp.js`); SSO OIDC (`sso/oidc.service`) | Comprobación de contraseñas filtradas (HIBP); WebAuthn/FIDO2 |
-| **V3** Sesiones | ✅ | JWT HS256 ligado a una fila de sesión (hash), expiración, logout revoca, `amr`, reto MFA ≠ sesión (`test_mfa.js`, `test_security.js`) | Limitar sesiones simultáneas; cierre de sesión global |
-| **V4** Control de acceso | ✅ | Propiedad por `user_id` en todas las consultas; roles desde BD; admin con MFA opcional (`role.middleware`) | Roles más finos que `user`/`admin`, multi-organización |
+| **V3** Sesiones | ✅ | JWT HS256 de 15 min ligado a una fila de sesión; refresh token opaco con rotación y detección de reutilización; inactividad/tope absoluto; cerrar una/todas las sesiones; `amr`; reto MFA ≠ sesión (`test_sessions.js`, `test_mfa.js`, `test_security.js`) | Limitar el número de sesiones simultáneas |
+| **V4** Control de acceso | ✅ | Propiedad por `user_id` en todas las consultas; RBAC con permisos explícitos y denegación por defecto (`permissions.js`, `test_rbac.js`); roles desde BD; aprobación de dos administradores; admin con MFA opcional | Multi-organización |
 | **V5** Validación | ✅ | `validate.*` (tipos/longitudes/patrones), `sanitize.middleware`, detector, `sqlInt()`; prueba "no hay SQL con interpolación" | — |
 | **V6** Criptografía | 🟡 | AES-256-GCM, HKDF, IV aleatorio, claves por archivo, rotación con migración, KMS | Clave maestra sigue derivada de semillas del entorno (KMS las protege en reposo, no en memoria); sin HSM por operación |
-| **V7** Logs y errores | ✅ | `security_events` + `security_logs` cifrado; sin secretos en logs (probado); errores genéricos al cliente | Envío a SIEM externo; alertas automáticas por umbral |
+| **V7** Logs y errores | ✅ | `security_events` + `security_logs` cifrado; alertas automáticas por umbral (`security_alerts`), métricas Prometheus, trazas con `X-Request-Id`; sin secretos en logs (probado); errores genéricos al cliente | Envío a SIEM externo (hay webhook firmado, métricas Prometheus y trazas OTLP) |
 | **V8** Protección de datos | 🟡 | Cifrado en reposo de campos y archivos; `Cache-Control: no-store` en API | Clasificación formal de datos; borrado/retención por política (existe retención de eventos) |
 | **V9** Comunicaciones | 🟡 | HSTS, TLS a la BD verificado en producción, HTTPS exigido para IdP/Vault | La terminación TLS de la API es del proxy/balanceador (fuera del código) |
-| **V10** Código malicioso | 🟡 | `lint:security`, CodeQL, gitleaks, Dependabot, SBOM, `npm audit` en CI; sin `eval` | Firma de artefactos / SLSA |
+| **V10** Código malicioso | 🟡 | `lint:security`, CodeQL, gitleaks, Dependabot, SBOM, `npm audit` y `dependency-review` en CI; acciones fijadas por SHA; fuzzing con propiedades (`test_fuzz.js`); cobertura con umbral; nada de desarrollo (nodemon) en producción (`check:prod-deps`); sin `eval` | Firma de artefactos / SLSA |
 | **V11** Lógica de negocio | 🟡 | Cuotas, límites por usuario, transacción de cuota bajo bloqueo de fila | Análisis de abuso específico del negocio |
-| **V12** Archivos | ✅ | Tipo por contenido, extensiones prohibidas, ClamAV, UUID en disco, descarga segura, cuotas (`test_files.js`, `test_av.js`) | No elimina EXIF ni recodifica imágenes |
+| **V12** Archivos | ✅ | Tipo por contenido, extensiones prohibidas, ClamAV, imágenes recodificadas, PDF sin contenido activo, UUID en disco, descarga segura, cuotas (`test_files.js`, `test_av.js`, `test_sanitize.js`) | No sanea audio/vídeo/texto (conservan metadatos) |
 | **V13** API | ✅ | `docs/openapi.json` (con prueba de que está al día), validación por esquema, límites, CORS cerrado en producción | Versionado de API |
 | **V14** Configuración | 🟡 | Variables documentadas (`.env.example`), `trust proxy`, cabeceras (helmet), TLS BD | Hardening del SO/contenedor y gestión de la configuración: del despliegue |
 

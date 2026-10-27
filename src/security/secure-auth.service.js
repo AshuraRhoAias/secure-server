@@ -709,6 +709,8 @@ class SecureAuthService {
 
     async revokeSession(userId, sessionId, reason = 'user_logout') {
         const db = require('../config/database');
+        // Un id imposible (fuera del rango de la columna) simplemente no existe: no es un error del servidor
+        if (!Number.isSafeInteger(Number(sessionId)) || Number(sessionId) < 1 || Number(sessionId) > 2 ** 31 - 1) return 0;
         const [result] = await db.query(
             `UPDATE user_sessions SET expires_at = NOW(), revoked_at = NOW(), revoked_reason = ?
              WHERE id = ? AND user_id = ? AND ${sqlFragment('liveSession')}`,

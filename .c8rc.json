@@ -1,0 +1,9 @@
+{
+  "all": true,
+  "src": ["src", "scripts"],
+  "include": ["src/**/*.js", "scripts/**/*.js"],
+  "exclude": ["**/node_modules/**", "test_*.js", "test_helpers/**", "benchmarks/**", "coverage/**", "scripts/devGuard.js"],
+  "reporter": ["text-summary", "lcov", "json-summary"],
+  "reports-dir": "coverage",
+  "check-coverage": false
+}

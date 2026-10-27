@@ -189,6 +189,11 @@ function receiveUpload(req) {
         };
 
         bb.on('file', (field, stream, info) => {
+            // busboy hace `stream.emit('error', 'Unexpected end of form')` DIRECTAMENTE si el cuerpo termina sin cerrar el multipart.
+            // Sin un listener permanente (pipeline los retira al terminar) sería una excepción no capturada que tumba el proceso:
+            // lo encontró el fuzzing (test_fuzz.js, cuerpo multipart sin boundary de cierre). Solo se absorbe: el motivo real lo
+            // informa el pipeline (o `fail` si ya se rechazó antes), para no pisar un 413/415 con un 400 genérico.
+            stream.on('error', () => {});
             try {
                 handleFile(field, stream, info);
             } catch (error) {

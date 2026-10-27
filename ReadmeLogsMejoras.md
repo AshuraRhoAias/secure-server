@@ -369,7 +369,7 @@ auto-puntuación retirados, `src/notifications/` fuera del control de versiones,
 
 ## H. Intervención 2026-10-21 (4.ª entrega): lo que seguía pendiente
 
-Rama `repo/sharp-noether-tbr0bz`. Detalle y límites honestos en `docs/SEGURIDAD.md` §10–§15.
+Rama `repo/sharp-noether-tbr0bz`. Detalle y límites honestos en `docs/SEGURIDAD.md` §10–§22.
 
 | Pendiente | Qué se hizo | Límite que se mantiene |
 |---|---|---|
@@ -384,3 +384,23 @@ Rama `repo/sharp-noether-tbr0bz`. Detalle y límites honestos en `docs/SEGURIDAD
 Hallazgos reales durante el trabajo: la copia sobrescribía una copia buena con un original truncado (corregido); la descarga de un
 archivo ausente/truncado cortaba la conexión (ahora se autentica el primer bloque antes de enviar cabeceras); caracteres
 bidireccionales literales en `file-types.js` detectados por el lint (corregido).
+
+---
+
+## I. Intervención 2026-10-27 (5.ª entrega): lo que faltaba tras la puntuación 7,5/10
+
+Misma rama y PR. Detalle y límites en `docs/SEGURIDAD.md` §15–§22.
+
+| Petición | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| Sesiones más cortas **sin** iniciar sesión a cada cambio + cerrar todas | JWT de 15 min + refresh token opaco con rotación y detección de reutilización (revoca la sesión), inactividad 7 d / tope 30 d, `logout-all`, lista y cierre de sesiones | El cliente debe guardar bien el refresh token y serializar las renovaciones |
+| Los 5 puntos de seguridad | **KMS por archivo** (`KMS_DATA_KEYS`, `kms1:` ligado al archivo, CLI migrate/unmigrate/rewrap); **WebAuthn**, **SAML 2.0** y **roles finos** (`user/auditor/operator/admin`); **aprobación de dos administradores** (reset MFA, borrado); **imágenes recodificadas** y **PDF sin contenido activo**; detector de inyección solo bloquea en rutas críticas | Probado contra simuladores, no contra IdP/KMS reales; solo imágenes y PDF se sanean |
+| Operación y observabilidad **solo admin** | Alertas automáticas + webhook firmado + panel JSON; métricas Prometheus y trazas OTLP con `X-Request-Id`; exportar/borrar datos personales; plan de respuesta a incidentes y custodia de claves | Sin interfaz web propia; las copias existentes conservan los datos borrados hasta caducar |
+| Cobertura y fuzzing | `npm run coverage` (c8) con umbral en CI; `test_fuzz.js` (fast-check, 18 propiedades, incluye **todas las rutas del OpenAPI** con 3 roles) y `fuzz.yml` nocturno | Property-based, no un fuzzer guiado por cobertura; la cobertura no mide corrección |
+| CI | Acciones fijadas por SHA, permisos mínimos, cancelación de ejecuciones obsoletas, *timeouts*, `dependency-review`, puerta de ZAP (riesgo alto), trabajo `production-install` | Los workflows no se han podido ejecutar fuera de GitHub |
+| Quitar nodemon en producción | Solo `devDependencies`; `npm run dev` se niega con `NODE_ENV=production`; `install.js --production` usa `--omit=dev`; `check:prod-deps` en CI | — |
+
+**Hallazgos reales del fuzzing** (corregidos, con prueba fija): un id de sesión enorme (`/api/auth/sessions/99999999999999999999`) daba 500 porque el validador aceptaba
+enteros no seguros; un cuerpo multipart sin cierre **tumbaba el proceso entero** (busboy emite `error` directamente en el stream del archivo sin listener).
+Otros hallazgos de esta entrega: node-saml aceptaba `Recipient`/`Destination`/`Status`
+distintos (comprobaciones propias añadidas), y la erradicación de un usuario dejaba un evento de aprobación con su `user_id`.

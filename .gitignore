@@ -163,3 +163,7 @@ storage/
 
 # Notificaciones generadas en tiempo de ejecucion (contienen destinatarios): no se versionan
 src/notifications/*.json
+
+# Cobertura de pruebas (npm run coverage)
+coverage/
+.nyc_output/

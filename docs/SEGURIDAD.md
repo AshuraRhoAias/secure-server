@@ -18,7 +18,14 @@ real); donde algo no se puede garantizar desde el código, se dice.
 - [12. Antivirus](#12-antivirus)
 - [13. Copias de `FILES_DIR`](#13-copias-de-files_dir)
 - [14. Pentest, análisis estático y certificaciones](#14-pentest-análisis-estático-y-certificaciones)
-- [15. Límites y pendientes (sin humo)](#15-límites-y-pendientes-sin-humo)
+- [15. Sesiones cortas con renovación y «cerrar todas»](#15-sesiones-cortas-con-renovación-y-cerrar-todas)
+- [16. Roles finos y aprobación de dos administradores](#16-roles-finos-y-aprobación-de-dos-administradores)
+- [17. Passkeys (WebAuthn) y SAML 2.0](#17-passkeys-webauthn-y-saml-20)
+- [18. Archivos: imágenes recodificadas, PDF sin contenido activo y claves de archivo en el KMS](#18-archivos-imágenes-recodificadas-pdf-sin-contenido-activo-y-claves-de-archivo-en-el-kms)
+- [19. Operación y observabilidad (solo admin)](#19-operación-y-observabilidad-solo-admin)
+- [20. Pruebas, cobertura y fuzzing](#20-pruebas-cobertura-y-fuzzing)
+- [21. CI y producción (sin nodemon)](#21-ci-y-producción-sin-nodemon)
+- [22. Límites y pendientes (sin humo)](#22-límites-y-pendientes-sin-humo)
 
 ---
 
@@ -289,11 +296,21 @@ Todas opcionales. Plantilla comentada en `.env.example`.
 | `RATE_LIMIT_GLOBAL_PER_MIN` | `600` | Peticiones por IP y minuto |
 | `SENSITIVE_RATE_LIMIT_PER_MIN` | `10` | Login/registro/tareas admin por IP y minuto |
 | `INJECTION_STRIKES_TO_BLOCK` | `5` | Rechazos por inyección (10 min) antes de bloquear la IP |
-| `INJECTION_BODY_MODE` | `block` | `block` o `log` (ver §4) |
+| `INJECTION_BODY_MODE` | `critical` | `critical` (rechaza solo en `INJECTION_BLOCK_PATHS`) · `block` (en todas) · `log` (solo registra); ver §4 y §18 |
 | `SCANNER_HITS_TO_BLOCK` / `AUTH_FAILURES_TO_BLOCK` | `5` / `30` | Umbrales de bloqueo |
 | `MAX_FAILED_ATTEMPTS` / `LOCKOUT_WINDOW_SECONDS` | `5` / `900` | Bloqueo de cuenta |
 | `LOGIN_IP_FAILURES_TO_BLOCK` | `20` | Fallos de login desde una IP antes de bloquearla |
-| `SESSION_TTL_HOURS` | `120` | Vida de sesión y JWT |
+| `ACCESS_TOKEN_MINUTES` / `REFRESH_IDLE_DAYS` / `SESSION_ABSOLUTE_DAYS` | `15` / `7` / `30` | Vida del JWT de acceso, inactividad máxima y tope absoluto de la sesión (§15). Sustituyen a `SESSION_TTL_HOURS` |
+| `REFRESH_REUSE_GRACE_SECONDS` | `10` | Ventana en la que dos renovaciones simultáneas no se toman por un robo (§15) |
+| `ADMIN_APPROVALS_REQUIRED` / `ADMIN_APPROVAL_TTL_HOURS` | `2` / `24` | Administradores que deben aprobar una acción crítica y caducidad de la solicitud (§16) |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGINS` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_USER_VERIFICATION` | — / — / — / `preferred` | Passkeys; sin `RP_ID` y `ORIGINS` quedan desactivadas (§17) |
+| `SAML_*` | — | SAML 2.0 (§17) |
+| `IMAGE_SANITIZE` / `IMAGE_JPEG_QUALITY` / `IMAGE_MAX_PIXELS` / `IMAGE_SANITIZE_PASSTHROUGH` | `on` / `90` / `100000000` / — | Recodificación de imágenes (§18) |
+| `PDF_ACTIVE_CONTENT` / `PDF_MAX_INFLATED_MB` / `SANITIZE_MAX_CONCURRENT` | `reject` / `64` / `4` | Inspección de PDF y concurrencia del saneador (§18) |
+| `INJECTION_BLOCK_PATHS` | `/api/auth,/api/system,/api/sso` | Prefijos donde un hallazgo en el cuerpo SÍ rechaza la petición (§18) |
+| `KMS_DATA_KEYS` / `KMS_DATA_KEY_CACHE_SECONDS` / `KMS_TIMEOUT_MS` | `false` / `300` / `30000` | Claves de archivo envueltas por el KMS (§18) |
+| `ALERT_*`, `ALERTS_DISABLED`, `METRICS_TOKEN`, `OTEL_*`, `HOUSEKEEPING_INTERVAL_MINUTES` | ver §19 | Operación y observabilidad |
+| `FUZZ_RUNS` / `FUZZ_SEED` | `100` / aleatoria | Solo pruebas: iteraciones y semilla del fuzzing (§20) |
 | `SECURITY_EVENTS_RETENTION_DAYS` | `90` | Retención de `security_events` |
 | `SECURITY_EVENTS_MAX_PER_MINUTE` | `30` | Tope de eventos por (IP, tipo) y minuto |
 | `JSON_BODY_LIMIT` | `1mb` | Tamaño máximo de un cuerpo JSON |
@@ -380,7 +397,7 @@ Login con MFA en dos pasos: `POST /api/auth/login` con la contraseña correcta d
 ### SSO (OpenID Connect)
 
 Authorization code + **PKCE**. Funciona con cualquier proveedor que publique `/.well-known/openid-configuration`
-(Microsoft Entra ID, Okta, Auth0, Keycloak, Google Workspace…). **SAML no está implementado.**
+(Microsoft Entra ID, Okta, Auth0, Keycloak, Google Workspace…). Para SAML 2.0 ver el [§17](#17-passkeys-webauthn-y-saml-20).
 
 | Variable | Qué hace |
 |---|---|
@@ -509,19 +526,248 @@ debe protegerla con `protectionMiddleware` a mano: ahí CodeQL ya no avisará.
 
 ---
 
-## 15. Límites y pendientes (sin humo)
+## 15. Sesiones cortas con renovación y «cerrar todas»
 
-Resuelto desde la versión anterior: MFA, SSO (OIDC), KMS para los secretos, antivirus, copias de `FILES_DIR`,
-bloqueo de cuenta no abusable. Lo que **sigue sin estar** o tiene límites:
+El JWT de acceso dura **15 minutos** (`ACCESS_TOKEN_MINUTES`): es lo único que puede robar quien lea una petición. Para que el
+usuario **no tenga que iniciar sesión a cada rato**, el login entrega además un **refresh token** opaco (`rt_…`) con el que el
+cliente pide un JWT nuevo sin volver a pedir la contraseña.
 
-- **SAML**, WebAuthn/FIDO2, multi-organización y roles más finos que `user`/`admin`.
-- **HSM por operación**: la clave maestra sigue en memoria del proceso (ver §11).
-- **Pentest externo y certificaciones**: dependen de terceros y de la organización (ver §14 y `docs/CONTROLES.md`).
-- **Antivirus**: detecta lo conocido; no elimina EXIF ni recodifica imágenes.
-- **Detección por reglas**: bloquea lo conocido; un atacante que conozca las reglas puede evadirlas. Por eso la defensa real es la
-  capa 1 (parámetros), no el detector.
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/auth/refresh` `{refreshToken}` | Público. Devuelve `token` + un **refresh token nuevo** (el anterior queda inservible) |
+| `POST` | `/api/auth/logout` | Cierra la sesión actual |
+| `POST` | `/api/auth/logout-all` `{keepCurrent?}` | **Cierra todas las sesiones** del usuario (opcionalmente conserva la actual) |
+| `GET` | `/api/auth/sessions` | Lista de sesiones vivas (IP, navegador, país, cómo se autenticó, última actividad) |
+| `DELETE` | `/api/auth/sessions/{id}` | Cierra una sesión concreta (solo las propias) |
+
+Reglas (cada una con prueba en `test_sessions.js`):
+
+- El refresh token **solo se guarda como hash** (SHA-256) y **rota en cada uso**. Si se presenta uno ya usado (señal de que fue
+  copiado), **se revoca la sesión entera** y se registra un evento crítico `REFRESH_TOKEN_REUSE` (el atacante y la víctima quedan fuera;
+  la víctima inicia sesión de nuevo).
+- Dos pestañas que renuevan a la vez no son un robo: dentro de `REFRESH_REUSE_GRACE_SECONDS` (10) la segunda recibe `409 REFRESH_CONFLICT`
+  y debe usar el token más reciente, sin revocar nada.
+- La sesión caduca por **inactividad** (`REFRESH_IDLE_DAYS`, 7, se desliza con cada renovación) y por **tope absoluto**
+  (`SESSION_ABSOLUTE_DAYS`, 30): pasado ese tiempo hay que autenticarse de nuevo, se renueve o no.
+- Renovar desde un origen (IP) distinto deja un evento `SESSION_REFRESH_NEW_ORIGIN` para el análisis posterior.
+- La fila de sesión **no se reactiva por efecto colateral** (`expires_at` sin `ON UPDATE`) y los JWT anteriores a este cambio
+  (sin `v:2`) siguen valiendo hasta su caducidad.
+- Admin: `POST /api/system/users/{id}/revoke-sessions` (cierra todas las de un usuario) y `POST /api/system/sessions/revoke-all` (cierra TODAS las de la plataforma: exige `reason` de 10+ caracteres y `confirm: "REVOKE-ALL-SESSIONS"`); ambas quedan auditadas.
+
+**Cliente**: guarda el refresh token en un almacén seguro (no en `localStorage` si la web admite XSS), renueva al recibir `401` o
+poco antes de que caduque el JWT, y serializa las renovaciones (una sola a la vez) para no provocar el `409`.
+
+---
+
+## 16. Roles finos y aprobación de dos administradores
+
+| Rol | Puede |
+|---|---|
+| `user` | Su cuenta, notas y archivos |
+| `auditor` | Solo lectura: estado, logs, eventos y resumen de seguridad |
+| `operator` | Auditor + desbloquear cuentas e IP |
+| `admin` | Todo, incluido lo que exige un **segundo administrador** |
+
+Los permisos están en `src/security/permissions.js` (mapa explícito, **denegar por defecto**) y las rutas piden el permiso por
+nombre (`requirePermission('…')`): un permiso mal escrito **falla al arrancar**, no deja la ruta abierta. El rol se lee de la BD en
+**cada petición**, de modo que bajar a alguien de rol surte efecto de inmediato aunque su JWT siga vivo.
+Para dar un rol: `npm run set-role -- --user-id <id> --role <user|auditor|operator|admin>`.
+
+**Aprobación de dos administradores** (`admin_approvals`): el **reset de MFA** de un usuario y el **borrado de sus datos** no se
+ejecutan al pedirlos. Un admin los solicita (`POST /api/system/accounts/mfa-reset`, `/users/{id}/erase`) y **otro administrador distinto** los aprueba (`POST /api/system/approvals/{id}/approve`)
+o rechaza. Quien solicita **no puede aprobar la suya**; el paso de «pendiente» a «aprobada» es atómico (dos aprobaciones
+simultáneas ejecutan la acción una vez); caducan a las 24 h; todo queda en la tabla (quién, cuándo, por qué, resultado).
+El reset de MFA además **cierra todas las sesiones** del usuario. `ADMIN_APPROVALS_REQUIRED=1` ejecuta al momento (solo para instalaciones
+con un único administrador: pierde la protección).
+
+---
+
+## 17. Passkeys (WebAuthn) y SAML 2.0
+
+### Passkeys / llaves de seguridad (segundo factor)
+
+Alternativa o complemento del TOTP (FIDO2: Touch ID, Windows Hello, YubiKey, passkeys del móvil).
+Con `WEBAUTHN_RP_ID` (dominio, sin esquema ni puerto) y `WEBAUTHN_ORIGINS` (https en producción) definidos:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/auth/webauthn/credentials` | Llaves registradas |
+| `POST` | `/api/auth/webauthn/register/options` · `/register` | Alta de una llave (exige contraseña **y** un segundo factor ya existente) |
+| `DELETE` | `/api/auth/webauthn/credentials/{id}` | Quitar una llave (misma exigencia) |
+| `POST` | `/api/auth/login/webauthn/options` · `/login/webauthn` | Segundo paso del login, en lugar del código TOTP |
+
+Retos de **un solo uso** en BD (5 min, ligados a usuario y propósito, consumidos con `DELETE` atómico); origen y RP ID **exactos**
+(una respuesta firmada para otro sitio no vale: anti-phishing); **contador de firmas** con actualización optimista (llave clonada ⇒
+rechazo y evento crítico `WEBAUTHN_CLONE_SUSPECTED`); solo *attestation* `none`. Una sesión robada **no puede añadir su propia llave**
+para quedarse. Máximo 10 llaves por usuario. Probado con un autenticador de software que firma de verdad (`test_webauthn.js`, 24 pruebas).
+
+### SAML 2.0 (proveedor de servicio)
+
+Para organizaciones cuyo IdP solo habla SAML (Entra ID, Okta, ADFS, Keycloak, Google Workspace…).
+
+| Ruta | Descripción |
+|---|---|
+| `GET /api/saml/metadata` | Metadatos del SP (entityID, URL ACS, certificado si firmas las solicitudes) |
+| `GET /api/saml/login` | Redirige al IdP (`?format=json` devuelve la URL) |
+| `POST /api/saml/acs` | Recibe la respuesta del IdP |
+| `GET /api/saml/status` | Si está configurado |
+
+| Variable | Qué hace |
+|---|---|
+| `SAML_IDP_SSO_URL`, `SAML_IDP_ENTITY_ID`, `SAML_IDP_CERT`, `SAML_CALLBACK_URL` | **Obligatorias**. `SAML_IDP_CERT` admite PEM o rutas separadas por comas (varias para rotar) |
+| `SAML_SP_ENTITY_ID` | Nuestro entityID (por defecto, la URL de metadatos) |
+| `SAML_REQUIRE_SIGNED` | `assertion` (por defecto) · `response` · `both`. **Nada sin firmar se acepta** |
+| `SAML_EMAIL_ATTRIBUTE`, `SAML_ALLOWED_EMAIL_DOMAINS`, `SAML_AUTO_PROVISION` | Identidad y alta automática |
+| `SAML_ADMIN_ATTRIBUTE` + `SAML_ADMIN_VALUE` | Rol admin según un atributo; se retira al salir del grupo |
+| `SAML_CLOCK_SKEW_SECONDS`, `SAML_FORCE_AUTHN`, `SAML_POST_LOGIN_URL` | Tolerancia de reloj (60), reautenticación forzada, destino tras el login |
+| `SAML_SP_PRIVATE_KEY` + `SAML_SP_CERT` | Firmar nuestras solicitudes (opcional) |
+| `SAML_ALLOW_INSECURE_HTTP` | Solo desarrollo |
+
+Reglas (prueba contra un IdP simulado que **firma XML de verdad**, `test_saml.js`, 22 pruebas): solo *SP-initiated* (la respuesta debe
+contestar a una solicitud NUESTRA, guardada en BD y de un solo uso; el inicio *IdP-initiated* no se admite); firma con el certificado
+configurado; **emisor, audiencia, destinatario (ACS), destino y estado** exactos; ventanas `NotBefore/NotOnOrAfter` con tolerancia
+acotada; una aserción no se acepta dos veces; defensa contra *signature wrapping* y manipulación tras firmar. Como en OIDC,
+**nunca se enlaza por email con una cuenta local existente**, y el IdP solo concede o retira `admin`.
+
+---
+
+## 18. Archivos: imágenes recodificadas, PDF sin contenido activo y claves de archivo en el KMS
+
+**Imágenes** (JPEG, PNG, GIF, WebP): se **decodifican y recodifican** con `sharp` antes de cifrar. Así desaparecen EXIF (GPS, cámara),
+perfiles ICC, miniaturas incrustadas, datos añadidos tras el final del archivo y las imágenes políglotas (JPEG válido que además es
+otra cosa). Una imagen que no se puede decodificar se rechaza (`422 IMAGE_INVALID`); se limita el tamaño en píxeles
+(`IMAGE_MAX_PIXELS`, anti «bomba de descompresión») y la concurrencia (`SANITIZE_MAX_CONCURRENT`). El archivo guarda su
+`sanitize_status`: `reencoded` (imagen recodificada), `inspected` (PDF inspeccionado, sin modificar) o `none`. `IMAGE_SANITIZE_PASSTHROUGH` admite tipos sin saneador (p. ej. `heic`).
+
+**PDF**: se rechazan los que contienen JavaScript, lanzadores, archivos incrustados, formularios que envían datos, multimedia,
+XFA o cifrado (no inspeccionable). Se leen también los *object streams* comprimidos con Flate (donde se esconden las acciones) y se
+descodifican los nombres ofuscados (`/J#61vaScript`). Un PDF que no se puede inspeccionar (filtros raros, bomba de descompresión,
+`PDF_MAX_INFLATED_MB`) se **rechaza** (falla cerrado). `PDF_ACTIVE_CONTENT=allow` lo desactiva (no recomendado).
+Orden del pipeline: tipo real → antivirus (sobre el original) → saneado → cifrado → disco. El texto en claro nunca se escribe.
+
+**Detector de inyección**: en el **cuerpo** de las peticiones, un hallazgo solo **rechaza** en las rutas críticas
+(`INJECTION_BLOCK_PATHS`, por defecto `/api/auth`, `/api/system` y `/api/sso`: login, registro, MFA, administración y SSO, donde nunca hay texto libre legítimo); en el resto (p. ej. una nota que habla de SQL) se **registra**
+sin rechazar, con más contexto en `security_events`. La defensa real sigue siendo la capa 1 (parámetros), no el detector.
+
+### Claves de archivo envueltas por el KMS (`KMS_DATA_KEYS=true`)
+
+Por defecto la clave de cada archivo se guarda envuelta con la clave maestra del servidor. Con `KMS_DATA_KEYS=true` (y `KMS_PROVIDER`)
+se envuelve **directamente con el KMS/HSM**: quien robe la base de datos *y* las semillas del servidor sigue sin poder abrir los
+archivos, y cada descifrado queda en el registro de auditoría del KMS.
+
+- Formato `kms1:<proveedor>:<blob>`, **ligado a `file:<storage_name>`**: copiar el blob a otra fila no abre nada.
+- Se decide por lo **guardado**, no por la configuración: archivos `v4:` y `kms1:` conviven y se leen siempre.
+- Caché en memoria acotada (500 claves, `KMS_DATA_KEY_CACHE_SECONDS`=300; `0` la desactiva): el KMS no es el cuello de botella.
+- **Si el KMS no responde**, descargar da `503 FILE_KEY_UNAVAILABLE` (más un evento) y subir falla sin dejar fila ni archivo.
+- La rotación de la clave maestra y el snapshot de backup **no tocan** las claves `kms1:` (no dependen de la maestra); **restaurar un
+  backup exige acceso al mismo KMS**.
+- Migración y vuelta atrás, repetibles y con simulación: `npm run kms -- migrate-files [--dry-run]`, `unmigrate-files`, `rewrap-files`
+  (cambio de KMS o de clave de envoltura). Una fila ilegible se informa y no bloquea a las demás.
+
+---
+
+## 19. Operación y observabilidad (solo admin)
+
+Todo lo de esta sección exige rol `admin` (permisos `alerts:*`, `dashboard:read`, `metrics:read`, `privacy:*`).
+
+**Alertas automáticas** (`security_alerts`). Un evaluador (cada `ALERT_EVAL_INTERVAL_SECONDS`, 60) ejecuta reglas fijas sobre
+`security_events`, cada una con una consulta parametrizada, y levanta una alerta al cruzar su umbral: cualquier **evento crítico**
+(`EVENT_CRITICAL`: reutilización de refresh token, llave WebAuthn clonada, fallo de integridad de archivo…), ataque de login **distribuido**
+(`ALERT_LOGIN_FAILURES` fallos desde `ALERT_LOGIN_FAILURE_IPS` IP), fuerza bruta contra **una cuenta** (`ALERT_ACCOUNT_FAILURES`), códigos
+MFA erróneos (`ALERT_MFA_FAILURES`), oleada de inyecciones (`ALERT_INJECTION_ATTEMPTS`), pico de bloqueos de IP (`ALERT_IP_BLOCKS`),
+antivirus no disponible, integridad del servidor, inundación de eventos y actividad administrativa sensible. Una sola alerta activa por
+(regla, sujeto) aunque haya varias instancias; la alerta **avisa, no actúa** (no bloquea ni cierra nada por sí sola). Aviso externo por **webhook
+firmado** (`X-Signature-256`, HMAC-SHA256 con `ALERT_WEBHOOK_SECRET`) a `ALERT_WEBHOOK_URL`, desde `ALERT_NOTIFY_MIN_SEVERITY` (por defecto `high`; https en
+producción); un fallo de envío queda registrado en la propia alerta.
+
+| Ruta | Descripción |
+|---|---|
+| `GET /api/system/alerts` · `POST /alerts/{id}/ack` · `/resolve` · `POST /alerts/evaluate` | Ver, reconocer, resolver, evaluar ya |
+| `GET /api/system/dashboard` | Resumen JSON para el panel: alertas abiertas, eventos por severidad/hora, IP bloqueadas, sesiones, aprobaciones pendientes |
+| `GET /api/system/approvals` | Aprobaciones pendientes (§16) |
+
+**Métricas** (`GET /api/metrics`, formato Prometheus): peticiones y latencias por plantilla de ruta, eventos de seguridad,
+sesiones, subidas, consultas SQL, alertas abiertas… con **cardinalidad acotada** (nunca URLs reales, usuarios ni IP en las etiquetas)
+y sin datos personales. Un scraper no puede renovar un JWT de 15 minutos: si defines `METRICS_TOKEN` (≥ 32 caracteres) ese token vale
+**solo** para esta ruta (comparación en tiempo constante; desactivado por defecto).
+
+**Trazas**: contexto W3C (`traceparent`); cada respuesta lleva `X-Request-Id` y cada evento de seguridad guarda su `traceId`, de modo que
+de un evento sospechoso se reconstruye todo lo que hizo esa petición. Exportación OTLP/HTTP opcional (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+muestreo `OTEL_TRACES_SAMPLER_ARG`=0.1); los spans llevan método, plantilla de ruta, estado y operación SQL, **nunca** query, cabeceras ni parámetros.
+
+**Datos personales**: `GET /api/system/users/{id}/export` entrega, descifrado, todo lo que el sistema guarda del usuario (sin hashes,
+secretos MFA ni claves de archivo). `POST /api/system/users/{id}/erase` lo borra (BD y disco) con **aprobación de un segundo
+admin**; los eventos de seguridad se **anonimizan**, no se borran. Las copias de seguridad existentes siguen conteniendo esos datos
+hasta que caduquen: díselo al usuario.
+
+**Procedimientos**: `docs/RESPUESTA-INCIDENTES.md` (plan de respuesta: detectar, contener, erradicar, recuperar, comunicar, aprender) y
+`docs/CUSTODIA-CLAVES.md` (quién guarda qué clave, doble custodia, rotación, recuperación).
+
+---
+
+## 20. Pruebas, cobertura y fuzzing
+
+`npm run test:all` ejecuta 18 archivos contra MariaDB real, de uno en uno (comparten servidor). Cada suite nueva tiene su script
+(`test:sessions`, `test:rbac`, `test:webauthn`, `test:saml`, `test:sanitize`, `test:ops`, `test:kms-files`, `test:fuzz`…).
+
+**Cobertura** (c8, sobre `src/` y `scripts/`): `npm run coverage` mide toda la suite y escribe `coverage/` (HTML/LCOV/JSON);
+`npm run coverage:check` aplica los umbrales de `.c8rc.json`. El CI falla si la cobertura baja de los umbrales y publica el resumen en
+cada ejecución. La cobertura **mide qué código se ejecuta, no si las pruebas comprueban lo correcto**: úsala para encontrar lo no probado, no como nota.
+
+**Fuzzing con propiedades** (`test_fuzz.js`, fast-check): entradas aleatorias, mutadas y patológicas contra lo que procesa datos hostiles.
+Propiedades comprobadas: el detector de tipos nunca lanza y rechaza SIEMPRE ejecutables; nombres de archivo sin rutas, controles ni bidi y estables;
+cifrado de campos y de archivos (cualquier rango; **cualquier byte alterado o truncado se detecta**); `parseRange` acotado; el detector de
+inyección no tarda (sin ReDoS) ni lanza, aguanta JSON de 5000 niveles y sigue detectando ataques con mayúsculas, comentarios y doble codificación;
+`sqlInt`/`sqlFragment` solo producen texto seguro; un rol inventado no tiene ningún permiso; PDF ofuscados con `#hex`, bombas Flate e imágenes
+corruptas se rechazan sin colgar; y **todas las rutas documentadas en `docs/openapi.json`**, con rol anónimo, usuario y admin, con ids, query y cuerpos hostiles
+(JSON inválido, `text/plain`, multipart sin cierre), **nunca responden 5xx ni filtran trazas**.
+
+El fuzzing ya encontró **dos fallos reales**, corregidos y con prueba fija: un `id` de sesión enorme daba 500 (`/api/auth/sessions/99999999999999999999`;
+el validador aceptaba enteros no seguros) y un cuerpo multipart sin cierre **tumbaba el proceso** (busboy emite `error` directamente en el
+stream del archivo). `npm run test:fuzz` usa 100 iteraciones (`FUZZ_RUNS`); `.github/workflows/fuzz.yml` corre 1500 cada noche, y una
+ejecución fallida imprime la semilla (`FUZZ_SEED`) para repetirla.
+
+Límite honesto: es *property-based testing*, no un fuzzer guiado por cobertura (AFL/libFuzzer) ni sustituye a un pentest.
+
+---
+
+## 21. CI y producción (sin nodemon)
+
+- **`ci.yml`**: lint de seguridad (0 avisos), `check:prod-deps`, MariaDB y ClamAV reales, `npm run coverage` (toda la suite, fuzzing incluido, con
+  umbral mínimo y artefacto `coverage`), `npm audit` de producción (alto), trabajo **`production-install`** (`npm ci --omit=dev`,
+  comprueba que no hay nodemon ni herramientas de desarrollo en `node_modules`, que `npm run dev` se niega con `NODE_ENV=production` y que el servidor
+  carga sus módulos) y **`dependency-review`** en los pull requests (rechaza dependencias nuevas con vulnerabilidades altas o licencias GPL/AGPL).
+  Permisos `contents: read`, cancelación de ejecuciones obsoletas y *timeouts*.
+- **`security.yml`**: ESLint security, CodeQL, gitleaks, SBOM CycloneDX y **DAST con OWASP ZAP que bloquea** si el informe contiene alertas de riesgo ALTO
+  (si ZAP no llega a ejecutarse por infraestructura, no bloquea). **`fuzz.yml`**: fuzzing nocturno largo.
+- **Todas las acciones están fijadas por SHA** de commit (con la versión en un comentario) y Dependabot propone las actualizaciones: una etiqueta como `@v4`
+  puede moverse y ejecutar código distinto mañana.
+- **nodemon solo en desarrollo**: está en `devDependencies`; `npm start` ejecuta `node src/index.js`; `npm run dev` pasa por `scripts/devGuard.js` y
+  **se niega con `NODE_ENV=production`**; `install.js --production` (o `NODE_ENV=production`) instala con `--omit=dev`; y `npm run check:prod-deps`
+  falla si una herramienta de desarrollo aparece en `dependencies`, en `start` o en un `require` de `src/`/`scripts/`.
+  En producción: `npm ci --omit=dev` y un gestor de procesos (systemd, PM2, contenedor) en lugar de nodemon.
+
+---
+
+## 22. Límites y pendientes (sin humo)
+
+Resuelto desde la versión anterior: MFA (TOTP, passkeys), SSO (OIDC y SAML), sesiones cortas con renovación y «cerrar todas», roles
+finos con aprobación de dos administradores, KMS para secretos **y** para las claves de archivo, antivirus, recodificación de imágenes y
+filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura, fuzzing y CI endurecido. Lo que **sigue sin estar** o tiene límites:
+
+- **Multi-organización** (varios clientes aislados en una misma instalación): no existe.
+- **HSM por operación**: la clave maestra de los campos cifrados sigue en memoria del proceso (ver §11). Con `KMS_DATA_KEYS` los **archivos** ya no dependen de ella.
+- **Pentest externo y certificaciones** (ISO 27001, SOC 2…): dependen de terceros y de la organización (ver §14 y `docs/CONTROLES.md`). Que el código pase sus
+  pruebas **no es** una certificación.
+- **Saneado de archivos**: solo imágenes (recodificadas) y PDF (inspeccionados, no modificados). Audio, vídeo y texto conservan sus metadatos; el antivirus detecta
+  lo conocido, no lo nuevo.
+- **Detección por reglas**: bloquea lo conocido; un atacante que conozca las reglas puede evadirlas. Por eso la defensa real es la capa 1 (parámetros), no el detector.
+- **Fuzzing**: pruebas con propiedades (§20), no un fuzzer guiado por cobertura; encuentra la clase de fallo común, no garantiza su ausencia. La **cobertura** mide ejecución, no corrección.
+- **Proveedores simulados**: OIDC, SAML, WebAuthn, Vault y AWS KMS están probados contra simuladores que firman/cifran de verdad, **no contra un Entra ID, Okta o AWS reales**:
+  prueba tu integración en un entorno de preproducción. Los workflows de CodeQL/gitleaks/ZAP/dependency-review no se han podido ejecutar fuera de GitHub; la primera ejecución puede pedir ajustes.
 - **DoS volumétrico** de capa 7: hace falta un WAF/CDN delante.
-- Vault y AWS KMS están probados contra servidores simulados, y los workflows de CodeQL/gitleaks/ZAP no se han podido ejecutar fuera de GitHub.
+- **Panel de administración**: hay API (`/api/system/dashboard`, alertas, aprobaciones) y métricas para Grafana; no hay interfaz web propia.
+- **Mantenimiento**: `prom-client` avisa de que su paquete fue sustituido por `@prometheus-io/client`; migrar es trabajo pendiente (sin impacto de seguridad conocido).
 - `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/`; **`.env` no se ha tocado** (decisión
   del propietario). Sus valores sensibles coinciden con los de `.env.example` público (parecen de ejemplo), pero si algún día contiene
   secretos reales quedarán en el historial: usa `npm run kms -- migrate-env` y sácalo del repositorio.

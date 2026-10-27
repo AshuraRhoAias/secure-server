@@ -2,7 +2,8 @@ name: Security
 
 # Análisis automáticos que auditores y pentesters esperan ver funcionando. Ninguno sustituye a una auditoría humana.
 # (Estos workflows no se han podido ejecutar en el entorno donde se escribieron: la primera ejecución en GitHub puede
-#  requerir ajustes; el job DAST es informativo y no bloquea.)
+#  requerir ajustes. El job DAST BLOQUEA solo si ZAP genera su informe y contiene alertas de riesgo ALTO; si ZAP no llega a
+#  ejecutarse (infraestructura) no bloquea.)
 
 on:
   push:
@@ -18,9 +19,10 @@ jobs:
   static:
     name: Análisis estático (ESLint security)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run lint:security
@@ -28,44 +30,47 @@ jobs:
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: github/codeql-action/init@51f77329afa6477de8c49fc9c7046c15b9a4e79d # v3.29.7
         with:
           languages: javascript-typescript
           queries: security-extended
           config-file: ./.github/codeql/codeql-config.yml
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@51f77329afa6477de8c49fc9c7046c15b9a4e79d # v3.29.7
 
   secrets:
     name: Búsqueda de secretos (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { fetch-depth: 0 }
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   sbom:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file sbom.cdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: sbom, path: sbom.cdx.json }
 
   dast:
     name: DAST (OWASP ZAP contra la API en marcha)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 40
     services:
       mariadb:
         image: mariadb:10.11
@@ -77,8 +82,8 @@ jobs:
     env:
       SEEDS: ${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22, cache: npm }
       - run: npm ci
 
@@ -118,7 +123,8 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - uses: zaproxy/action-api-scan@v0.9.0
+      - uses: zaproxy/action-api-scan@77dfa9a647bb0f583e39d4df8531634d6ddd8df4 # v0.9.0
+        continue-on-error: true      # el veredicto lo da la puerta de abajo (riesgo alto), no el código de salida de ZAP
         env:
           # Cabecera de autenticación nativa de zap-api-scan.py: se envía en TODAS las peticiones del escaneo
           ZAP_AUTH_HEADER: Authorization
@@ -129,6 +135,22 @@ jobs:
           fail_action: false
           # El workflow no tiene permiso para abrir issues; el informe se sube como artefacto
           allow_issue_writing: false
+
+      # Puerta: sin alertas de riesgo ALTO (riskcode 3). Medio/bajo/informativo quedan en el informe (artefacto "zap_scan").
+      - name: Puerta ZAP (sin riesgo alto)
+        if: always() && hashFiles('report_json.json') != ''
+        run: |
+          node -e "
+            const report = require('./report_json.json');
+            const alerts = (report.site || []).flatMap(site => site.alerts || []);
+            const high = alerts.filter(a => Number(a.riskcode) >= 3);
+            const summary = alerts.reduce((acc, a) => { acc[a.riskdesc] = (acc[a.riskdesc] || 0) + 1; return acc; }, {});
+            console.log('Alertas ZAP:', JSON.stringify(summary));
+            if (high.length) {
+              high.forEach(a => console.error('ALTO: ' + a.name + ' (' + (a.instances || []).length + ' instancias)'));
+              process.exit(1);
+            }
+          "
 
       - if: always()
         run: tail -n 50 "$RUNNER_TEMP/api.log" || true

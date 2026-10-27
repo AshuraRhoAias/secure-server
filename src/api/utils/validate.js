@@ -49,7 +49,8 @@ function checkField(name, rule, raw) {
             if (typeof value !== 'number' || !Number.isFinite(value)) {
                 return { error: `${name} debe ser numérico` };
             }
-            if (rule.type === 'integer' && !Number.isInteger(value)) {
+            // Safe integer: 99999999999999999999 es "entero" para JS pero no se puede representar con exactitud ni usar como id
+            if (rule.type === 'integer' && !Number.isSafeInteger(value)) {
                 return { error: `${name} debe ser un entero` };
             }
             if (rule.min !== undefined && value < rule.min) return { error: `${name} debe ser >= ${rule.min}` };

@@ -35,7 +35,9 @@ Solo la rama `main`. Las correcciones de seguridad se publican allí.
 
 ## Qué ya está comprobado y cómo reproducirlo
 
-- `npm run test:all` (necesita MySQL/MariaDB): pruebas de seguridad, MFA, SSO, KMS, antivirus, archivos y copias.
+- `npm run test:all` (necesita MySQL/MariaDB): pruebas de seguridad, sesiones, RBAC, MFA/WebAuthn, SSO/SAML, KMS, antivirus, archivos, operación y fuzzing.
+- `npm run coverage`: la misma suite medida con c8 (umbral mínimo en CI). `npm run test:fuzz`: fuzzing con propiedades (`FUZZ_RUNS`, `FUZZ_SEED`).
+- `npm run check:prod-deps`: nada de desarrollo (nodemon, eslint, c8…) en producción.
 - `npm run lint:security`: análisis estático (eslint-plugin-security), debe quedar a cero avisos.
 - `npm audit --omit=dev`: dependencias de producción sin vulnerabilidades altas.
 - `docs/openapi.json`: definición de la API para escáneres (ZAP, Burp); una prueba garantiza que está al día.

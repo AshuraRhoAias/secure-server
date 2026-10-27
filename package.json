@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "node scripts/devGuard.js && nodemon src/index.js",
     "test": "node test_system.js",
     "test:api": "node --test test_api.js",
     "test:icmp": "node --test test_icmp.js",
@@ -29,7 +29,7 @@
     "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\"",
     "test:security": "node --test test_security.js",
     "test:files": "node --test test_files.js",
-    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_kms_files.js test_files.js test_sanitize.js test_ops.js test_av.js test_files_backup.js",
+    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_kms_files.js test_files.js test_sanitize.js test_ops.js test_av.js test_files_backup.js test_fuzz.js",
     "test:mfa": "node --test test_mfa.js",
     "test:sessions": "node --test test_sessions.js",
     "test:rbac": "node --test test_rbac.js",
@@ -47,7 +47,11 @@
     "files:verify": "node scripts/filesBackup.js verify",
     "files:restore": "node scripts/filesBackup.js restore",
     "test:files-backup": "node --test test_files_backup.js",
-    "lint:security": "eslint src scripts --max-warnings 0"
+    "lint:security": "eslint src scripts --max-warnings 0",
+    "check:prod-deps": "node scripts/checkProductionDeps.js",
+    "test:fuzz": "node --test test_fuzz.js",
+    "coverage": "c8 --reporter=text-summary --reporter=lcov --reporter=json-summary npm run test:all",
+    "coverage:check": "c8 check-coverage"
   },
   "keywords": [
     "security",
@@ -90,9 +94,11 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "c8": "^10.1.3",
     "concurrently": "^9.2.0",
     "eslint": "^9.39.5",
     "eslint-plugin-security": "^3.0.1",
+    "fast-check": "^3.23.2",
     "globals": "^17.13.0",
     "nodemon": "^3.1.10",
     "xml-crypto": "^6.4.0"

@@ -221,6 +221,9 @@ test('cerrar una sesión concreta; no se puede cerrar la de otro usuario (404, s
     assert.strictEqual((await me(second.token, ip)).status, 200, 'sigue viva');
     assert.strictEqual((await api(app.base, 'DELETE', '/api/auth/sessions/abc', { token: owner.token, ip })).status, 400);
     assert.strictEqual((await api(app.base, 'DELETE', '/api/auth/sessions/999999999', { token: owner.token, ip })).status, 404);
+    // Hallazgo del fuzzing: un id fuera del rango de la columna daba 500
+    assert.strictEqual((await api(app.base, 'DELETE', '/api/auth/sessions/2147483648', { token: owner.token, ip })).status, 404);
+    assert.strictEqual((await api(app.base, 'DELETE', '/api/auth/sessions/99999999999999999999', { token: owner.token, ip })).status, 400);
 
     assert.strictEqual((await api(app.base, 'DELETE', `/api/auth/sessions/${target.id}`, { token: owner.token, ip })).status, 200);
     assert.strictEqual((await me(second.token, ip)).status, 401);
