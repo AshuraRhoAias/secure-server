@@ -194,9 +194,11 @@ itDb('líder: solo UNA instancia lo es, el relevo ocurre al parar o al perder la
 // ============================================================================ cluster (procesos reales)
 
 // index.js exige que el archivo de entorno exista; todo lo demás llega por variables de entorno
-const envFile = path.join(os.tmpdir(), `scale-test-${process.pid}.env`);
-fs.writeFileSync(envFile, '# vacío a propósito: la configuración llega por variables de entorno\n');
-test.after(() => fs.rmSync(envFile, { force: true }));
+// (en un directorio propio creado con mkdtemp, permisos 0700: nada predecible en /tmp)
+const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scale-test-'));
+const envFile = path.join(envDir, 'test.env');
+fs.writeFileSync(envFile, '# vacío a propósito: la configuración llega por variables de entorno\n', { mode: 0o600 });
+test.after(() => fs.rmSync(envDir, { recursive: true, force: true }));
 
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 

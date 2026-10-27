@@ -51,6 +51,7 @@ test.after(async () => {
   await pool?.end().catch(() => {});
   await webProc?.stop();
   await apiProc?.stop();
+  if (apiProc?.envDir) fs.rmSync(apiProc.envDir, { recursive: true, force: true });
   fs.rmSync(filesDir, { recursive: true, force: true });
 });
 

@@ -53,7 +53,7 @@ function load(url, token) {
     try {
         for (let i = 0; i < 60; i++) { try { if ((await request('GET', '/health')).status === 200) break; } catch { /* arrancando */ } await new Promise(r => setTimeout(r, 500)); }
         const user = `bench_${Date.now().toString(36)}`;
-        const password = `Bench-${Math.random().toString(36).slice(2)}-Pw1!`;
+        const password = `Bench-${require('crypto').randomBytes(9).toString('hex')}-Pw1!`;
         await request('POST', '/api/auth/register', { json: { username: user, email: `${user}@example.com`, password } });
         const login = await request('POST', '/api/auth/login', { json: { username: user, password } });
         const token = login.body?.token; if (!token) throw new Error(`login falló: ${login.text.slice(0, 200)}`);

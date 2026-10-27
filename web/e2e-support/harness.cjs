@@ -39,14 +39,16 @@ function launch(name, command, args, { env, cwd }) {
 
 async function startApi(extraEnv = {}) {
   const port = await freePort();
-  const envFile = path.join(os.tmpdir(), `ops-e2e-${process.pid}.env`);
-  fs.writeFileSync(envFile, '# vacío a propósito\n');
+  // Directorio propio (mkdtemp, 0700): nada con nombre predecible en /tmp
+  const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-e2e-'));
+  const envFile = path.join(envDir, 'api.env');
+  fs.writeFileSync(envFile, '# vacío a propósito\n', { mode: 0o600 });
   const proc = launch('api', process.execPath, [path.join(ROOT, 'src/index.js')], {
     cwd: ROOT,
     env: { ...process.env, ENV_FILE: envFile, PORT: String(port), TRUST_PROXY: '1', ALERTS_DISABLED: 'true', PROTECTION_CACHE_MS: '0', ...extraEnv }
   });
   await waitFor(`http://127.0.0.1:${port}/health`);
-  return { ...proc, port, base: `http://127.0.0.1:${port}`, envFile };
+  return { ...proc, port, base: `http://127.0.0.1:${port}`, envFile, envDir };
 }
 
 async function startWeb(apiBase, extraEnv = {}) {
