@@ -404,3 +404,18 @@ Misma rama y PR. Detalle y límites en `docs/SEGURIDAD.md` §15–§22.
 enteros no seguros; un cuerpo multipart sin cierre **tumbaba el proceso entero** (busboy emite `error` directamente en el stream del archivo sin listener).
 Otros hallazgos de esta entrega: node-saml aceptaba `Recipient`/`Destination`/`Status`
 distintos (comprobaciones propias añadidas), y la erradicación de un usuario dejaba un evento de aprobación con su `user_id`.
+
+---
+
+## J. Intervención 2026-10-27 (6.ª entrega): interfaz web y escalabilidad
+
+Misma rama y PR. Detalle en `docs/SEGURIDAD.md` §23 y §24.
+
+| Petición | Qué se hizo | Límite que se mantiene |
+|---|---|---|
+| Interfaz web React/Next.js para operación y observabilidad | `web/`: Next.js 16 + React 19. BFF con cookie `httpOnly` cifrada (los tokens no llegan al JavaScript), lista cerrada de rutas, CSRF, CSP con nonce; panel, alertas, aprobaciones, eventos (CSV), IP, usuarios/sesiones, datos personales, métricas y sistema. 43 pruebas unitarias + 15 de extremo a extremo con el API real y Chromium; job `web` en el CI | Solo admin; sin passkeys ni SSO en la interfaz; sondeo, no tiempo real |
+| Mejorar la escalabilidad | `src/cluster.js` (workers, relanzado, reinicio en caliente, cierre ordenado, métricas agregadas); líder único para las tareas periódicas; `/health/ready`; limitador de una sentencia; caché de 1 s de IP bloqueadas; medido con `benchmarks/scale-bench.js`: **×1,9 con 2 workers y ×2,2–2,3 con 4** en 4 vCPU compartidos, +12 % en proceso único | Medido en UNA máquina de 4 vCPU; `FILES_DIR` sigue siendo disco local (volumen compartido con varias máquinas); el cuello pasa a MariaDB |
+
+**Correcciones a lo dicho antes**: la documentación afirmaba «~3 consultas por petición protegida»; medido con el registro de MariaDB eran 4 (ahora 2–3). Hallazgos reales: un
+`GET_LOCK` en una conexión retenida habría tumbado el proceso al caerse la conexión (sin listener de `error`); en el cluster, prom-client solo responde a la agregación si el worker construye un
+`AggregatorRegistry` (daba 500); el reparto round-robin perdía conexiones al reiniciar en caliente (ahora socket compartido); y cerrar las conexiones ociosas al instante daba resets.

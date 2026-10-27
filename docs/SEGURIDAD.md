@@ -26,6 +26,8 @@ real); donde algo no se puede garantizar desde el código, se dice.
 - [20. Pruebas, cobertura y fuzzing](#20-pruebas-cobertura-y-fuzzing)
 - [21. CI y producción (sin nodemon)](#21-ci-y-producción-sin-nodemon)
 - [22. Límites y pendientes (sin humo)](#22-límites-y-pendientes-sin-humo)
+- [23. Escalabilidad](#23-escalabilidad)
+- [24. Interfaz web de operación (Next.js)](#24-interfaz-web-de-operación-nextjs)
 
 ---
 
@@ -310,6 +312,11 @@ Todas opcionales. Plantilla comentada en `.env.example`.
 | `INJECTION_BLOCK_PATHS` | `/api/auth,/api/system,/api/sso` | Prefijos donde un hallazgo en el cuerpo SÍ rechaza la petición (§18) |
 | `KMS_DATA_KEYS` / `KMS_DATA_KEY_CACHE_SECONDS` / `KMS_TIMEOUT_MS` | `false` / `300` / `30000` | Claves de archivo envueltas por el KMS (§18) |
 | `ALERT_*`, `ALERTS_DISABLED`, `METRICS_TOKEN`, `OTEL_*`, `HOUSEKEEPING_INTERVAL_MINUTES` | ver §19 | Operación y observabilidad |
+| `WEB_CONCURRENCY` / `CLUSTER_SCHEDULING` / `STARTUP_TIMEOUT_MS` | núcleos (máx. 16) / `none` / `60000` | Cluster (§23) |
+| `PROTECTION_CACHE_MS` | `1000` | Caché de la comprobación de IP bloqueada; `0` la desactiva (§23) |
+| `LEADER_ELECTION` / `LEADER_RETRY_SECONDS` / `LEADER_PING_SECONDS` | `true` / `10` / `5` | Líder de tareas periódicas (§23) |
+| `SHUTDOWN_TIMEOUT_MS` / `SHUTDOWN_DRAIN_MS` / `KEEP_ALIVE_TIMEOUT_MS` | `10000` / `1500` / `65000` | Cierre ordenado y keep-alive (§23) |
+| `ACCESS_LOG` | `combined` | `combined` · `errors` (solo ≥ 400) · `off` |
 | `FUZZ_RUNS` / `FUZZ_SEED` | `100` / aleatoria | Solo pruebas: iteraciones y semilla del fuzzing (§20) |
 | `SECURITY_EVENTS_RETENTION_DAYS` | `90` | Retención de `security_events` |
 | `SECURITY_EVENTS_MAX_PER_MINUTE` | `30` | Tope de eventos por (IP, tipo) y minuto |
@@ -359,10 +366,10 @@ celda: son órdenes de magnitud, no cifras de catálogo.**
 Lectura honesta: la protección en MySQL cuesta ~19 % de rendimiento en rutas con BD frente a
 desactivarla, y aun así el conjunto es más rápido que el código anterior *sin* protección (se quitaron
 decenas de `console.log` por operación de cifrado y el doble descifrado de verificación).
-`/health` no usa la BD de seguridad, por eso apenas cambia. Cada petición protegida hace ~3
-consultas por clave primaria; sube `DB_POOL_SIZE` si tu BD lo permite.
+`/health` no usa la BD de seguridad, por eso apenas cambia. *(Corrección posterior: medido con el registro de consultas, cada petición protegida
+hacía 4 consultas, no 3; ahora son 2 o 3, ver §23.)* Sube `DB_POOL_SIZE` si tu BD lo permite.
 
-**Escalado horizontal**: ahora sí es posible (el estado es compartido). Varias instancias detrás de un
+**Escalado horizontal**: ahora sí es posible (el estado es compartido; para varios procesos y varias máquinas ver §23). Varias instancias detrás de un
 balanceador comparten límites, bloqueos y eventos; solo `FILES_DIR` debe ser **almacenamiento
 compartido** (NFS/EFS/volumen) o todas las instancias deben ver el mismo disco. El cuello de botella
 pasa a ser la base de datos.
@@ -756,6 +763,7 @@ finos con aprobación de dos administradores, KMS para secretos **y** para las c
 filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura, fuzzing y CI endurecido. Lo que **sigue sin estar** o tiene límites:
 
 - **Multi-organización** (varios clientes aislados en una misma instalación): no existe.
+- **Escala medida solo en una máquina de 4 vCPU** (§23): no hay prueba de carga con varias máquinas, réplicas de BD ni cientos de miles de usuarios.
 - **HSM por operación**: la clave maestra de los campos cifrados sigue en memoria del proceso (ver §11). Con `KMS_DATA_KEYS` los **archivos** ya no dependen de ella.
 - **Pentest externo y certificaciones** (ISO 27001, SOC 2…): dependen de terceros y de la organización (ver §14 y `docs/CONTROLES.md`). Que el código pase sus
   pruebas **no es** una certificación.
@@ -766,8 +774,81 @@ filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura
 - **Proveedores simulados**: OIDC, SAML, WebAuthn, Vault y AWS KMS están probados contra simuladores que firman/cifran de verdad, **no contra un Entra ID, Okta o AWS reales**:
   prueba tu integración en un entorno de preproducción. Los workflows de CodeQL/gitleaks/ZAP/dependency-review no se han podido ejecutar fuera de GitHub; la primera ejecución puede pedir ajustes.
 - **DoS volumétrico** de capa 7: hace falta un WAF/CDN delante.
-- **Panel de administración**: hay API (`/api/system/dashboard`, alertas, aprobaciones) y métricas para Grafana; no hay interfaz web propia.
+- **Interfaz web** (`web/`, §24): solo contraseña + TOTP/código de recuperación; sin passkeys ni SSO desde la interfaz; datos por sondeo, no en tiempo real.
+- **Archivos con varias máquinas**: `FILES_DIR` es disco local; con varias máquinas hace falta un volumen compartido (NFS/EFS). No hay almacenamiento S3 propio.
 - **Mantenimiento**: `prom-client` avisa de que su paquete fue sustituido por `@prometheus-io/client`; migrar es trabajo pendiente (sin impacto de seguridad conocido).
 - `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/`; **`.env` no se ha tocado** (decisión
   del propietario). Sus valores sensibles coinciden con los de `.env.example` público (parecen de ejemplo), pero si algún día contiene
   secretos reales quedarán en el historial: usa `npm run kms -- migrate-env` y sácalo del repositorio.
+
+---
+
+## 23. Escalabilidad
+
+Qué se midió, qué se cambió y qué **no** se ha probado. Mediciones con `benchmarks/scale-bench.js` (`npm run bench:scale -- --env <archivo>`): el servidor
+**real** con MariaDB real, 64 conexiones, 8 s por ruta, usuario con 40 notas. Máquina de **4 vCPU** que comparte CPU con el generador de carga y con
+MariaDB, así que el cluster no puede escalar linealmente aquí. Tres corridas por celda del proceso único; una por celda del cluster: son órdenes de magnitud.
+
+| Configuración | `/api/files/quota` (autenticada, ligera) | `GET /api/notes?limit=20` (descifra 40 campos) |
+|---|---:|---:|
+| **Antes** (proceso único) | 458 · 455 · 459 req/s | 285 · 293 · 298 req/s |
+| Ahora, proceso único | 507 · 494 · 540 req/s (**+12 %**) | 308 · 298 · 302 req/s (≈ +3 %, dentro del ruido) |
+| Ahora, cluster ×2 | 947 req/s (**1,9×**) | 550 req/s (**1,9×**) |
+| Ahora, cluster ×4 | 1 130 req/s (**2,2×**) · p50 10 ms | 699 req/s (**2,3×**) · p50 33 ms |
+
+Lectura honesta: **el grueso de la ganancia viene de usar todos los núcleos** (`src/cluster.js`). Quitar consultas por petición ayuda poco en un solo proceso porque
+ahí el cuello es la CPU de Node (JSON, JWT, cifrado), no la base de datos; ayuda sobre todo a la BD cuando hay muchas instancias. La ruta de notas depende
+del descifrado: se reparte entre procesos, no se acelera por proceso.
+
+### Qué cambió
+
+- **Cluster** (`npm run start:cluster`, `WEB_CONCURRENCY`, por defecto un worker por núcleo, máx. 16). Supervisor mínimo sin secretos ni BD: relanza workers caídos con
+  espera creciente (y se detiene con error si fallan 5 seguidos en 60 s: arranque roto); **reinicio en caliente** con `kill -HUP <pid>` (sustituye de uno en uno, esperando a
+  que el nuevo escuche); cierre ordenado con SIGTERM; y agrega las métricas de todos los workers en `/api/metrics`. Reparto con el socket compartido del kernel
+  (`CLUSTER_SCHEDULING=none`, por defecto): no se pierde ninguna conexión al reiniciar. El reparto round-robin del supervisor (`rr`) perdía ~1 de cada 200
+  conexiones durante un reinicio en caliente (medido; `rr` queda como opción).
+- **Un solo líder para las tareas periódicas** (`src/tasks/leader.js`): limpieza, evaluador de alertas y planificador de rotación solo corren en UNA instancia (cerrojo `GET_LOCK` de MariaDB
+  en una conexión dedicada). Si el líder muere, otro lo releva en ≤ 10 s (`LEADER_RETRY_SECONDS`); si pierde la conexión se retira solo. `LEADER_ELECTION=false` las ejecuta en todas.
+  Antes, con N instancias corrían N planificadores de rotación. El aviso de arranque/cierre lo envía una sola instancia.
+- **`GET /health/ready`**: 200 solo si esa instancia puede atender (BD alcanzable, no cerrándose ni en mantenimiento); 503 en caso contrario, para que un balanceador la retire. `/health` sigue siendo «el proceso vive».
+  No cuentan para el límite de peticiones ni para el bloqueo de IP.
+- **Cierre ordenado**: la sonda pasa a 503, no se aceptan conexiones nuevas, las respuestas llevan `Connection: close`, se espera `SHUTDOWN_DRAIN_MS` (1,5 s) antes de cerrar las conexiones ociosas
+  (cerrarlas al instante daba resets a clientes con la petición ya en camino), se suelta el liderazgo y se cierra el pool. `SHUTDOWN_TIMEOUT_MS` (10 s) fija el plazo total.
+- **`keepAliveTimeout` 65 s** (`KEEP_ALIVE_TIMEOUT_MS`): mayor que el de los balanceadores (ALB/nginx, ~60 s); si el servidor cerrara antes habría 502 intermitentes.
+- **Menos consultas por petición**: el limitador pasa de 2 sentencias a **1** (`hits = LAST_INSERT_ID(hits + 1)` devuelve el contador sin releer; la ventana anterior, ya cerrada, se recuerda).
+  La comprobación de IP bloqueada tiene una **caché de 1 s** (`PROTECTION_CACHE_MS`, 0 la desactiva): una ráfaga desde una IP hace una consulta, no miles. **Coste de seguridad**: un bloqueo o
+  desbloqueo hecho por OTRA instancia tarda como máximo ese tiempo en notarse (el de la propia instancia es inmediato). Resultado: de 4 a 2 consultas por petición autenticada ligera.
+- **Panel**: peticiones idénticas simultáneas al panel comparten un cálculo (sin caché con caducidad: sin datos obsoletos). `ACCESS_LOG=errors|off` reduce el registro de accesos (una escritura síncrona por petición).
+
+### Cómo dimensionar
+
+- **Conexiones a la BD** = `WEB_CONCURRENCY` × `DB_POOL_SIZE` (10 por defecto) × número de máquinas: debe quedar por debajo de `max_connections` con margen (las tareas de líder y las sondas usan algunas más).
+  Con 4 workers y 3 máquinas: 120 conexiones. Baja `DB_POOL_SIZE` o sube `max_connections`.
+- Detrás de un balanceador: `TRUST_PROXY`, sondas a `/health/ready`, drenaje (deregistration delay) ≥ `SHUTDOWN_DRAIN_MS`.
+- **Archivos**: `FILES_DIR` debe ser almacenamiento compartido entre máquinas (NFS/EFS) o todas deben ver el mismo disco.
+- El cuello pasa a ser **MariaDB**. El siguiente paso (no hecho): réplica de lectura para el panel y las consultas de análisis, y particionado de `security_events` si crece mucho.
+
+Comprobado en `test_scale.js` (MariaDB real, procesos reales): contador del limitador exacto con 50 golpes simultáneos, una sola sentencia por golpe, caché de bloqueo (TTL, invalidación local), líder único y relevo
+al parar o al caerse la conexión, cluster con reparto entre procesos y un solo líder, métricas agregadas **sin multiplicar** los gauges que salen de la BD, relanzamiento de un worker (incluido el líder),
+reinicio en caliente con cuatro clientes martilleando sin una petición fallida, supervisor que se detiene si el arranque está roto, y cierre ordenado sin procesos huérfanos.
+Un `SIGKILL` a un worker (p. ej. el OOM-killer) sí corta las conexiones en vuelo y alguna conexión ya entregada a ese worker puede quedarse colgada hasta el *timeout* del cliente: el cierre ordenado no es evitable ahí.
+
+---
+
+## 24. Interfaz web de operación (Next.js)
+
+`web/` (Next.js 16 + React 19 + TypeScript): panel, alertas, aprobaciones de dos administradores, eventos con filtros y CSV, IP bloqueadas, usuarios y sesiones, datos personales, métricas
+y estado del sistema. **Solo administradores.** Instalación y variables: `web/README.md`.
+
+La seguridad está en el diseño, no en la apariencia: es un **BFF**. El navegador habla solo con esta aplicación; los tokens del API viven en una cookie `httpOnly`, `SameSite=Strict`
+(`__Host-` y `Secure` con HTTPS) cifrada con AES-256-GCM y **nunca llegan al JavaScript de la página**; el BFF añade el Bearer, renueva el token antes de que caduque (una sola renovación aunque lleguen
+cinco peticiones a la vez) y solo reenvía una **lista cerrada** de rutas. CSRF con cabecera personalizada + `Origin` + `Sec-Fetch-Site`. CSP con nonce por petición y sin `unsafe-inline`.
+El reto de MFA va en otra cookie `httpOnly`. Tras el login se comprueba que el usuario es admin; si no, su sesión se cierra en el API.
+
+Pruebas: 43 unitarias (cookies selladas y alteradas, CSRF, lista cerrada y recorridos de directorio, IP del cliente, BFF completo contra un API simulado incluida la carrera de renovaciones) y **15 de extremo a
+extremo** con el API real, la web real y Chromium: un usuario normal no entra; ningún token en `document.cookie`, `localStorage`, el HTML ni las respuestas; la CSP bloquea un manejador y un `<script>` inyectados
+y registra la violación; la sesión (token de 36 s) se renueva sola y rota el refresh token; MFA con TOTP y con código de recuperación; acciones reales (reconocer y resolver alertas, aprobar como segundo
+administrador, desbloquear una IP, cerrar sesiones con motivo, exportar CSV); y cerrar sesión revoca en el API. En el CI es el job `web`.
+
+Límites: sin passkeys ni SSO en la interfaz (se usan desde el API); datos por sondeo (10–30 s); no está probada con varios administradores a la vez ni con un navegador distinto de Chromium. Ponla detrás de TLS y,
+mejor, tras una VPN o SSO: es una herramienta de administración.
