@@ -78,6 +78,64 @@ jobs:
       - name: Dependencias de producción sin vulnerabilidades altas
         run: npm audit --omit=dev --audit-level=high
 
+  # Interfaz web de operación (web/): tipos, pruebas unitarias del BFF, compilación y extremo a extremo con el API REAL + Chromium
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - run: npm ci                    # el API real, que usan las pruebas de extremo a extremo
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - name: Compilar
+        run: npm run build
+        working-directory: web
+        env:
+          WEB_SESSION_SECRET: compilacion-sin-secreto-real-0123456789abcdef
+          OPS_API_URL: http://127.0.0.1:3000
+      - name: Dependencias de producción de la web sin vulnerabilidades altas
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: web
+      - name: Chromium para Playwright
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Base de datos de pruebas
+        run: |
+          mysql -h127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE secure_platform_test_app CHARACTER SET utf8mb4;
+            CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_test_pw';
+            GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
+      - name: Extremo a extremo (API real + web real + navegador)
+        run: npm run test:e2e
+        working-directory: web
+
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   production-install:
     runs-on: ubuntu-latest

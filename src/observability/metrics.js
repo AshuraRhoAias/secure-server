@@ -12,7 +12,9 @@ client.collectDefaultMetrics({ register: registry, prefix: 'secure_server_' });
 
 const counter = (name, help, labelNames = []) => new client.Counter({ name: `secure_server_${name}`, help, labelNames, registers: [registry] });
 const histogram = (name, help, labelNames, buckets) => new client.Histogram({ name: `secure_server_${name}`, help, labelNames, buckets, registers: [registry] });
-const gauge = (name, help, labelNames, collect) => new client.Gauge({ name: `secure_server_${name}`, help, labelNames, registers: [registry], ...(collect && { async collect() { await collect(this); } }) });
+// `aggregator` solo importa en modo cluster (ver renderMetrics): los gauges que salen de la BD valen lo mismo en todos los procesos y se
+// agregan con 'max' (con la 'sum' por defecto saldrían multiplicados por el número de procesos); los de cada proceso (pool) se suman.
+const gauge = (name, help, labelNames, collect, aggregator = 'max') => new client.Gauge({ name: `secure_server_${name}`, help, labelNames, aggregator, registers: [registry], ...(collect && { async collect() { await collect(this); } }) });
 
 const httpRequests = counter('http_requests_total', 'Peticiones HTTP', ['method', 'route', 'status']);
 const httpDuration = histogram('http_request_duration_seconds', 'Duración de las peticiones HTTP', ['method', 'route'], [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]);
@@ -50,7 +52,35 @@ gauge('db_pool_connections', 'Conexiones del pool de la base de datos', ['state'
     g.set({ state: 'total' }, pool._allConnections?.length ?? 0);
     g.set({ state: 'free' }, pool._freeConnections?.length ?? 0);
     g.set({ state: 'queued' }, pool._connectionQueue?.length ?? 0);
-});
+}, 'sum');
+
+// Texto de /api/metrics. Con el cluster (src/cluster.js) cada proceso tiene SU registro: se pide al proceso principal que agregue el de
+// todos (prom-client AggregatorRegistry) para que el scrape sea el mismo caiga en el proceso que caiga. Sin cluster, el registro local.
+let nextRequest = 1;
+const pending = new Map();
+if (process.env.CLUSTER_METRICS === 'true' && typeof process.send === 'function') {
+    // prom-client solo responde a las peticiones del principal si el worker construye un AggregatorRegistry; y hay que indicarle
+    // que agregue NUESTRO registro (no el global)
+    client.AggregatorRegistry.setRegistries([registry]);
+    new client.AggregatorRegistry();
+    process.on('message', (message) => {
+        if (message?.type !== 'secure-server:metrics:result') return;
+        const waiter = pending.get(message.id);
+        if (!waiter) return;
+        pending.delete(message.id);
+        message.error ? waiter.reject(new Error(message.error)) : waiter.resolve(message.text);
+    });
+}
+
+function renderMetrics() {
+    if (!(process.env.CLUSTER_METRICS === 'true' && typeof process.send === 'function')) return registry.metrics();
+    return new Promise((resolve, reject) => {
+        const id = nextRequest++;
+        const timer = setTimeout(() => { pending.delete(id); reject(new Error('el proceso principal no respondió a tiempo')); }, 5000);
+        pending.set(id, { resolve: (text) => { clearTimeout(timer); resolve(text); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+        process.send({ type: 'secure-server:metrics', id });
+    });
+}
 
 // Etiqueta de operación SQL: solo valores de una lista cerrada
 const OPERATIONS = new Set(['select', 'insert', 'update', 'delete', 'replace', 'alter', 'create', 'drop']);
@@ -75,7 +105,7 @@ function httpMiddleware() {
 }
 
 module.exports = {
-    registry, httpMiddleware, sqlOperation,
+    registry, renderMetrics, httpMiddleware, sqlOperation,
     httpRequests, httpDuration, securityEvents, sessionsCreated, refreshes, fileUploads, fileRejections,
     dbDuration, dbErrors, otelExportFailures, alertsRaised
 };

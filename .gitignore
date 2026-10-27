@@ -167,3 +167,7 @@ src/notifications/*.json
 # Cobertura de pruebas (npm run coverage)
 coverage/
 .nyc_output/
+
+# Interfaz web (web/): compilación y dependencias propias
+web/node_modules/
+web/.next/

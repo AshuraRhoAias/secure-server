@@ -27,7 +27,7 @@ router.get('/', requireAdminOrScraper, async (req, res) => {
     try {
         res.set('Content-Type', metrics.registry.contentType);
         res.set('Cache-Control', 'no-store');
-        res.send(await metrics.registry.metrics());
+        res.send(await metrics.renderMetrics());
     } catch (error) {
         console.error('❌ Error generando métricas:', error.code || error.message);
         res.status(500).json({ success: false, message: 'Error generando métricas' });

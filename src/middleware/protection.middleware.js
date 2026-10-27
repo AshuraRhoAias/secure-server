@@ -61,8 +61,8 @@ class ProtectionMiddleware {
             // Bypass explícito para pruebas de carga. Por defecto DESACTIVADO.
             if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
 
-            // /health no toca la BD: así un balanceador puede comprobar que el proceso vive
-            if (req.path === '/health') return next();
+            // /health y /health/ready: las sondas de un balanceador no se cuentan ni se limitan (y /health no toca la BD)
+            if (req.path === '/health' || req.path === '/health/ready') return next();
 
             try {
                 const cfg = config();

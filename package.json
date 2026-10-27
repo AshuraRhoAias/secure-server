@@ -9,6 +9,10 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "start:cluster": "node src/cluster.js",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:start": "npm --prefix web start",
     "dev": "node scripts/devGuard.js && nodemon src/index.js",
     "test": "node test_system.js",
     "test:api": "node --test test_api.js",
@@ -29,7 +33,7 @@
     "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\"",
     "test:security": "node --test test_security.js",
     "test:files": "node --test test_files.js",
-    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_kms_files.js test_files.js test_sanitize.js test_ops.js test_av.js test_files_backup.js test_fuzz.js",
+    "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_kms_files.js test_files.js test_sanitize.js test_ops.js test_scale.js test_av.js test_files_backup.js test_fuzz.js",
     "test:mfa": "node --test test_mfa.js",
     "test:sessions": "node --test test_sessions.js",
     "test:rbac": "node --test test_rbac.js",
@@ -51,7 +55,9 @@
     "check:prod-deps": "node scripts/checkProductionDeps.js",
     "test:fuzz": "node --test test_fuzz.js",
     "coverage": "c8 --reporter=text-summary --reporter=lcov --reporter=json-summary npm run test:all",
-    "coverage:check": "c8 check-coverage"
+    "coverage:check": "c8 check-coverage",
+    "bench:scale": "node benchmarks/scale-bench.js",
+    "test:scale": "node --test test_scale.js"
   },
   "keywords": [
     "security",

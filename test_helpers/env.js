@@ -32,6 +32,9 @@ Object.assign(process.env, {
 
 // Las pruebas lanzan muchas peticiones desde pocas IP: se sube el límite global. Los tests de límites
 // lo bajan a propósito (y un proceso hijo hereda ese valor, por eso solo se fija si no viene ya definido).
+// Las pruebas bloquean/desbloquean escribiendo en la BD y esperan el efecto al instante: sin caché de bloqueo
+// (la caché tiene sus propias pruebas en test_scale.js)
+process.env.PROTECTION_CACHE_MS ??= '0';
 process.env.RATE_LIMIT_GLOBAL_PER_MIN ??= '100000';
 process.env.SENSITIVE_RATE_LIMIT_PER_MIN ??= '100000';
 process.env.UPLOAD_RATE_PER_MIN ??= '100000';

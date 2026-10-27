@@ -41,6 +41,24 @@
         "security": []
       }
     },
+    "/health/ready": {
+      "get": {
+        "summary": "Preparación para balanceadores: 200 solo si esta instancia puede atender (BD alcanzable, no en cierre ni mantenimiento)",
+        "tags": [
+          "Sistema"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Lista: {status:\"ready\", leader, pid, uptime}"
+          },
+          "503": {
+            "description": "No lista: shutting_down, database o mantenimiento (el balanceador debe dejar de enviarle tráfico)"
+          }
+        },
+        "security": []
+      }
+    },
     "/api/auth/register": {
       "post": {
         "summary": "Registro",

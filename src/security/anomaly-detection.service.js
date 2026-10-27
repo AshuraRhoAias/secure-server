@@ -4,8 +4,8 @@ const events = require('./security-events.service');
 const { ipSubject, isNeverBlocked } = require('./ip');
 
 // Bloqueo de IPs y reacción a comportamiento abusivo, con TODO el estado en MySQL
-// (tablas blocked_ips, rate_limit_counters y security_events). Nada vive en memoria del proceso:
-// un reinicio no libera a un atacante y varias instancias comparten el mismo veredicto.
+// (tablas blocked_ips, rate_limit_counters y security_events). Un reinicio no libera a un atacante y varias instancias comparten
+// el mismo veredicto. La única memoria es una caché de CORTA duración de la consulta de bloqueo (ver isIPBlocked).
 //
 // Esta versión sustituye a la anterior, que guardaba historiales por IP en Map/Set. Se eliminaron
 // dos detectores que no tenían sentido por petición (cambio de país y de navegador "por IP": una
@@ -14,14 +14,39 @@ const { ipSubject, isNeverBlocked } = require('./ip');
 
 const HOUR = 3600;
 
+const BLOCK_CACHE_MAX = 20_000;
+const blockCache = new Map(); // subject -> { blocked, until }
+const cacheMs = () => {
+    const n = Number(process.env.PROTECTION_CACHE_MS);
+    return Number.isFinite(n) && n >= 0 ? Math.min(n, 10_000) : 1000;
+};
+
 class AnomalyDetection {
     // ¿Está bloqueada? (IPv6 se agrupa por /64)
+    //
+    // La BD es la fuente de verdad. Con PROTECTION_CACHE_MS > 0 (por defecto 1000) la respuesta de cada IP se recuerda ese tiempo en
+    // memoria: en una ráfaga desde una IP, miles de peticiones por segundo hacen UNA consulta, no miles. Coste en seguridad: un bloqueo
+    // o desbloqueo hecho por OTRA instancia tarda como mucho ese tiempo en notarse (el de esta misma instancia surte efecto al
+    // instante). Con 0 se consulta la BD en cada petición.
     async isIPBlocked(ip) {
+        const subject = ipSubject(ip);
+        const ttl = cacheMs();
+        const now = Date.now();
+        if (ttl > 0) {
+            const hit = blockCache.get(subject);
+            if (hit && hit.until > now) return hit.blocked;
+        }
+
         const [rows] = await db.query(
             'SELECT 1 AS blocked FROM blocked_ips WHERE ip_address = ? AND blocked_until > NOW() LIMIT 1',
-            [ipSubject(ip)]
+            [subject]
         );
-        return rows.length > 0;
+        const blocked = rows.length > 0;
+        if (ttl > 0) {
+            if (blockCache.size >= BLOCK_CACHE_MAX) blockCache.clear();
+            blockCache.set(subject, { blocked, until: now + ttl });
+        }
+        return blocked;
     }
 
     // Bloqueo PROGRESIVO: 1 h la primera vez, 2 h la segunda, 4 h... hasta 7 días.
@@ -45,6 +70,7 @@ class AnomalyDetection {
                 [subject, String(reason).slice(0, 500), baseSeconds, String(reason).slice(0, 500), baseSeconds, maxSeconds]
             );
 
+            blockCache.delete(subject); // esta instancia lo nota al instante
             await events.record({
                 type: 'IP_BLOCKED', rule: String(reason).slice(0, 64), severity: 'high', riskScore: 80,
                 action: 'blocked_ip', ip
@@ -59,6 +85,7 @@ class AnomalyDetection {
     async unblockIP(ip) {
         try {
             await db.query('DELETE FROM blocked_ips WHERE ip_address = ?', [ipSubject(ip)]);
+            blockCache.delete(ipSubject(ip));
             return true;
         } catch (error) {
             console.error('❌ Error desbloqueando IP:', error.code || error.message);

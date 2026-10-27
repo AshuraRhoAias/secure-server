@@ -7,8 +7,17 @@ const events = require('./security-events.service');
 
 const count = async (sql, params = []) => Number((await db.query(sql, params))[0][0].n);
 
-async function snapshot({ hours = 24 } = {}) {
+// Peticiones idénticas simultáneas (varios administradores con el panel abierto, o varias pestañas) comparten UN cálculo: son ~13
+// consultas. No hay caché con caducidad: en cuanto termina, la siguiente petición vuelve a calcular con datos frescos.
+const inflight = new Map();
+
+function snapshot({ hours = 24 } = {}) {
     const h = Number(sqlInt(hours, { min: 1, max: 24 * 30 }));
+    if (!inflight.has(h)) inflight.set(h, compute(h).finally(() => inflight.delete(h)));
+    return inflight.get(h);
+}
+
+async function compute(h) {
     const secureAuth = require('./secure-auth.service');
     const lockout = secureAuth.lockout;
 

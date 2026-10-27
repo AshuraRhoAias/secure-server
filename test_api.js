@@ -341,7 +341,7 @@ test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no 
         for (const method of Object.keys(methods)) documented.add(`${method.toUpperCase()} ${route.replace(/\{(\w+)\}/g, ':$1')}`);
     }
 
-    const implemented = new Set(['GET /health']);
+    const implemented = new Set(['GET /health', 'GET /health/ready']);
     const dir = path.join(__dirname, 'src/api/routes');
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.routes.js'))) {
         const mount = `/api/${file.replace('.routes.js', '')}`;

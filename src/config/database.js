@@ -145,6 +145,15 @@ class DatabaseConfig {
         }
     }
 
+    // Cierra el pool (cierre ordenado: las consultas en curso terminan)
+    async close() {
+        if (this.pool) {
+            const pool = this.pool;
+            this.pool = null;
+            await pool.end();
+        }
+    }
+
     async testConnection() {
         let connection;
         try {
