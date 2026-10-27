@@ -13,7 +13,7 @@
     "start": "next start -p 3100",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "node --test e2e/"
+    "test:e2e": "node --test e2e/ops.test.cjs"
   },
   "dependencies": {
     "next": "16.4.3",
