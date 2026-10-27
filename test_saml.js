@@ -245,7 +245,7 @@ itDb('aserción manipulada DESPUÉS de firmar (NameID a "admin", atributos, audi
 itDb('signature wrapping (XSW): una aserción maliciosa sin firmar junto a la firmada, o la firmada escondida → rechazada', async () => {
     const evil = (id) => `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" Version="2.0" IssueInstant="${new Date().toISOString()}"><saml:Issuer>${idp.entityId}</saml:Issuer><saml:Subject><saml:NameID>admin-root</saml:NameID></saml:Subject></saml:Assertion>`;
     const attacks = {
-        'segunda aserción antes': (xml) => xml.replace('<samlp:Status>', '<samlp:Status>').replace(/(<saml:Issuer>[^<]*<\/saml:Issuer>)(<samlp:Status>)/, `$1$2`).replace('</samlp:Status>', `</samlp:Status>${evil('_evil1')}`),
+        'segunda aserción antes': (xml) => xml.replace('</samlp:Status>', `</samlp:Status>${evil('_evil1')}`),
         'segunda aserción después': (xml) => xml.replace('</samlp:Response>', `${evil('_evil2')}</samlp:Response>`),
         'aserción firmada dentro de Extensions': (xml) => {
             const signed = /<saml:Assertion[\s\S]*<\/saml:Assertion>/.exec(xml)[0];
