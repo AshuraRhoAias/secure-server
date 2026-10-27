@@ -325,8 +325,12 @@ itE2e('la sesión se renueva sola (token de 36 s) sin pedir otra vez la contrase
   const [[a]] = await pool.query('SELECT refresh_hash FROM user_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1', [users.admin.userId]);
 
   await sleep(24_000); // el token de acceso (36 s) queda por debajo del umbral de renovación (20 s)
-  await page.getByRole('button', { name: 'Actualizar' }).click();
-  await page.getByText(/Actualizado/).waitFor();
+  // Esperar la RESPUESTA de la petición de datos (el texto «Actualizado» ya estaba en pantalla y no prueba nada)
+  const [renewed] = await Promise.all([
+    page.waitForResponse(r => r.url().includes('/bff/api/system/dashboard') && r.status() === 200),
+    page.getByRole('button', { name: 'Actualizar' }).click()
+  ]);
+  assert.ok((await renewed.allHeaders())['set-cookie'], 'la respuesta trae la cookie de sesión renovada');
   const me = await context.request.get('/session/me');
   assert.strictEqual(me.status(), 200);
   assert.ok(new Date((await me.json()).accessExpiresAt).getTime() > Date.now() + 10_000, 'el token de acceso se renovó');
