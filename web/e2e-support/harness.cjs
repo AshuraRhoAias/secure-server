@@ -57,7 +57,8 @@ async function startWeb(apiBase, extraEnv = {}) {
     env: {
       ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1',
       OPS_API_URL: apiBase, OPS_API_ALLOW_HTTP: 'true', WEB_COOKIE_SECURE: 'false', WEB_TRUST_PROXY_HOPS: '0',
-      WEB_SESSION_SECRET: 'e2e-secreto-de-pruebas-0123456789abcdef0123456789', ...extraEnv
+      // Secreto aleatorio en cada ejecución: ningún secreto (ni de pruebas) literal en el repositorio
+      WEB_SESSION_SECRET: require('crypto').randomBytes(32).toString('base64'), ...extraEnv
     }
   });
   await waitFor(`http://127.0.0.1:${port}/login`);

@@ -113,10 +113,9 @@ jobs:
       - run: npm test
         working-directory: web
       - name: Compilar
-        run: npm run build
+        run: WEB_SESSION_SECRET="$(openssl rand -hex 32)" npm run build
         working-directory: web
         env:
-          WEB_SESSION_SECRET: compilacion-sin-secreto-real-0123456789abcdef
           OPS_API_URL: http://127.0.0.1:3000
       - name: Dependencias de producción de la web sin vulnerabilidades altas
         run: npm audit --omit=dev --audit-level=high
