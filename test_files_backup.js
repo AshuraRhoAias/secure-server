@@ -89,7 +89,8 @@ itDb('copia incremental: la primera copia todo, la segunda solo lo nuevo, y todo
         const name = await storageName(file.id);
         const copy = fs.readFileSync(path.join(backupDir, 'files', name.slice(0, 2), `${name}.enc`));
         assert.ok(copy.equals(fs.readFileSync(await sourceFile(file.id))));
-        assert.ok(!copy.includes('texto de prueba') && !copy.includes('PNG'));
+        // Firma PNG completa (8 bytes): buscar solo 'PNG' (3 bytes) coincide por azar ~2 % de las veces en 300 KB de cifrado aleatorio
+        assert.ok(!copy.includes('texto de prueba') && !copy.includes(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
     }
     const index = fs.readFileSync(path.join(backupDir, 'index.json'), 'utf8');
     assert.ok(!/a\.png|b\.png|c\.txt|d\.png/.test(index), 'el índice no contiene nombres reales');
