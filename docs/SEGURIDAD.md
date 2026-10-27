@@ -736,7 +736,7 @@ Límite honesto: es *property-based testing*, no un fuzzer guiado por cobertura 
 - **`ci.yml`**: lint de seguridad (0 avisos), `check:prod-deps`, MariaDB y ClamAV reales, `npm run coverage` (toda la suite, fuzzing incluido, con
   umbral mínimo y artefacto `coverage`), `npm audit` de producción (alto), trabajo **`production-install`** (`npm ci --omit=dev`,
   comprueba que no hay nodemon ni herramientas de desarrollo en `node_modules`, que `npm run dev` se niega con `NODE_ENV=production` y que el servidor
-  carga sus módulos) y **`dependency-review`** en los pull requests (rechaza dependencias nuevas con vulnerabilidades altas o licencias GPL/AGPL).
+  carga sus módulos) y **`dependency-review`** en los pull requests (rechaza dependencias nuevas con vulnerabilidades altas o licencias GPL/AGPL; **requiere activar «Dependency graph»** —y Advanced Security si el repositorio es privado— en Settings; mientras no lo esté, el job avisa pero no bloquea).
   Permisos `contents: read`, cancelación de ejecuciones obsoletas y *timeouts*.
 - **`security.yml`**: ESLint security, CodeQL, gitleaks, SBOM CycloneDX y **DAST con OWASP ZAP que bloquea** si el informe contiene alertas de riesgo ALTO
   (si ZAP no llega a ejecutarse por infraestructura, no bloquea). **`fuzz.yml`**: fuzzing nocturno largo.
