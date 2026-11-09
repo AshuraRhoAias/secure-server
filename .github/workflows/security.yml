@@ -123,7 +123,7 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - uses: zaproxy/action-api-scan@77dfa9a647bb0f583e39d4df8531634d6ddd8df4 # v0.9.0
+      - uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
         continue-on-error: true      # el veredicto lo da la puerta de abajo (riesgo alto), no el código de salida de ZAP
         env:
           # Cabecera de autenticación nativa de zap-api-scan.py: se envía en TODAS las peticiones del escaneo
