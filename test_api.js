@@ -355,6 +355,15 @@ test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no 
     assert.deepStrictEqual([...documented].filter(r => !implemented.has(r)), [], 'rutas documentadas que no existen');
 });
 
+// ---------- README: la tabla de endpoints es la generada desde docs/openapi.json ----------
+test('README.md: la tabla de endpoints coincide con docs/openapi.json (npm run docs:endpoints -- --write)', () => {
+    const fs = require('fs');
+    const { render, currentBlock } = require('./scripts/openapiTable');
+    const block = currentBlock(fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8'));
+    assert.ok(block, 'el README tiene los marcadores de la tabla');
+    assert.strictEqual(block, render(), 'la tabla del README está desactualizada: npm run docs:endpoints -- --write');
+});
+
 // ---------- MFA: exactamente un factor y de tipo texto ----------
 test('mfa.verify: sin factor, con los dos a la vez o con tipos no textuales → no válido y sin tocar la BD', async () => {
     const mfa = require('./src/security/mfa.service');

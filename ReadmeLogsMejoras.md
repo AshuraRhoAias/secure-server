@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría:** 2026-10-21 (UTC)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-09 (ver §A y §L)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -17,62 +17,36 @@
 
 ## A. Resumen ejecutivo
 
-**Estado general.** `secure-server` es una API REST en Node.js (Express 5 + MySQL) con
-una arquitectura de seguridad notablemente completa para su tamaño: cifrado en tres
-capas de los datos persistidos, autenticación JWT ligada a sesión con análisis de
-riesgo, autorización por rol leída de la BD en cada petición, rate limiting, detección
-de anomalías, rotación de claves con backups cifrados y auditoría cifrada. La **suite
-de pruebas que no depende de BD pasa al 100 %** (ver §B#2).
+- **Última actualización:** 2026-11-09 (7.ª intervención, «cierre»). Punto de recuperación: tag `pre-cierre-2026-11` (= `b36a9a1`, el `main` tras el PR #8).
+- **Trabajo de esta intervención:** ramas apiladas `cierre/0-base` → `cierre/1-seguridad` → `cierre/2-deps` → `cierre/3-web` → `cierre/4-escala`
+  → `cierre/5-pruebaslinux` → `cierre/6-docs` (una por fase, para revisarlas por separado). Entradas #21–#28.
+- **Entorno de verificación:** Windows 11 + Node 26 en local **sin MariaDB** (decisión del propietario: lo que necesita BD se verifica en
+  GitHub Actions con MariaDB 10.11 real). Las fases 0–2 están **verificadas en CI** (verde). Las fases 3–6 están verificadas en local en
+  todo lo que no necesita BD y **su CI está pendiente**: el `git push` de esas ramas se bloqueó porque la credencial de GitHub del equipo
+  caducó (el Git Credential Manager pide iniciar sesión de forma interactiva). Ver #28.
 
-**Componentes analizados.** Capa de entrada (`src/index.js`), middlewares de
-protección/auth/rol/errores, servicios de seguridad (auth, anomalías, comunicaciones,
-ICMP), criptografía (triple cifrado, rotación), APIs (auth, notes, system), esquema y
-migraciones de BD, scripts de operación, dependencias y configuración.
+**Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
+administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
+rotatorio, MFA (TOTP, passkeys), SSO (OIDC, SAML), roles finos con aprobación de dos administradores, KMS, antivirus, alertas, métricas,
+trazas, cluster y varias réplicas. Media de los componentes evaluados (§C): **≈ 8,0/10** (antes 6,7 el 21-oct y ≈ 7,6 el 9-nov por la mañana).
 
-**Problemas críticos / relevantes encontrados.**
+**Componentes analizados.** Entrada y middlewares, autenticación/autorización, criptografía y rotación, archivos (local y S3), SSO,
+observabilidad, cluster y despliegue (Docker), interfaz web (BFF), base de datos y migraciones, dependencias, CI, PruebasLinux y documentación.
 
-1. **Dependencias vulnerables (ALTA):** `npm audit --omit=dev` reporta **21
-   vulnerabilidades** (1 crítica, 12 altas, 8 moderadas), p. ej. en `proxy-addr`
-   (crítica), `axios`, `mysql2`, `path-to-regexp`, `lodash`.
-2. **`.env` versionado en git (ALTA de higiene):** el archivo `.env` está en control de
-   versiones pese a estar en `.gitignore`. En este repo sus valores son **idénticos a
-   los de `.env.example`** (semillas de ejemplo, no secretos vivos), pero el patrón es
-   peligroso: si alguna vez contuviera secretos reales, quedarían expuestos en el
-   historial.
-3. **JWT sin fijar `algorithms` en la verificación (MEDIA):** `jwt.verify(token,
-   secret)` (`src/security/secure-auth.service.js:211`) no restringe el algoritmo
-   aceptado. Conviene pasar `{ algorithms: ['HS256'] }` para evitar confusión de
-   algoritmo.
-4. **Artefactos de "auto-puntuación" engañosos (MEDIA de honestidad):** scripts como
-   `maximize-score.js`, `final-boost-to-100.js`, `fix-system.js` y los marcadores
-   `.audit_version`, `.integrity_status`, `.security_optimized` afirman una puntuación
-   de "100/100" **auto-declarada**, no medida por un auditor independiente. Inducen a
-   error sobre el estado real de seguridad.
-5. **Ruido/exposición en el repo (BAJA):** 56 ficheros `src/notifications/*.json` y un
-   `reports/security_audit_*.json` están versionados (el `.gitignore` pretende
-   ignorarlos pero fueron añadidos antes). Contienen contenido camuflado en base64 y
-   métricas; aportan ruido y potencial divulgación de información.
+**Problemas críticos encontrados en esta intervención.**
+1. **Credenciales reales de una base de datos MySQL remota en `test.js`**, en el historial del repositorio público desde `4b196d1`
+   (25-ago-2025). Archivo eliminado (#22); **hay que cambiar esa contraseña en el proveedor** (solo puede hacerlo el propietario).
+2. `main` en **rojo** desde que se publicó GHSA-mrwp-f3q8-3g9p (`follow-redirects`, vía `axios`): el código no había cambiado (#21).
+3. `DISABLE_IP_BLOCKING=true` quitaba bloqueos **y límites de login también en producción** (#22).
 
-**Mejoras implementadas en esta intervención.**
+**Mejoras implementadas** (#21–#27): `main` en verde; bypass de pruebas de carga imposible en producción; MFA de un solo factor por
+petición (alerta de CodeQL analizada); restos engañosos de 2025 retirados; 14 dependencias al día (incluidas TypeScript 7, ESLint 10,
+fast-check 4); interfaz web completa (passkey, SSO sin tokens en el navegador, datos en vivo, cluster, accesibilidad, tres navegadores);
+archivos en S3; varias réplicas con Docker; réplica de lectura y particionado de eventos; `@prometheus-io/client`; 9 opciones nuevas en
+PruebasLinux con Semgrep propio; documentación al día con la tabla de endpoints generada y comprobada.
 
-- Entorno independiente **`PruebasLinux/`** con **117 pruebas** defensivas reales en 15
-  categorías, menú interactivo, modo no interactivo, logging e informes MD/JSON/CSV.
-- Instalación y verificación de 33 herramientas defensivas en el laboratorio.
-- **Corrección de vulnerabilidades de dependencias** (de 21 a 3; ver #6): a petición
-  expresa del usuario se tocó el mínimo de código de la app necesario (migrar el parseo
-  de user-agent a `ua-parser-js` y subir `nodemailer`), validado sin regresiones.
-- **Instalador multiplataforma** (Linux/Windows) con barra de progreso (ver #7).
-
-> **Alcance de los cambios en el código.** La primera entrega (entorno `PruebasLinux`
-> y documentación) fue puramente aditiva. En esta segunda entrega, **con autorización
-> expresa de Antonio**, se modificaron `package.json`, `package-lock.json` y
-> `src/security/anomaly-detection.service.js` para corregir vulnerabilidades, y se
-> añadió el instalador. No se tocó ninguna otra lógica de la aplicación.
-
-**Riesgos pendientes.** La higiene de secretos sigue abierta (ver #5); de las
-dependencias quedan 3 vulnerabilidades transitivas no alcanzables (ver #6). Sacar `.env`
-y los artefactos del control de versiones y rotar secretos afecta al repositorio y a la
-operación, por lo que se deja propuesto, no aplicado (ver §F).
+**Riesgos pendientes** (detalle en §D): rotar la contraseña filtrada; `.env` versionado (decisión del propietario: datos de prueba); CI de
+las fases 3–6 sin ejecutar; pentest externo; multi-organización; S3 y proveedores de identidad reales sin probar.
 
 ---
 
@@ -152,6 +126,20 @@ operación, por lo que se deja propuesto, no aplicado (ver §F).
   código**; no se aplica en esta intervención aditiva.
 - **Siguiente mejora:** plan de actualización escalonado con pruebas. *(Prioridad alta.)*
 
+### #5 — Higiene de secretos y repositorio
+
+- **Estado:** completado (hallazgos abiertos).
+- **Acciones:** categorías 6 y 12 de `PruebasLinux` + inspección de `git ls-files`.
+- **Resultados verificables:** `.env` versionado (valores = `.env.example`); 56
+  `src/notifications/*.json` y 1 `reports/*.json` versionados; permisos de `.env` `644`
+  (recomendado `600`); sin claves privadas ni tokens reales detectados en archivos
+  versionados; `detect-secrets` marca entradas en `.env`, `README.md` y algunos tests
+  (coinciden con semillas de ejemplo/documentación).
+- **Puntuación:** 5/10.
+- **Problemas restantes:** dejar de versionar `.env` y los artefactos; rotar cualquier
+  secreto que alguna vez haya sido real; limpiar historial si procede.
+- **Siguiente mejora:** `git rm --cached` de esos ficheros + rotación. *(Prioridad alta;* afecta al repo, se propone, no se aplica.)*
+
 ### #6 — Corrección de vulnerabilidades de dependencias
 
 - **Estado:** completado (de 21 a 3; las 3 restantes, riesgo aceptado documentado).
@@ -196,144 +184,109 @@ operación, por lo que se deja propuesto, no aplicado (ver §F).
   mejora.
 - **Siguiente mejora:** script `winget`/`choco` para el toolset en Windows. *(Prioridad baja.)*
 
-### #5 — Higiene de secretos y repositorio
-
-- **Estado:** completado (hallazgos abiertos).
-- **Acciones:** categorías 6 y 12 de `PruebasLinux` + inspección de `git ls-files`.
-- **Resultados verificables:** `.env` versionado (valores = `.env.example`); 56
-  `src/notifications/*.json` y 1 `reports/*.json` versionados; permisos de `.env` `644`
-  (recomendado `600`); sin claves privadas ni tokens reales detectados en archivos
-  versionados; `detect-secrets` marca entradas en `.env`, `README.md` y algunos tests
-  (coinciden con semillas de ejemplo/documentación).
-- **Puntuación:** 5/10.
-- **Problemas restantes:** dejar de versionar `.env` y los artefactos; rotar cualquier
-  secreto que alguna vez haya sido real; limpiar historial si procede.
-- **Siguiente mejora:** `git rm --cached` de esos ficheros + rotación. *(Prioridad alta;* afecta al repo, se propone, no se aplica.)*
+Las entregas siguientes siguen en la sección **K** (#8–#20) y **L** (#21–#28), con este mismo formato.
 
 ---
 
 ## C. Sistema de puntuación por componente (0–10)
 
-Criterios: funcionalidad, seguridad, calidad/mantenibilidad, gestión de errores,
-rendimiento, cobertura de pruebas y documentación. **No se asignan 10 sin evidencia
-suficiente.** Se distingue el grado de evaluación.
+Criterios: **F** funcionalidad · **S** seguridad · **Q** calidad y mantenibilidad · **E** gestión de errores · **R** rendimiento ·
+**T** cobertura de pruebas · **D** documentación. «Evaluado» = con pruebas ejecutadas (local o CI); «Parcial» = parte sin ejecutar (se dice
+qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pentest externo ni producción real, no hay evidencia suficiente.
 
-| Componente | Evaluación | Punt. | Justificación |
-|------------|------------|:----:|---------------|
-| Criptografía / cifrado | Evaluado (estático + tests) | 8 | Triple capa + rotación; tests de cifrado/rotación en verde. Riesgo inherente de criptografía a medida. |
-| Autenticación | Evaluado (estático) | 7 | JWT+sesión+riesgo, 2FA. `algorithms` sin fijar; expiración de 5 días algo larga. |
-| Autorización | Evaluado (estático) | 8 | Rol leído de BD en cada petición; `requireRole` presente. |
-| API / validación de entrada | Parcial (sin servidor) | 7 | `validate.js`, 400 en malformados, rate limit. No ejecutado en vivo. |
-| Base de datos | Parcial (sin MySQL) | 7 | Columnas cifradas, consultas parametrizadas. Integración no verificada aquí. |
-| Gestión de errores | Evaluado (estático) | 7 | Manejador global; 4xx respetados, resto 500 sin detalle. |
-| Dependencias | Evaluado | 7 | Corregidas 18 de 21 (ver #6); quedan 3 transitivas no alcanzables vía geoip-lite. |
-| Secretos / configuración | Evaluado | 5 | `.env` versionado (valores de ejemplo), permisos `644`. |
-| Logging / auditoría | Evaluado (estático) | 8 | Auditoría cifrada, integridad, sin fugas en logs. |
-| Calidad / mantenibilidad | Evaluado | 6 | Artefactos de auto-puntuación engañosos; ruido (56 JSON); scripts `.sh` con avisos. |
-| Pruebas automatizadas | Parcial (sin BD) | 7 | Suites sólidas; 32 pruebas de BD omitidas por entorno. |
-| Documentación | Evaluado | 8 | `README.md` extenso y fiel al código. |
-| Rendimiento | **No evaluado** | — | Sin pruebas de carga ni servidor en marcha. |
-| Infraestructura / Docker | **No evaluado** | — | El proyecto no incluye Dockerfile ni compose. |
+| Componente | Estado | F | S | Q | E | R | T | D | Media | Justificación breve |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
+| Criptografía y rotación | Evaluado (CI, oct) | 9 | 8 | 8 | 9 | 6 | 9 | 9 | **8,3** | v4 + HKDF, rotación probada con `kill -9`; RAM ≈7× la BD al rotar |
+| Autenticación (sesiones, MFA, SSO) | Evaluado (CI) + parcial (handoff: CI pendiente) | 9 | 9 | 8 | 8 | 8 | 9 | 9 | **8,6** | Refresh rotatorio, TOTP/WebAuthn/OIDC/SAML; solo contra simuladores |
+| Autorización | Evaluado (CI) | 9 | 9 | 8 | 8 | 8 | 8 | 8 | **8,3** | Permisos por rol desde la BD, dos administradores; sin multi-organización |
+| API y validación | Evaluado (local + CI) | 9 | 8 | 8 | 9 | 8 | 9 | 9 | **8,6** | OpenAPI = código (prueba) y README = OpenAPI (prueba); fuzzing de todas las rutas |
+| Base de datos | Parcial (particiones/réplica: CI pendiente) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales nuevas |
+| Archivos (local y S3) | Evaluado (local) + parcial (API en S3: CI pendiente) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; audio/vídeo sin sanear |
+| Gestión de errores | Evaluado | 8 | 8 | 8 | 8 | — | 8 | 7 | **7,8** | Sin trazas al cliente (fuzzing); fallos de S3/BD sin filas a medias |
+| Dependencias | Evaluado (CI, fases 0–2) | 9 | 9 | 8 | — | — | 8 | 8 | **8,4** | `npm audit` producción 0 (raíz y web); Dependabot incluye docker |
+| Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente) y `.env` versionado |
+| Observabilidad y operación | Evaluado (CI) + parcial (stream: CI pendiente) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
+| Rendimiento y escalabilidad | Parcial (compose: CI pendiente) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
+| Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~430 API + 57 web + e2e; local sin BD: se omiten las de BD |
+| Interfaz web | Parcial (unitarias y build en local; e2e nuevas: CI pendiente) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
+| Infraestructura / Docker | Parcial (compose validado; build y pruebas: CI pendiente) | 8 | 8 | 8 | 7 | 7 | 7 | 8 | **7,6** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
+| PruebasLinux | Evaluado (local) + parcial (CI pendiente) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
+| Documentación | Evaluado | 9 | — | 8 | — | — | 8 | 9 | **8,5** | README 4979→560 líneas, histórico separado, tabla de endpoints con prueba |
 
-**Media de los componentes evaluados (excluye los "No evaluado"):** ≈ **6,7/10**.
-Esta cifra es una valoración de auditoría con evidencia, no una puntuación perfecta
-auto-declarada.
+**Media de los 16 componentes ≈ 8,1/10** (antes 6,7 el 21-oct). Con el CI de las fases 3–6 en verde, «Parcial» pasaría a «Evaluado»
+sin cambiar las notas; un fallo allí las bajaría hasta que se corrija.
 
 ---
 
 ## D. Registro de problemas y tareas pendientes (por prioridad)
 
-### 🔴 Crítica / Alta
+| Prioridad | Hallazgo | Evidencia | Impacto | Solución | Estado |
+|---|---|---|---|---|---|
+| **Crítica** | Contraseña real de una BD MySQL remota en el repositorio público | `test.js` (host `sistemagym.xo.je`), en el historial desde `4b196d1` | Cualquiera puede leerla del historial de GitHub | Archivo eliminado (#22). **Cambiar la contraseña en el proveedor**; opcional: reescribir el historial | Abierto (rotación: propietario) |
+| Alta | CI de las fases 3–6 sin ejecutar | `git push` → «Cannot prompt because user interactivity has been disabled» | Lo que necesita MariaDB/navegadores no está verificado | Iniciar sesión en GitHub en este equipo y subir las ramas; corregir lo que falle | Bloqueado (credencial) |
+| Alta | Sin pentest externo ni auditoría | `docs/PENTEST-AUTOEVALUACION.md` §4 | Las pruebas propias no sustituyen a un tercero | Encargar pentest con `docs/openapi.json` y el entorno reproducible | Abierto (organización) |
+| Alta (aceptada) | `.env` versionado | `git ls-files .env` | Si un día lleva secretos reales, quedan en el historial | Decisión del propietario: hoy son datos de prueba; antes de producción, `npm run kms -- migrate-env` y sacarlo | Aceptado |
+| Media | Alerta de CodeQL `js/user-controlled-bypass` en `mfa.service.js` | Check «Code scanning results» del PR #8 | Falso positivo analizado: el valor elige qué factor se verifica, no si se verifica | Endurecido (un solo factor, tipo texto) (#22); **descartarla en GitHub** como falso positivo | Mitigado |
+| Media | Proveedores reales sin probar (Entra ID/Okta, AWS KMS/Vault, AWS S3/R2) | Pruebas contra simuladores | Diferencias de un proveedor real | Prueba en preproducción con cada proveedor usado | Abierto |
+| Media | Rotación de claves en memoria | 83 MB → 593 MB de RAM, 75 s cerrado | Inviable con BD de GB | Snapshot y re-cifrado por lotes en streaming | Propuesto |
+| Media | Multi-organización, HIBP, límite de sesiones simultáneas, versionado de API | `docs/CONTROLES.md` §2 | Controles ASVS no cubiertos | Diseño y desarrollo por separado | Propuesto |
+| Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
+| Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
+| Baja | Saneado solo de imágenes y PDF | `docs/SEGURIDAD.md` §22 | Metadatos en audio/vídeo/texto | Recodificar o despojar metadatos | Propuesto |
+| Baja | Mensaje del commit `b1863b6` dice «test:api 16/16» | Ejecución: 15/15 | Inexactitud en el historial | Corregido aquí (#22) | Cerrado |
 
-- **[ALTA → mayormente resuelto] Dependencias vulnerables.** *Evidencia:* `npm audit
-  --omit=dev` pasó de **21 a 3** (ver #6). *Acción aplicada:* `npm audit fix`, `nodemailer`
-  7→10, migración `useragent`→`ua-parser-js`. *Restante:* 3 transitivas vía
-  `geoip-lite → ip-address`, no alcanzables (sólo `geoip.lookup()`); riesgo aceptado y a
-  vigilar upstream. *Estado:* corregido con residual documentado.
-- **[ALTA] `.env` y artefactos versionados.** *Evidencia:* `git ls-files` lista `.env`,
-  56 `src/notifications/*.json`, `reports/*.json`. *Impacto:* higiene de secretos y
-  divulgación. *Solución:* `git rm --cached`, rotación de secretos reales si los hubo.
-  *Estado:* abierto (propuesto; afecta al repo).
-
-### 🟠 Media
-
-- **[MEDIA] JWT `algorithms` sin fijar.** *Evidencia:* `secure-auth.service.js:211`.
-  *Impacto:* confusión de algoritmo. *Solución:* `jwt.verify(t, k, {algorithms:['HS256']})`.
-  *Estado:* abierto (propuesto; afecta al código).
-- **[MEDIA] Auto-puntuación engañosa.** *Evidencia:* `maximize-score.js`,
-  `final-boost-to-100.js`, `.audit_version` (score 100 auto-declarado). *Impacto:*
-  induce a confianza no fundamentada. *Solución:* retirar o marcar claramente como
-  demostrativos; usar `PruebasLinux` como medición real. *Estado:* abierto (propuesto).
-
-### 🟡 Baja
-
-- **[BAJA] Advertencias de ShellCheck** en `scripts/*.sh`. *Solución:* corregir avisos.
-- **[BAJA] Permisos de `.env` 644.** *Solución:* `chmod 600 .env` (hay script
-  `npm run fix-permissions`).
-- **[BAJA] Ruido de 56 ficheros de notificación** en `src/notifications/`. *Solución:*
-  mover a un directorio ignorado o purgar.
+Resueltos de la lista del 21-oct (§D anterior): dependencias (0 vulnerabilidades), JWT con algoritmo fijo, auto-puntuación retirada
+(completado en #22: `fix-system.js` y los marcadores «score 100»), `src/notifications/`, CI con MariaDB.
 
 ---
 
-## E. Historial de cambios de esta intervención
+## E. Historial de cambios
 
-Primera entrega: aditiva (`PruebasLinux/` + documentación). Segunda entrega (con
-autorización de Antonio): corrección de vulnerabilidades e instalador.
+### Entregas 1–2 (21-oct, PR #6)
 
 | Acción | Archivo(s) | Motivo | Validación |
 |--------|-----------|--------|------------|
-| Creado | `PruebasLinux/pruebas.sh` | Lanzador principal | `bash -n`, `shellcheck`, `--list/--diagnose`, menú |
-| Creado | `PruebasLinux/lib/core.sh`, `lib/ui.sh`, `lib/report.sh` | Núcleo, menú e informes | idem |
-| Creado | `PruebasLinux/modules/01..15_*.sh` | 117 pruebas en 15 categorías | ejecución por categoría |
-| Creado | `PruebasLinux/ReadmeLogMejoras.md` | Documentación del entorno | revisión; tabla generada del registro real |
-| Creado | `PruebasLinux/.gitignore`, `logs/.gitkeep`, `reports/.gitkeep` | No versionar salida | — |
-| Creado | `ReadmeLogsMejoras.md` (este archivo) | Bitácora de auditoría | — |
-| **Modificado** | `package.json`, `package-lock.json` | Corregir vulnerabilidades (nodemailer↑, audit fix, quitar `useragent`) | `npm audit` 21→3; suites en verde |
-| **Modificado** | `src/security/anomaly-detection.service.js` | Migrar `useragent`→`ua-parser-js` | smoke de `generateRequestFingerprint`; suites en verde |
-| Creado | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md` | Instalador multiplataforma con barra de progreso | `node --check`, `shellcheck`, ejecución `--os linux/windows` |
+| Creado | `PruebasLinux/` (lanzador, 3 librerías, 15 módulos, documentación) | Entorno independiente de pruebas | `bash -n`, `shellcheck`, `--list/--diagnose`, menú |
+| Creado | `ReadmeLogsMejoras.md` | Bitácora de auditoría | — |
+| Modificado | `package.json`, `package-lock.json`, `src/security/anomaly-detection.service.js` | 21 → 3 vulnerabilidades (`nodemailer`, `ua-parser-js`) | `npm audit`; suites en verde |
+| Creado | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md` | Instalador multiplataforma | `--os linux/windows` |
 
-**Punto de recuperación.** El estado previo es el commit `b7b1ea1` en `main`; el trabajo
-está en la rama `claude/project-thread-qjkfd0`. Revertir todo es no fusionar la rama; los
-cambios en el código de la app se limitan a los dos archivos marcados **Modificado** y
-están aislados en commits propios, fáciles de revertir individualmente.
+### Entregas 3–6 (21–27-oct, PR #7 y #8)
+
+Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a9a1`). Resumen por entrada en §K (#8–#20).
+
+### Intervención 7 (9-nov, ramas `cierre/*`)
+
+| Fase / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| 0 · `a5b9b05`, `f32972a` | — | `package-lock.json`, `src/crypto/kms-providers.js`, `test_kms.js` | — | `main` en rojo; proveedor KMS `file` inutilizable en Windows | CI verde; `test_kms` 16/16 en Windows |
+| 1 · `b1863b6` | `scripts/healthCheck.js` | `protection.middleware.js`, `index.js`, `mfa.service.js`, `.gitleaksignore`, `.env.example`, `docs/SEGURIDAD.md`, `package.json`, `test_api.js`, `test_mfa.js` | `test.js`, `fix-system.js`, 8 marcadores «score 100», `reports/…json`, `integrity/history.json` | Bypass en producción, CodeQL, gitleaks, restos engañosos, credencial filtrada, health-check falso | CI verde; `test:api` 15/15; lint 0 |
+| 2 · `d0daebb`…`bed6619` | — | 3 workflows, `package*.json`, `web/package*.json`, `test_fuzz.js` | — | 14 actualizaciones de Dependabot | CI verde; build con TypeScript 7; fuzz 16/16 |
+| 3 · `62dbe6b` | migración 017, `handoff.service.js`, `live-stream.js`, `cluster-status.js`, 6 rutas y 4 módulos de `web/`, `e2e/live-auth.test.cjs`, `sso-passkey-stream.test.ts` | controladores SSO/SAML/system, rutas, `index.js`, `cluster.js`, `schema.sql`, `openapi.json`, páginas web, `ci.yml`, 4 suites de pruebas | — | Interfaz web completa (#24) | Local: web 57/57 (mutaciones), build, `test:api`, lint; **CI pendiente** |
+| 4 · `2ad6e0b` | `s3-store.js`, `events-partitions.js`, `Dockerfile`, `.dockerignore`, `deploy/*`, `test_s3.js`, `test_files_s3.js`, `test_partitions.js`, `test_compose.js`, `mock-s3.js`, `scripts/eventsPartitions.js` | `storage.js`, `file-cipher.js`, `files-backup.js`, `database.js`, `metrics.js`, `cluster.js`, 2 servicios, `ci.yml`, `dependabot.yml`, `install.js`, `INSTALL.md` | dependencia `prom-client` | Escalabilidad (#25) | Local: `test_s3` 5/5, fuzz, `test_files` sin BD, agregación de métricas, compose validado; **CI pendiente** |
+| 5 · `10d4921` | `PruebasLinux/modules/16_ampliacion.sh`, `rules/semgrep-node.yml` | `ci.yml` | — | PruebasLinux (#26) | `bash -n`, `--list` 126, opciones 119/120/121/124 OK; **CI pendiente** |
+| 6 · (este commit) | `docs/historico/GUIA-ORIGINAL.md`, `scripts/openapiTable.js` | `README.md`, `ReadmeLogsMejoras.md`, `docs/SEGURIDAD.md`, `web/README.md`, `PruebasLinux/ReadmeLogMejoras.md`, `.env.example`, `test_api.js`, `package.json` | 4300 líneas históricas del README (movidas) | Documentación fiel (#27) | `test:api` 16/16 (incluye README = OpenAPI) |
 
 ---
 
 ## F. Plan de mejora continua
 
-Separado entre **completado** en esta intervención y **propuesto** (requiere decisiones
-que tocan el código/operación y exceden el encargo aditivo).
+### Completado (con evidencia)
+- ✅ `main` en verde y punto de recuperación (#21). ✅ Seguridad: bypass, MFA, gitleaks, restos y credencial retirada del árbol (#22).
+- ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24, CI pendiente). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25, CI pendiente).
+- ✅ PruebasLinux ampliado (#26, CI pendiente). ✅ Documentación fiel y con prueba de sincronía (#27).
 
-### Completado
-- ✅ Corrección de vulnerabilidades de dependencias (21 → 3; ver #6).
-- ✅ Instalador multiplataforma Linux/Windows con barra de progreso (ver #7).
-- ✅ Entorno `PruebasLinux` funcional con 117 pruebas, logging e informes.
-- ✅ Verificación de las suites de test existentes (sin regresiones).
-- ✅ Auditoría estática con evidencia y esta bitácora.
-
-### Propuesto (con dependencias, prioridad y criterio de aceptación)
-
-1. **Dependencias vulnerables restantes (geoip-lite → ip-address).** *Prioridad:* media
-   (hecho lo crítico/alto; ver #6). *Dependencia:* que `geoip-lite` publique una versión
-   con `ip-address` parcheado. *Aceptación:* `npm audit --omit=dev` sin vulnerabilidades.
-2. **Sacar `.env` y artefactos del control de versiones + rotar secretos.** *Prioridad:*
-   alta. *Dependencia:* confirmar que no se rompe el arranque. *Aceptación:* `git ls-files`
-   no lista `.env` ni `src/notifications/*.json`; secretos rotados si fueron reales.
-3. **Fijar `algorithms` en `jwt.verify`.** *Prioridad:* media. *Aceptación:* `verify`
-   restringe a `HS256`; `test:api` sigue en verde.
-4. **Retirar/etiquetar los scripts de auto-puntuación.** *Prioridad:* media.
-   *Aceptación:* no quedan ficheros que afirmen una puntuación no medida.
-5. **CI con MySQL efímero + `PruebasLinux --safe-all`.** *Prioridad:* media.
-   *Aceptación:* las 46 pruebas de rotación se ejecutan y el perfil seguro corre en cada
-   PR.
-6. **Añadir `trivy` y reglas `semgrep`.** *Prioridad:* baja. *Aceptación:* opciones 88–89
-   dejan de omitirse; `semgrep` con ruleset Node.
-
-> Las mejoras 1–4 modifican el código o el repositorio del proyecto y, por respetar el
-> encargo de **no interferir con el código existente**, se dejan **documentadas y
-> propuestas**, no aplicadas. Requieren el visto bueno de Antonio para ejecutarse en una
-> intervención aparte.
-
+### Propuesto (dependencias · prioridad · criterio de aceptación)
+1. **Cambiar la contraseña filtrada** de la BD remota · crítica · el usuario de `test.js` ya no da acceso.
+2. **Subir las ramas `cierre/3-web` … `cierre/6-docs`** (requiere iniciar sesión en GitHub) y corregir lo que falle · alta · los jobs
+   `test`, `web`, `compose`, `pruebaslinux` y `production-install` en verde; entonces abrir un PR por fase.
+3. **Descartar la alerta de CodeQL** como falso positivo y **activar Dependency graph** · baja · sin alertas abiertas ni jobs rojos de ruido.
+4. **Pruebas con proveedores reales** (IdP, KMS, S3) en preproducción · media · un login SSO real, una clave KMS real, un bucket real.
+5. **Pentest externo** · alta (organizativa) · informe y retest de hallazgos.
+6. **Rotación de claves en streaming** · media · rotar una BD de 1 GB con RAM acotada.
+7. **trivy y hadolint en CI** con binarios verificados · baja · opciones 88, 89 y 125 ejecutadas.
+8. **ASVS pendientes**: HIBP, límite de sesiones, versionado de API, multi-organización · media.
+9. `.env` fuera del repositorio cuando deje de ser de pruebas · alta antes de producción.
 
 ---
 
@@ -419,3 +372,192 @@ Misma rama y PR. Detalle en `docs/SEGURIDAD.md` §23 y §24.
 **Correcciones a lo dicho antes**: la documentación afirmaba «~3 consultas por petición protegida»; medido con el registro de MariaDB eran 4 (ahora 2–3). Hallazgos reales: un
 `GET_LOCK` en una conexión retenida habría tumbado el proceso al caerse la conexión (sin listener de `error`); en el cluster, prom-client solo responde a la agregación si el worker construye un
 `AggregatorRegistry` (daba 500); el reparto round-robin perdía conexiones al reiniciar en caliente (ahora socket compartido); y cerrar las conexiones ociosas al instante daba resets.
+
+---
+
+## K. Entregas 3–6 en el formato de la bitácora (#8–#20)
+
+Las entregas 3–6 (secciones G–J) se registraron como tablas resumen. Aquí van con el formato de la sección B, revisadas el 2026-11-09
+(revisión estática del código y resultados del CI del 27-oct; las pruebas citadas existen y pasaron en ese CI).
+
+**Estado al 2026-11-09 de las entradas #1–#7:** #1 PruebasLinux 8/10 (ampliado en #26) · #2 suite de pruebas 7→9/10 (CI con MariaDB,
+~430 casos) · #3 análisis estático 7→8/10 (JWT con algoritmo, CodeQL y lint en CI) · #4/#6 dependencias 7→9/10 tras #21/#23 · #5 secretos
+5→6/10 (credencial filtrada encontrada, #22) · #7 instalador 8/10 (`--production`; exige Node ≥ 22 desde #25).
+
+### #8 — Seguridad persistente en MySQL (2026-10-21)
+- **Estado:** completado.
+- **Archivos y módulos revisados:** `src/middleware/protection.middleware.js`, `src/security/{rate-limiter,anomaly-detection,secure-auth}.service.js`, migraciones 004–007.
+- **Problema detectado:** límites, bloqueos e intentos en `Map`/`Set` por proceso; bloqueo de cuenta inoperante (clave `usuario_IP` vs consulta por usuario); sin `trust proxy`.
+- **Acciones realizadas:** todo el estado en tablas; bloqueo por (usuario, origen) y global; `TRUST_PROXY`; TLS a la BD verificado en producción.
+- **Pruebas ejecutadas:** `test_security.js` (57) y `test_scale.js` (11), con dos procesos reales.
+- **Puntuación:** 9/10 — el estado se comparte entre procesos y réplicas (además probado en #25 con contenedores).
+- **Problemas restantes:** la caché de bloqueo (1 s) retrasa un bloqueo hecho por OTRA instancia hasta ese tiempo (documentado).
+- **Siguiente mejora:** ninguna urgente. *(Prioridad baja.)*
+
+### #9 — Cifrado v4 y rotación de claves
+- **Estado:** completado.
+- **Archivos y módulos revisados:** `src/crypto/*`, `src/maintenance/*`, `src/backup/*`, `scripts/rotateKeys.js`.
+- **Problema detectado:** «triple cifrado» con la misma clave en las tres capas y claves que cambiaban cada día.
+- **Acciones realizadas:** AES-256-GCM `v4` con HKDF; lectura del formato antiguo; rotación con backup previo, re-cifrado transaccional y recuperación.
+- **Pruebas ejecutadas:** `test_rotation.js` (48) contra MariaDB y MySQL; `kill -9` en 44 instantes; 8 escritores concurrentes.
+- **Puntuación:** 8/10 — robusta y probada; limitada en tamaño.
+- **Problemas restantes:** la clave maestra se deriva de semillas del entorno; la rotación necesita ≈7× la BD en RAM.
+- **Siguiente mejora:** rotación en streaming por lotes. *(Prioridad media.)*
+
+### #10 — Anti-inyección
+- **Estado:** completado.
+- **Archivos y módulos revisados:** `src/security/injection-detector.js`, `src/config/sql.js`.
+- **Problema detectado:** reglas que bloqueaban 24 h por texto legítimo.
+- **Acciones realizadas:** reglas por severidad, normalización contra evasión, bloqueo solo en rutas críticas; prueba que falla si alguien interpola SQL.
+- **Pruebas ejecutadas:** `test_security.js`, `test_fuzz.js` (sin ReDoS, ataques ofuscados), sqlmap (`docs/PENTEST-AUTOEVALUACION.md`).
+- **Puntuación:** 8/10 — la defensa real son los parámetros; el detector es una capa adicional evadible.
+- **Problemas restantes:** reglas conocidas. **Siguiente mejora:** ninguna. *(Prioridad baja.)*
+
+### #11 — Archivos: subida, antivirus, saneado, copias y claves en el KMS
+- **Estado:** completado (modo S3 añadido en #25).
+- **Archivos y módulos revisados:** `src/files/*`, `src/api/controllers/files.controller.js`, `src/crypto/file-keys.js`.
+- **Problema detectado:** no existía API de archivos.
+- **Acciones realizadas:** tipo por contenido, ClamAV en streaming, imágenes recodificadas, PDF sin contenido activo, cifrado por archivo y bloque, copias de `FILES_DIR`, claves envueltas por el KMS.
+- **Pruebas ejecutadas:** `test_files` (41), `test_sanitize` (16), `test_av` (16), `test_files_backup` (10), `test_kms_files` (12).
+- **Puntuación:** 8/10. **Problemas restantes:** audio, vídeo y texto sin sanear. **Siguiente mejora:** despojar metadatos. *(Baja.)*
+
+### #12 — Autenticación: sesiones, MFA, WebAuthn, OIDC, SAML
+- **Estado:** completado (ampliado en #22 y #24).
+- **Archivos y módulos revisados:** `src/security/{secure-auth,mfa,webauthn}.service.js`, `src/sso/*`.
+- **Problema detectado:** JWT de 5 días sin refresh; sin segundo factor robusto ni SSO.
+- **Acciones realizadas:** JWT 15 min + refresh opaco con rotación y reutilización detectada; TOTP, passkeys, códigos de recuperación; OIDC (PKCE) y SAML.
+- **Pruebas ejecutadas:** `test_sessions` (15), `test_mfa` (15+1), `test_webauthn` (24), `test_sso` (19+4), `test_saml` (22+1).
+- **Puntuación:** 8/10 — probado contra simuladores que firman de verdad, no contra proveedores reales.
+- **Problemas restantes:** HIBP, límite de sesiones simultáneas. **Siguiente mejora:** preproducción con un IdP real. *(Media.)*
+
+### #13 — Autorización: roles finos y dos administradores
+- **Estado:** completado. **Archivos:** `src/security/permissions.js`, `admin-approvals.service.js`, `role.middleware.js`.
+- **Problema detectado:** solo `user`/`admin`; acciones destructivas de una sola persona.
+- **Acciones realizadas:** `user/auditor/operator/admin` con permisos explícitos; aprobación de un segundo admin, atómica y con caducidad.
+- **Pruebas ejecutadas:** `test_rbac` (13), e2e de aprobaciones; en #24, dos administradores aprobando a la vez (e2e, CI pendiente).
+- **Puntuación:** 9/10. **Problemas restantes:** multi-organización. **Siguiente mejora:** diseño de tenencia. *(Media.)*
+
+### #14 — KMS para secretos y claves de archivo
+- **Estado:** completado (Windows corregido en #21). **Archivos:** `src/crypto/kms*.js`, `scripts/kms.js`.
+- **Problema detectado:** semillas en claro en el `.env`.
+- **Acciones realizadas:** proveedores `file`, Vault Transit y AWS KMS; arranque que falla cerrado; claves de archivo `kms1:`.
+- **Pruebas ejecutadas:** `test_kms` (16, también en Windows tras #21), `test_kms_files` (12).
+- **Puntuación:** 7/10 — solo contra simulaciones; la clave maestra sigue en memoria del proceso.
+- **Siguiente mejora:** probar con un KMS real; HSM por operación si el riesgo lo exige. *(Media.)*
+
+### #15 — Operación y observabilidad
+- **Estado:** completado (en vivo en #24; librería de métricas en #25). **Archivos:** `src/security/{alerts,dashboard,privacy}.service.js`, `src/observability/*`.
+- **Problema detectado:** sin alertas, panel ni métricas.
+- **Acciones realizadas:** alertas por umbral con webhook firmado, panel JSON, Prometheus, OTLP, exportación y borrado de datos personales, planes de incidentes y custodia.
+- **Pruebas ejecutadas:** `test_ops` (21 + 4 del stream y el cluster, estas en CI pendiente).
+- **Puntuación:** 8/10. **Problemas restantes:** envío a SIEM. **Siguiente mejora:** exportador a SIEM. *(Baja.)*
+
+### #16 — CI, cobertura y fuzzing
+- **Estado:** completado (ampliado en #23, #25 y #26). **Archivos:** `.github/workflows/*`, `.c8rc.json`, `test_fuzz.js`.
+- **Problema detectado:** CI sin BD real, sin cobertura ni fuzzing.
+- **Acciones realizadas:** MariaDB y ClamAV reales, umbral de cobertura, fast-check (18 propiedades), acciones fijadas por SHA, ZAP, SBOM, gitleaks, CodeQL.
+- **Pruebas ejecutadas:** el propio CI (verde en las fases 0–2 de #21–#23).
+- **Puntuación:** 8/10. **Problemas restantes:** Dependency graph sin activar; trivy/hadolint. **Siguiente mejora:** ver §F. *(Baja.)*
+
+### #17 — Escalabilidad en una máquina (cluster)
+- **Estado:** completado (varias réplicas en #25). **Archivos:** `src/cluster.js`, `src/tasks/leader.js`.
+- **Problema detectado:** un solo proceso; N instancias ejecutaban N planificadores.
+- **Acciones realizadas:** cluster con reinicio en caliente, un solo líder, `/health/ready`, limitador de una sentencia.
+- **Pruebas ejecutadas:** `test_scale` (11); `bench:scale`: ×2,2–2,3 con 4 workers en 4 vCPU.
+- **Puntuación:** 8/10. **Siguiente mejora:** hecho en #25 (réplicas, S3, réplica de lectura, particiones).
+
+### #18 — Interfaz web de operación (6.ª entrega)
+- **Estado:** completado (ampliado en #24). **Archivos:** `web/`.
+- **Problema detectado:** sin interfaz; tokens en el navegador si se hacía a mano.
+- **Acciones realizadas:** BFF con cookie `httpOnly` cifrada, lista cerrada, CSRF, CSP con nonce, 9 páginas.
+- **Pruebas ejecutadas:** 43 unitarias y 15 e2e (Chromium) en CI.
+- **Puntuación:** 8/10 entonces. **Siguiente mejora:** hecho en #24.
+
+### #19 — Pruebas de carga (PR #6)
+- **Estado:** completado. **Archivos:** `benchmarks/`.
+- **Problema detectado:** rendimiento no evaluado.
+- **Acciones realizadas:** 1 millón de peticiones (0 errores), API de estrés con topes de CPU/RAM, informe honesto (GPU no medida).
+- **Pruebas ejecutadas:** las del informe `benchmarks/INFORME_RENDIMIENTO.md`.
+- **Puntuación:** 7/10. **Problemas restantes:** el interruptor `DISABLE_IP_BLOCKING` funcionaba en producción (corregido en #22).
+
+### #20 — Documentación (estado a 2026-11-09 por la mañana)
+- **Estado:** completado en #27. **Archivos:** `README.md`, `docs/*`, esta bitácora.
+- **Problema detectado:** README con 28 rutas sin documentar, «JWT 5 días», «migraciones 004-010», «cifrado multicapa» y 4300 líneas de código histórico; esta bitácora sin el formato de B para las entregas 3–6.
+- **Acciones realizadas / pruebas / puntuación:** ver #27.
+
+---
+
+## L. Intervención 2026-11-09: plan de cierre (#21–#28)
+
+Plan aprobado por el propietario con estas decisiones: `.env` se queda (datos de prueba); MariaDB no está instalada en el equipo (lo que
+necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz web con alcance completo; un PR por fase.
+
+### #21 — Fase 0: punto de recuperación y `main` en verde
+- **Estado:** completado (CI verde en `a5b9b05`).
+- **Archivos y módulos revisados:** `package-lock.json`, `.github/workflows/ci.yml`, `src/crypto/kms-providers.js`, `test_kms.js`.
+- **Problema detectado:** `CI / test` en rojo en `main` con el mismo árbol que pasó el 27-oct: el último paso (`npm audit --omit=dev --audit-level=high`) falló por GHSA-mrwp-f3q8-3g9p en `follow-redirects` 1.16.1 (vía `axios`), publicado después. En local (Windows), 11 fallos de `test_kms`: los bits de modo no reflejan las ACL de NTFS y el proveedor `file` rechazaba cualquier KEK.
+- **Acciones realizadas:** tag `pre-cierre-2026-11`; `npm audit fix` (solo el lockfile); comprobación de permisos de la KEK solo en POSIX (en Windows se documenta `icacls`).
+- **Pruebas ejecutadas:** CI `test`, `web`, `production-install` en verde; local `test_kms` 16/16, `test:api` 13/13, `test:icmp` 24/24, lint 0.
+- **Puntuación:** 9/10 — causa raíz encontrada (no era el código) y corregida con un cambio mínimo.
+- **Problemas restantes:** ninguno. **Siguiente mejora:** —.
+
+### #22 — Fase 1: seguridad pendiente y limpieza
+- **Estado:** completado (CI verde en `b1863b6`; la alerta de CodeQL hay que descartarla en GitHub).
+- **Archivos y módulos revisados:** `protection.middleware.js`, `index.js`, `mfa.service.js`, `.gitleaksignore`, raíz del repositorio.
+- **Problema detectado:** `DISABLE_IP_BLOCKING=true` desactivaba bloqueos y límites de login también en producción; CodeQL `js/user-controlled-bypass` en `mfa.service.js:101`; gitleaks en los PR por un secreto de pruebas de `600be88`; `fix-system.js` y 8 marcadores de «score 100» seguían ahí; **`test.js` con credenciales reales de una BD remota**; `health-check` que imprimía «Sistema funcionando» sin comprobar nada.
+- **Acciones realizadas:** el servidor no arranca y el middleware ignora el bypass con `NODE_ENV=production`; `mfa.verify` exige exactamente un factor de tipo texto (antes, con los dos, elegía el de recuperación en silencio); fingerprints de gitleaks; restos y `test.js` eliminados; `scripts/healthCheck.js` consulta `/health/ready`.
+- **Pruebas ejecutadas:** `test:api` 15/15 (2 nuevas: bypass y MFA, con el limitador caído responde 503); `test_mfa` +1 en CI; health-check con y sin servidor; lint 0.
+- **Puntuación:** 8/10 — los fallos reales quedan cerrados; la contraseña filtrada sigue válida hasta que el propietario la cambie.
+- **Problemas restantes:** rotar la credencial; descartar la alerta de CodeQL. **Siguiente mejora:** ver §F 1 y 3. *(Crítica / baja.)*
+
+### #23 — Fase 2: dependencias
+- **Estado:** completado (CI verde en `bed6619`).
+- **Archivos y módulos revisados:** workflows, `package*.json`, `web/package*.json`, `test_fuzz.js`.
+- **Problema detectado:** 13 ramas de Dependabot sin revisar, algunas mayores.
+- **Acciones realizadas:** acciones (checkout 7, setup-node 7, CodeQL 4, gitleaks 3, ZAP 0.10); express 5.3, winston 3.19, aws-sdk; eslint 10 + eslint-plugin-security 4 (13 reglas activas comprobadas), fast-check 4 (`fullUnicodeString` → `string({unit})`); next 16.4.5, TypeScript 7, vitest 5.1, @types/node.
+- **Pruebas ejecutadas:** lint 0 y reglas detectando `require`/`RegExp`/`eval` no literales; fuzz 16/16; web typecheck + 43 + build; CI verde.
+- **Puntuación:** 9/10. **Problemas restantes:** las ramas de Dependabot se cerrarán solas al fusionar. **Siguiente mejora:** —.
+
+### #24 — Fase 3: interfaz web completa
+- **Estado:** parcial — implementado y verificado en local; **CI pendiente** (push bloqueado, #28).
+- **Archivos y módulos revisados:** `web/`, `src/sso/*`, `src/api/controllers/{sso,saml,system}.controller.js`, `src/cluster.js`, `src/index.js`.
+- **Problema detectado:** sin passkey ni SSO en la interfaz; datos por sondeo; `Sistema` describía solo el proceso que atendía. Además, el SSO del API entregaba los tokens en el fragmento de la URL (visibles para el JavaScript), incompatible con el BFF.
+- **Acciones realizadas:** entrega SSO por código de un solo uso ligado al navegador (migración 017, `POST /api/sso/exchange`, robo → evento crítico); `GET /api/system/stream` (SSE con cursor, revalidación cada 30 s, límites, cierre ordenado); estado de todos los workers; en la web: passkey (segundo factor), SSO OIDC/SAML, en vivo (panel, alertas, aprobaciones, «N eventos nuevos», avisos), tabla del cluster y mejoras de accesibilidad.
+- **Pruebas ejecutadas:** web 57/57 (14 nuevas, con dos mutaciones que las hacen fallar); typecheck y build; `test:api` 15/15 con la OpenAPI al día; IPC del cluster con workers simulados. Escritas para el CI: `test_sso` +4, `test_saml` +1, `test_ops` +4, `test_scale` +1 aserción, e2e `live-auth.test.cjs` (en vivo, passkey, SSO, concurrencia, axe, Firefox y WebKit).
+- **Puntuación:** 8/10 provisional — se confirma o se corrige con el CI.
+- **Problemas restantes:** lo que diga el CI (sobre todo axe y WebKit, que nunca se han ejecutado contra esta interfaz). **Siguiente mejora:** §F 2. *(Alta.)*
+
+### #25 — Fase 4: escalabilidad
+- **Estado:** parcial — verificado en local; **CI pendiente** (#28).
+- **Archivos y módulos revisados:** `src/files/*`, `src/config/database.js`, `src/security/{dashboard,security-events}.service.js`, `src/observability/metrics.js`, `src/cluster.js`.
+- **Problema detectado:** `FILES_DIR` local obligaba a un volumen compartido; sin prueba con varias réplicas; MariaDB como cuello; `security_events` purgada con DELETE; `prom-client` sustituido; Node 18/20 fuera de soporte.
+- **Acciones realizadas:** `FILES_STORAGE=s3` (una petición con Range por descarga; integridad igual); Dockerfile de producción y `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + MinIO) con job `compose`; `DB_READ_HOST` (solo análisis, con vuelta a la principal); particionado mensual opcional; `@prometheus-io/client` (agregación entre procesos comprobada igual que con prom-client); Node ≥ 22.
+- **Pruebas ejecutadas:** `test_s3` 5/5 en local (cifrado en el bucket, rangos con una petición, byte alterado/truncado/ausente, servidor que ignora Range, fallo de subida, configuración); fuzz 16/16 y `test_files` sin BD tras reescribir `decryptRange`; prueba anti-interpolación SQL; compose validado con `docker compose config`. Escritas para el CI: `test_files_s3`, `test_partitions`, `test_compose`.
+- **Puntuación:** 8/10 provisional.
+- **Problemas restantes:** CI; el compose usa TLS desactivado hacia la BD (red interna, documentado). **Siguiente mejora:** §F 2 y 6. *(Alta / media.)*
+
+### #26 — Fase 5: PruebasLinux
+- **Estado:** parcial — verificado en local; **CI pendiente** (#28).
+- **Archivos y módulos revisados:** `PruebasLinux/lib/core.sh`, `modules/*`, `.github/workflows/ci.yml`.
+- **Problema detectado:** sin semgrep; nada de lo nuevo (refresh, SSO, BFF, Docker) tenía comprobación; PruebasLinux no corría en CI.
+- **Acciones realizadas:** opciones 118–126 en un módulo que se carga el último (1–117 sin renumerar); reglas Semgrep propias; job `pruebaslinux` (informe + puerta).
+- **Pruebas ejecutadas:** `bash -n`; `--list` = 126; 119/120/121/124 en verde contra el código real; YAML validado. La regla de `child_process` se corrigió antes de usarla: habría marcado cualquier `RegExp.exec`.
+- **Puntuación:** 8/10. **Problemas restantes:** trivy y hadolint en CI. **Siguiente mejora:** §F 7. *(Baja.)*
+
+### #27 — Fase 6: documentación
+- **Estado:** completado.
+- **Archivos y módulos revisados:** `README.md`, `ReadmeLogsMejoras.md`, `docs/SEGURIDAD.md`, `web/README.md`, `PruebasLinux/ReadmeLogMejoras.md`, `.env.example`.
+- **Problema detectado:** ver #20.
+- **Acciones realizadas:** README de 4979 a 560 líneas (guía de 2025 en `docs/historico/GUIA-ORIGINAL.md`); tabla de endpoints generada desde la OpenAPI con `npm run docs:endpoints` y **una prueba que falla si se desincroniza**; afirmaciones desfasadas corregidas; variables nuevas en `.env.example`; §13, §22, §23 y §24 de SEGURIDAD; esta bitácora con A–F al día y #8–#28 en formato.
+- **Pruebas ejecutadas:** `test:api` 16/16 (incluye README = OpenAPI = código).
+- **Puntuación:** 9/10 — la documentación de la API ya no puede quedarse atrás sin que falle una prueba; el resto depende de revisión.
+- **Problemas restantes:** las cifras de las fases 3–6 se actualizarán con el CI. **Siguiente mejora:** —.
+
+### #28 — Fase 7: validación final
+- **Estado:** **bloqueado** en la parte que necesita CI.
+- **Archivos y módulos revisados:** todo lo anterior.
+- **Problema detectado:** `git push` de `cierre/3-web` se quedó esperando; con interactividad desactivada: «Cannot prompt because user interactivity has been disabled» (la credencial de GitHub del Git Credential Manager caducó).
+- **Acciones realizadas:** verificación local de todo lo que no necesita MariaDB ni navegadores (ver #21–#27); commits listos en las ramas locales.
+- **Pruebas ejecutadas:** locales: lint 0, `test:api` 16/16, `test_s3` 5/5, fuzz 16/16, `test_kms` 16/16, web 57/57 + typecheck + build, PruebasLinux 126 opciones; CI verde de las fases 0–2.
+- **Puntuación:** — (no se puntúa una validación sin terminar).
+- **Problemas restantes:** subir `cierre/3-web` … `cierre/6-docs`, revisar el CI y corregir lo que falle. **Siguiente mejora:** §F 2. *(Alta.)*

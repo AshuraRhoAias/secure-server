@@ -16,7 +16,7 @@ código de la aplicación: sólo lo **lee** para análisis estático (esquema SQ
 fuente, dependencias, configuración). Arrancar o usar este entorno **no afecta** a la
 ejecución normal del servidor.
 
-Ofrece un **menú interactivo en terminal** con **117 opciones reales y diferenciadas**
+Ofrece un **menú interactivo en terminal** con **126 opciones reales y diferenciadas** (117 originales + 9 de la ampliación de noviembre de 2026)
 organizadas en **15 categorías**, que invocan herramientas defensivas estándar
 (`nmap`, `sslscan`, `nikto`, `whatweb`, `openssl`, `dig`, `bandit`, `detect-secrets`,
 `pip-audit`, `shellcheck`, `yamllint`, `npm audit`, etc.) y comprobaciones propias
@@ -69,7 +69,7 @@ PruebasLinux/
 
 - `core.sh` mantiene un **registro** de opciones en arrays paralelos. Cada módulo
   llama a `reg <categoría> "<nombre>" "<descripción>" "<requisitos>" "<riesgo>" <función>`.
-  El numerado (1..117) es automático según el orden de carga de los módulos.
+  El numerado es automático según el orden de carga de los módulos; por eso la ampliación vive en `modules/16_ampliacion.sh` (se carga el último) y las opciones 1..117 conservan su número. Cada opción declara su categoría.
 - `run_option N` comprueba las dependencias de la opción; si falta alguna, la **omite**
   y muestra cómo instalarla (nunca simula un resultado). Si están, ejecuta la función,
   mide el tiempo, captura el código de salida real y lo registra para el informe.
@@ -137,7 +137,7 @@ cd PruebasLinux
 # Diagnóstico del entorno (qué herramientas hay)
 ./pruebas.sh --diagnose
 
-# Listar las 117 opciones con su número
+# Listar las 126 opciones con su número
 ./pruebas.sh --list
 
 # Ejecutar una o varias pruebas por número
@@ -179,7 +179,7 @@ $ ./pruebas.sh --diagnose
 ✔  nmap             /usr/bin/nmap
 ...
 ℹ  Herramientas disponibles: 30   ausentes: 4
-ℹ  Opciones registradas: 117 en 15 categorías
+ℹ  Opciones registradas: 126 en 15 categorías
 ```
 
 **Análisis estático del código (categoría 8):**
@@ -245,7 +245,7 @@ Sin tocar el lanzador ni el código del proyecto:
 
 ---
 
-## 10. Listado completo de las 117 opciones
+## 10. Listado completo de las 126 opciones
 
 Número · nombre · finalidad · requisitos · nivel de riesgo.
 <!-- GENERADO desde el registro real del lanzador (./pruebas.sh --list). -->
@@ -441,6 +441,15 @@ Número · nombre · finalidad · requisitos · nivel de riesgo.
 | 115 | Exportar a CSV | Guarda los resultados de la sesión en .csv. | (builtin) | INFO |
 | 116 | Ejecutar perfil seguro | Corre todas las pruebas locales/INFO/LOW. | (builtin) | LOCAL |
 | 117 | Scorecard de la sesión | Resumen OK/hallazgos/omitidas e índice. | (builtin) | INFO |
+| 118 | Semgrep (reglas propias Node/Express) | rules/semgrep-node.yml: JWT sin algoritmo, exec, redirección abierta (ERROR); SQL con plantillas y Math.random (WARNING). Sin red. | semgrep | LOCAL |
+| 119 | Refresh token: rotación y reutilización | Detección de reutilización y hash del refresh anterior. Categoría 13. | grep | LOCAL |
+| 120 | SSO: entrega por código | Tokens fuera de la URL, verificador en tiempo constante, evento por código robado. Categoría 13. | grep | LOCAL |
+| 121 | BFF web: cookies y lista cerrada | httpOnly/SameSite y rutas permitidas del BFF. Categoría 13. | grep | LOCAL |
+| 122 | Sonda: canje SSO inventado | POST /api/sso/exchange con código falso → 400/401. Categoría 13. | curl | LOW |
+| 123 | Sonda: stream en vivo sin token | GET /api/system/stream sin token → 401. Categoría 13. | curl | LOW |
+| 124 | Dockerfile: política de la imagen | Usuario no root, HEALTHCHECK, sin dependencias de desarrollo, .env excluido. Categoría 11. | grep | LOCAL |
+| 125 | hadolint (Dockerfile) | Buenas prácticas del Dockerfile. Categoría 11. | hadolint | LOCAL |
+| 126 | npm audit de la interfaz web | Dependencias de producción de web/ sin vulnerabilidades altas. Categoría 7. | npm | LOCAL |
 
 ---
 
@@ -464,3 +473,14 @@ en una imagen de contenedor reproducible.
 
 Ver la bitácora de auditoría del proyecto completo en
 [`../ReadmeLogsMejoras.md`](../ReadmeLogsMejoras.md).
+
+## 12. Ampliación de noviembre de 2026 (opciones 118-126) y CI
+
+- **Qué se añadió**: las 9 opciones de la tabla (118-126) en `modules/16_ampliacion.sh` y las reglas `rules/semgrep-node.yml` (locales: no
+  descargan reglas del registro de semgrep).
+- **Verificado en local** (Windows + Git Bash, sin semgrep/trivy/hadolint): `bash -n`, `--list` (126 opciones, 1-117 con su número de
+  siempre) y `--run 119 120 121 124` en verde contra el código real. 118 y 125 se omiten sin la herramienta (lo dice el informe).
+- **CI** (job `pruebaslinux` de `.github/workflows/ci.yml`): instala shellcheck, yamllint, jq y semgrep 1.95.0; ejecuta el perfil seguro como
+  **informe** (artefacto `pruebaslinux`) y como **puerta** las invariantes 119/120/121/124 y Semgrep con severidad ERROR.
+- **Sigue pendiente**: `trivy` (opciones 88-89) y `hadolint` (125) no se instalan en el CI (habría que fijar y verificar sus binarios);
+  se omiten y quedan como omitidas en el informe, sin declararse verificadas.

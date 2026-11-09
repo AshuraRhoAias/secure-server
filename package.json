@@ -62,7 +62,8 @@
     "test:files-s3": "node --test test_files_s3.js",
     "test:compose": "node --test test_compose.js",
     "events:partition": "node scripts/eventsPartitions.js",
-    "test:partitions": "node --test test_partitions.js"
+    "test:partitions": "node --test test_partitions.js",
+    "docs:endpoints": "node scripts/openapiTable.js"
   },
   "keywords": [
     "security",
