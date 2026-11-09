@@ -70,7 +70,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.1155.0",
+    "@aws-sdk/client-kms": "^3.1165.0",
     "@node-saml/node-saml": "^5.2.0",
     "@simplewebauthn/server": "^14.0.3",
     "@xmldom/xmldom": "^0.8.15",
@@ -82,7 +82,7 @@
     "crypto-js": "^4.2.0",
     "device-detector-js": "^3.0.3",
     "dotenv": "^17.2.1",
-    "express": "^5.1.0",
+    "express": "^5.3.0",
     "fs-extra": "^11.3.0",
     "geoip-lite": "^2.0.3",
     "helmet": "^8.1.0",
@@ -97,7 +97,7 @@
     "sharp": "^0.35.5",
     "speakeasy": "^2.0.0",
     "ua-parser-js": "^2.0.4",
-    "winston": "^3.17.0"
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "c8": "^10.1.3",
