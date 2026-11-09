@@ -29,9 +29,21 @@ const config = () => ({
     strikesToBlock: intEnv('INJECTION_STRIKES_TO_BLOCK', 5),
     scannerHitsToBlock: intEnv('SCANNER_HITS_TO_BLOCK', 5),
     authFailuresToBlock: intEnv('AUTH_FAILURES_TO_BLOCK', 30),
-    // 'block' (por defecto): firmas inequívocas en el cuerpo se rechazan. 'log': solo se registran.
-    bodyMode: process.env.INJECTION_BODY_MODE === 'log' ? 'log' : 'block'
+    // Qué hacer con firmas de inyección en el CUERPO de la petición:
+    //   'critical' (por defecto)  se rechazan solo en las rutas de INJECTION_BLOCK_PATHS; en el resto se registran
+    //   'block'                   se rechazan en todas las rutas
+    //   'log'                     solo se registran
+    // La defensa real contra SQLi son las consultas parametrizadas; el detector por reglas puede equivocarse con
+    // texto legítimo (una nota que habla de SQL), así que solo corta donde nunca hay texto libre legítimo.
+    bodyMode: ['block', 'log'].includes(process.env.INJECTION_BODY_MODE) ? process.env.INJECTION_BODY_MODE : 'critical',
+    criticalPaths: (process.env.INJECTION_BLOCK_PATHS || '/api/auth,/api/system,/api/sso')
+        .split(',').map(p => p.trim().toLowerCase().replace(/\/+$/, '')).filter(Boolean)
 });
+
+const isCriticalPath = (path, criticalPaths) => {
+    const clean = String(path || '').toLowerCase();
+    return criticalPaths.some(prefix => clean === prefix || clean.startsWith(`${prefix}/`));
+};
 
 const SCANNER_PATH = /(?:^|\/)\.(?:env|git|svn|hg|aws|ssh|ds_store|htaccess|htpasswd)\b|wp-(?:admin|login|content|includes)|xmlrpc\.php|phpmyadmin|cgi-bin|\.(?:php\d?|asp|aspx|jsp|cgi)$|\/(?:actuator|manager\/html|solr|boaform)(?:\/|$)/i;
 
@@ -49,8 +61,8 @@ class ProtectionMiddleware {
             // Bypass explícito para pruebas de carga. Por defecto DESACTIVADO.
             if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
 
-            // /health no toca la BD: así un balanceador puede comprobar que el proceso vive
-            if (req.path === '/health') return next();
+            // /health y /health/ready: las sondas de un balanceador no se cuentan ni se limitan (y /health no toca la BD)
+            if (req.path === '/health' || req.path === '/health/ready') return next();
 
             try {
                 const cfg = config();
@@ -108,8 +120,9 @@ class ProtectionMiddleware {
         const { findings } = scanRequest(req);
         if (findings.length === 0) return null;
 
-        // Rechazable: severidad alta fuera del cuerpo; en el cuerpo, solo si bodyMode = 'block'
-        const blockable = findings.filter(f => f.severity === 'high' && (!f.bodyLike || cfg.bodyMode === 'block'));
+        // Rechazable: severidad alta fuera del cuerpo; en el cuerpo, según la política (ver config)
+        const bodyBlocks = cfg.bodyMode === 'block' || (cfg.bodyMode === 'critical' && isCriticalPath(req.path, cfg.criticalPaths));
+        const blockable = findings.filter(f => f.severity === 'high' && (!f.bodyLike || bodyBlocks));
 
         // Se registran hasta 3 hallazgos por petición (los más graves primero) para no inundar la tabla
         const ordered = [...findings].sort((a, b) => (b.severity === 'high') - (a.severity === 'high')).slice(0, 3);
@@ -217,3 +230,4 @@ class ProtectionMiddleware {
 }
 
 module.exports = new ProtectionMiddleware();
+module.exports.isCriticalPath = isCriticalPath;

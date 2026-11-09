@@ -315,14 +315,27 @@ test('getNetworkPosture: endurecido vs. abierto', () => {
 
 // ---------- Guardas estáticas ----------
 
+// Única excepción: el KMS necesita un proceso hijo para que el arranque siga siendo síncrono. Se admite SOLO si
+// lanza `process.execPath` con el script fijo kms-worker.js, sin shell y sin ninguna otra API de procesos.
+const CHILD_PROCESS_ALLOWED = new Map([['src/crypto/kms.js', [
+    /require\('child_process'\)/, /execFileSync\(process\.execPath, \[WORKER\]/
+]]]);
+
 test('el servidor (src/) nunca ejecuta procesos externos: sin child_process', () => {
     const offenders = [];
     const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
-            else if (entry.name.endsWith('.js') && /child_process|\bexecSync\b|\bspawnSync\b/.test(fs.readFileSync(full, 'utf8'))) {
-                offenders.push(path.relative(__dirname, full));
+            else if (entry.name.endsWith('.js')) {
+                const source = fs.readFileSync(full, 'utf8');
+                if (!/child_process|\b(?:execSync|spawnSync|execFileSync|execFile)\b/.test(source)) continue;
+                const rel = path.relative(__dirname, full).split(path.sep).join('/');
+                const allowed = CHILD_PROCESS_ALLOWED.get(rel);
+                const onlyAllowedUse = allowed
+                    && allowed.every(re => re.test(source))
+                    && !/\b(?:execSync|spawnSync|execFile|spawn|fork)\b|shell\s*:/.test(source.replace(/execFileSync/g, ''));
+                if (!onlyAllowedUse) offenders.push(rel);
             }
         }
     };

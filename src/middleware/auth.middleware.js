@@ -42,7 +42,8 @@ class AuthMiddleware {
                 id: validation.userId,
                 username: validation.username,
                 sessionId: validation.sessionId,
-                riskLevel: validation.riskLevel
+                riskLevel: validation.riskLevel,
+                amr: validation.amr
             };
 
             // Agregar headers de información de sesión

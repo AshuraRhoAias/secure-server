@@ -15,7 +15,8 @@ const ENCRYPTED_COLUMNS = {
             'metadata_encrypted',
             'username_encrypted',
             'risk_level_encrypted',
-            'encrypted_metadata'
+            'encrypted_metadata',
+            'mfa_secret_encrypted'
         ]
     },
     security_logs: { primaryKey: 'id', columns: ['encrypted_details', 'encrypted_timestamp'] },
@@ -25,11 +26,18 @@ const ENCRYPTED_COLUMNS = {
     user_notes: { primaryKey: 'id', columns: ['title_encrypted', 'content_encrypted'] },
     // Metadatos de /api/files. key_encrypted es la clave de CADA archivo envuelta con la clave maestra:
     // al rotar solo se re-envuelven estas claves, los bytes de los archivos no se tocan.
-    user_files: { primaryKey: 'id', columns: ['filename_encrypted', 'key_encrypted'] }
+    user_files: { primaryKey: 'id', columns: ['filename_encrypted', 'key_encrypted'] },
+    // Estado de logins SSO en curso (caduca a los 10 min): si un valor queda ilegible se puede borrar
+    oidc_login_state: { primaryKey: 'id', columns: ['code_verifier_encrypted'], regenerable: true }
 };
 
 // Columnas con "encrypted" en el nombre que NO guardan texto cifrado con tripleEncryptor
 // (hoy ninguna; añade aquí `tabla.columna: 'motivo'` si alguna vez hace falta)
 const IGNORED = {};
 
-module.exports = { ENCRYPTED_COLUMNS, IGNORED };
+// Valores que NO están cifrados con la clave maestra sino por un sistema externo (hoy: clave de archivo envuelta por el
+// KMS, "kms1:"). La rotación y el snapshot los dejan tal cual.
+const EXTERNAL_PREFIXES = ['kms1:'];
+const isExternal = (value) => typeof value === 'string' && EXTERNAL_PREFIXES.some(prefix => value.startsWith(prefix));
+
+module.exports = { ENCRYPTED_COLUMNS, IGNORED, EXTERNAL_PREFIXES, isExternal };

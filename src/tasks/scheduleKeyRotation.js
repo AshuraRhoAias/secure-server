@@ -10,6 +10,12 @@ class ScheduleKeyRotation {
         this.rotationHistory = [];
         this.nextRotationTime = null;
 
+        this.jobs = [];
+    }
+
+    // Se arranca desde la elección de líder (src/tasks/leader.js): con varias instancias solo UNA planifica la rotación
+    start() {
+        if (this.jobs.length > 0) return;
         if (this.isRotationEnabled) {
             this.initializeSchedules();
         } else {
@@ -17,32 +23,37 @@ class ScheduleKeyRotation {
         }
     }
 
+    stop() {
+        this.jobs.forEach(job => job.stop());
+        this.jobs = [];
+    }
+
     initializeSchedules() {
         console.log('⏰ Inicializando planificador de rotación de claves...');
 
         // Rotación mensual de claves - día 1 de cada mes a las 2:00 AM
-        cron.schedule('0 2 1 * *', async () => {
+        this.jobs.push(cron.schedule('0 2 1 * *', async () => {
             await this.executeMonthlyRotation();
         }, {
             scheduled: true,
             timezone: "America/Mexico_City"
-        });
+        }));
 
         // Limpieza de sesiones expiradas - todos los días a las 3:00 AM
-        cron.schedule('0 3 * * *', async () => {
+        this.jobs.push(cron.schedule('0 3 * * *', async () => {
             await this.executeSessionCleanup();
         }, {
             scheduled: true,
             timezone: "America/Mexico_City"
-        });
+        }));
 
         // Verificación de integridad - cada 6 horas
-        cron.schedule('0 */6 * * *', async () => {
+        this.jobs.push(cron.schedule('0 */6 * * *', async () => {
             await this.executeIntegrityCheck();
         }, {
             scheduled: true,
             timezone: "America/Mexico_City"
-        });
+        }));
 
         this.calculateNextRotation();
         console.log('✅ Planificador inicializado');

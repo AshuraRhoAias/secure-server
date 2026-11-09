@@ -1,0 +1,2789 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Secure Server API",
+    "version": "1.0.0",
+    "description": "Definición para pentesters y escáneres (ZAP, Burp). Se valida contra el código en test_api.js: si se añade una ruta sin documentarla, la prueba falla."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Estado del proceso (no usa la BD)",
+        "tags": [
+          "Sistema"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": []
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "summary": "Preparación para balanceadores: 200 solo si esta instancia puede atender (BD alcanzable, no en cierre ni mantenimiento)",
+        "tags": [
+          "Sistema"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Lista: {status:\"ready\", leader, pid, uptime}"
+          },
+          "503": {
+            "description": "No lista: shutting_down, database o mantenimiento (el balanceador debe dejar de enviarle tráfico)"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "summary": "Registro",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Creado"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "409": {
+            "description": "El usuario ya existe"
+          },
+          "429": {
+            "description": "Límite"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 64
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login (paso 1). Con MFA devuelve mfaRequired y mfaToken",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión, o reto de MFA"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Cuenta bloqueada (ACCOUNT_LOCKED) o límite"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "password": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login/mfa": {
+      "post": {
+        "summary": "Login (paso 2): segundo factor",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión"
+          },
+          "401": {
+            "description": "Código o reto inválido"
+          },
+          "429": {
+            "description": "Bloqueado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mfaToken"
+                ],
+                "properties": {
+                  "mfaToken": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Cierra la sesión",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/profile": {
+      "get": {
+        "summary": "Perfil descifrado",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa": {
+      "get": {
+        "summary": "Estado del MFA",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa/setup": {
+      "post": {
+        "summary": "Inicia el alta de MFA (secreto + QR)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa/enable": {
+      "post": {
+        "summary": "Activa MFA con un código válido; entrega los códigos de recuperación",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "otp"
+                ],
+                "properties": {
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/mfa/disable": {
+      "post": {
+        "summary": "Desactiva MFA (contraseña + segundo factor)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/mfa/recovery-codes": {
+      "post": {
+        "summary": "Regenera los códigos de recuperación (contraseña + segundo factor)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sso/status": {
+      "get": {
+        "summary": "¿Está configurado el SSO?",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/sso/login": {
+      "get": {
+        "summary": "Inicia el login OIDC (redirige al proveedor; ?format=json devuelve la URL)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirección al proveedor"
+          },
+          "200": {
+            "description": "URL (format=json)"
+          },
+          "404": {
+            "description": "SSO no configurado"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/sso/callback": {
+      "get": {
+        "summary": "Retorno del proveedor OIDC (code + state)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token de sesión"
+          },
+          "302": {
+            "description": "Redirección a SSO_POST_LOGIN_URL"
+          },
+          "401": {
+            "description": "State/código/id_token inválido"
+          },
+          "403": {
+            "description": "Dominio o usuario no permitido"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/notes": {
+      "get": {
+        "summary": "Lista tus notas",
+        "tags": [
+          "Notas"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": ""
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Crea una nota",
+        "tags": [
+          "Notas"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Creada"
+          },
+          "400": {
+            "description": "Datos inválidos o contenido rechazado"
+          },
+          "401": {
+            "description": "Sin sesión"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 10000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{id}": {
+      "get": {
+        "summary": "Lee una nota tuya",
+        "tags": [
+          "Notas"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Edita title y/o content",
+        "tags": [
+          "Notas"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 10000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Borra una nota tuya",
+        "tags": [
+          "Notas"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/files": {
+      "get": {
+        "summary": "Lista tus archivos (cursor)",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": ""
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": ""
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "video",
+                "audio",
+                "document",
+                "text"
+              ]
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Sube UN archivo (multipart, campo file)",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Subido"
+          },
+          "413": {
+            "description": "Demasiado grande o cuota"
+          },
+          "415": {
+            "description": "Tipo no permitido"
+          },
+          "422": {
+            "description": "Malware detectado"
+          },
+          "503": {
+            "description": "Antivirus no disponible (FILE_SCAN=required)"
+          },
+          "401": {
+            "description": "Sin sesión"
+          },
+          "429": {
+            "description": "Límite"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/quota": {
+      "get": {
+        "summary": "Tu uso y límites",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/files/{id}": {
+      "get": {
+        "summary": "Metadatos",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Borra fila y archivo",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/files/{id}/download": {
+      "get": {
+        "summary": "Descarga (Range y HEAD)",
+        "tags": [
+          "Archivos"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "inline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archivo"
+          },
+          "206": {
+            "description": "Rango"
+          },
+          "416": {
+            "description": "Rango no satisfacible"
+          },
+          "404": {
+            "description": "No existe o no es tuyo"
+          },
+          "401": {
+            "description": "Sin sesión"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/status": {
+      "get": {
+        "summary": "Estado del sistema",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/logs": {
+      "get": {
+        "summary": "Logs de seguridad (cifrados en BD)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/rotation": {
+      "get": {
+        "summary": "Estado de claves, mantenimiento y backups",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/blocked-ips": {
+      "get": {
+        "summary": "IP bloqueadas",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/blocked-ips/{ip}": {
+      "delete": {
+        "summary": "Desbloquea una IP",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "ip",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/security-events": {
+      "get": {
+        "summary": "Tabla de análisis de anomalías",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "rule",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "info",
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "description": ""
+          },
+          {
+            "name": "ip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8760
+            },
+            "description": ""
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/security-summary": {
+      "get": {
+        "summary": "Resumen de eventos",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2160
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/accounts/unlock": {
+      "post": {
+        "summary": "Libera una cuenta bloqueada por intentos fallidos",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/accounts/mfa-reset": {
+      "post": {
+        "summary": "Solicita reiniciar el MFA de un usuario (otro admin debe aprobarlo)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ejecutado (ADMIN_APPROVALS_REQUIRED=1)"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "202": {
+            "description": "Pendiente de aprobación de otro administrador"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "reason"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/integrity-check": {
+      "post": {
+        "summary": "Fuerza la verificación de integridad",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/rotate-keys": {
+      "post": {
+        "summary": "501: la rotación se lanza con npm run rotate-keys",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/system/test-communications": {
+      "post": {
+        "summary": "Prueba los canales de alerta",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "No es administrador"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Solo role=admin."
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "summary": "Renueva el token de acceso con el refresh token (rota)",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de acceso nuevo y refresh nuevo"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "409": {
+            "description": "Otra petición acaba de renovar la sesión: reintenta con el refresh más reciente"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "refreshToken"
+                ],
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "pattern": "^rt_[A-Za-z0-9_-]{43}$"
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "summary": "Cierra todas las sesiones del usuario (opcionalmente menos la actual)",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sesiones cerradas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "keepCurrent": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "summary": "Sesiones abiertas del usuario",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Listado (sin tokens ni hashes)"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/sessions/{id}": {
+      "delete": {
+        "summary": "Cierra una sesión concreta del usuario",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión cerrada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "No existe o no es tuya"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/approvals": {
+      "get": {
+        "summary": "Solicitudes de aprobación (filtro opcional por estado)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "executed",
+                "failed",
+                "rejected",
+                "cancelled"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Sin permiso"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/approvals/{id}/approve": {
+      "post": {
+        "summary": "Aprueba (y ejecuta) una solicitud: no puede ser quien la pidió",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejecutada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Autoaprobación o sin permiso"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Ya no está pendiente"
+          },
+          "410": {
+            "description": "Caducada"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/approvals/{id}/reject": {
+      "post": {
+        "summary": "Rechaza una solicitud (o la cancela si la pidió el mismo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rechazada/cancelada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Ya no está pendiente"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts": {
+      "get": {
+        "summary": "Alertas de seguridad automáticas (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "acknowledged",
+                "resolved"
+              ]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/evaluate": {
+      "post": {
+        "summary": "Evalúa las reglas de alerta ahora (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Resumen: creadas, actualizadas, autoresueltas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/{id}/ack": {
+      "post": {
+        "summary": "Reconoce una alerta (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reconocida"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Estado no válido"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/alerts/{id}/resolve": {
+      "post": {
+        "summary": "Resuelve una alerta (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resuelta"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Ya resuelta"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/dashboard": {
+      "get": {
+        "summary": "Panel de operación: alertas, eventos, sesiones, archivos, estado (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Foto del estado de seguridad"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/users/{id}/export": {
+      "get": {
+        "summary": "Exporta, descifrados, todos los datos de un usuario (solo admin; queda auditado)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos personales"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/users/{id}/erase": {
+      "post": {
+        "summary": "Solicita borrar los datos de un usuario (otro admin debe aprobarlo)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejecutado (ADMIN_APPROVALS_REQUIRED=1)"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "202": {
+            "description": "Pendiente de aprobación"
+          },
+          "400": {
+            "description": "Confirmación errónea"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "404": {
+            "description": "No existe"
+          },
+          "409": {
+            "description": "Cuenta con privilegios"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "confirmUsername"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  },
+                  "confirmUsername": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/users/{id}/revoke-sessions": {
+      "post": {
+        "summary": "Cierra todas las sesiones de un usuario (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesiones cerradas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/sessions/revoke-all": {
+      "post": {
+        "summary": "Interruptor de emergencia: cierra TODAS las sesiones de TODOS (solo admin)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sesiones cerradas"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "confirm"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "enum": [
+                      "REVOKE-ALL-SESSIONS"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "summary": "Métricas Prometheus (solo admin; opcionalmente un token de servicio METRICS_TOKEN)",
+        "tags": [
+          "Observabilidad"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Texto en formato Prometheus"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "403": {
+            "description": "Solo admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/login/webauthn/options": {
+      "post": {
+        "summary": "Login con passkey (paso 2, A): opciones con el reto",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Opciones WebAuthn"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "WebAuthn no activado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mfaToken"
+                ],
+                "properties": {
+                  "mfaToken": {
+                    "type": "string"
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login/webauthn": {
+      "post": {
+        "summary": "Login con passkey (paso 2, B): la firma",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Bloqueado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mfaToken",
+                  "credential"
+                ],
+                "properties": {
+                  "mfaToken": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "type": "object"
+                  },
+                  "deviceInfo": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/credentials": {
+      "get": {
+        "summary": "Passkeys registradas del usuario (sin claves)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/webauthn/register/options": {
+      "post": {
+        "summary": "Registrar passkey (A): opciones; exige contraseña (+ segundo factor si ya hay)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Opciones WebAuthn"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "WebAuthn no activado"
+          },
+          "409": {
+            "description": "Máximo de llaves"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/register": {
+      "post": {
+        "summary": "Registrar passkey (B): respuesta del autenticador; la primera entrega códigos de recuperación",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Registrada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "201": {
+            "description": "Registrada"
+          },
+          "400": {
+            "description": "Reto o firma no válidos"
+          },
+          "409": {
+            "description": "Ya registrada"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "credential"
+                ],
+                "properties": {
+                  "credential": {
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webauthn/credentials/{id}": {
+      "delete": {
+        "summary": "Quitar una passkey; exige contraseña (+ segundo factor)",
+        "tags": [
+          "MFA"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eliminada"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "No existe"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/saml/status": {
+      "get": {
+        "summary": "¿SAML activado?",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ enabled }"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/metadata": {
+      "get": {
+        "summary": "Metadatos SAML del proveedor de servicio (entityID, URL ACS, certificado)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "XML application/samlmetadata+xml"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/login": {
+      "get": {
+        "summary": "Inicia el login SAML: 302 al IdP (o JSON con ?format=json)",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ url }"
+          },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "302": {
+            "description": "Redirección al IdP"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          },
+          "503": {
+            "description": "Mal configurado"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/saml/acs": {
+      "post": {
+        "summary": "ACS: recibe la respuesta firmada del IdP y abre sesión (amr \"saml\")",
+        "tags": [
+          "SSO"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Token de sesión (o 303 a SAML_POST_LOGIN_URL)"
+          },
+          "401": {
+            "description": "Respuesta no válida (firma, audiencia, repetición...)"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          },
+          "303": {
+            "description": "Redirección a la URL fija de la aplicación"
+          },
+          "400": {
+            "description": "Respuesta mal formada"
+          },
+          "403": {
+            "description": "Dominio o usuario no permitido"
+          },
+          "404": {
+            "description": "SAML no configurado"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "SAMLResponse"
+                ],
+                "properties": {
+                  "SAMLResponse": {
+                    "type": "string",
+                    "description": "XML en base64"
+                  },
+                  "RelayState": {
+                    "type": "string",
+                    "description": "Se ignora"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

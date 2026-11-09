@@ -30,8 +30,13 @@ function buildApp() {
     const { createErrorHandler } = require('../src/middleware/error.middleware');
     const { registerRoutes } = require('../src/api/routes');
 
+    const tracing = require('../src/observability/tracing');
+    const metrics = require('../src/observability/metrics');
+
     const app = express();
     app.set('trust proxy', true); // las pruebas simulan IPs distintas con X-Forwarded-For
+    app.use(tracing.middleware());
+    app.use(metrics.httpMiddleware());
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: false, limit: '1mb' }));
     app.use(protection.autoProtect());
@@ -51,8 +56,9 @@ async function startApp() {
 }
 
 // Cliente mínimo. `ip` se envía como X-Forwarded-For (el servidor de pruebas confía en él).
-async function api(base, method, route, { token, ip, json, form, headers = {}, raw } = {}) {
+async function api(base, method, route, { token, ip, json, form, headers = {}, raw, redirect } = {}) {
     const init = { method, headers: { ...headers } };
+    if (redirect) init.redirect = redirect;
     if (ip) init.headers['X-Forwarded-For'] = ip;
     if (token) init.headers.Authorization = `Bearer ${token}`;
     if (json !== undefined) {
@@ -93,7 +99,7 @@ async function registerAndLogin(base, { ip, username = uniqueName(), password = 
     if (reg.status !== 201) throw new Error(`registro falló: ${reg.status} ${reg.text}`);
     const login = await api(base, 'POST', '/api/auth/login', { ip, json: { username, password } });
     if (login.status !== 200) throw new Error(`login falló: ${login.status} ${login.text}`);
-    return { username, password, token: login.body.token, userId: reg.body.userId };
+    return { username, password, token: login.body.token, refreshToken: login.body.refreshToken, userId: reg.body.userId };
 }
 
 // IP de documentación (RFC 5737) distinta por prueba: así cada prueba tiene sus propios contadores

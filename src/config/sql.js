@@ -3,8 +3,8 @@
 // La defensa contra inyección SQL de este proyecto es de tres capas:
 //   1. TODA consulta usa parámetros (`?`): mysql2 `execute` las envía como sentencias preparadas
 //      en el servidor, de modo que los valores nunca se interpretan como SQL.
-//   2. Lo único que no admite parámetros (LIMIT/OFFSET, listas de `?`) pasa por estas funciones,
-//      que o devuelven un entero seguro o lanzan una excepción.
+//   2. Lo único que no admite parámetros (LIMIT/OFFSET, listas de `?`, trozos de SQL constantes) pasa por
+//      estas funciones: o devuelven un entero seguro / un trozo de un registro CERRADO, o lanzan una excepción.
 //   3. test_security.js recorre el código fuente y FALLA si encuentra SQL con `${...}` que no sea
 //      una de estas ayudas (ver "no hay SQL con interpolación").
 
@@ -23,4 +23,16 @@ function sqlPlaceholders(count) {
     return Array(n).fill('?').join(', ');
 }
 
-module.exports = { sqlInt, sqlPlaceholders };
+// Trozos de SQL constantes que se repiten en muchas consultas. Se piden por NOMBRE: no se puede pasar texto
+// arbitrario, y un nombre que no esté en el registro lanza.
+const FRAGMENTS = Object.freeze({
+    // Sesión viva: no revocada, no caducada por inactividad ni por el tope absoluto (tabla user_sessions)
+    liveSession: 'revoked_at IS NULL AND expires_at > NOW() AND (absolute_expires_at IS NULL OR absolute_expires_at > NOW())'
+});
+
+function sqlFragment(name) {
+    if (typeof name !== 'string' || !Object.hasOwn(FRAGMENTS, name)) throw new RangeError('Fragmento SQL desconocido');
+    return FRAGMENTS[name];
+}
+
+module.exports = { sqlInt, sqlPlaceholders, sqlFragment };

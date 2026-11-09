@@ -51,6 +51,11 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 | POST | `/api/auth/login` | público (10 req/min) | Devuelve `token` JWT |
 | POST | `/api/auth/logout` | JWT | Invalida la sesión actual |
 | GET | `/api/auth/profile` | JWT | Perfil descifrado y sesiones activas |
+| POST | `/api/auth/login/mfa` | público (reto MFA) | Segundo paso del login con MFA (`mfaToken` + `otp` o `recoveryCode`) |
+| GET | `/api/auth/mfa` | JWT | Estado del MFA |
+| POST | `/api/auth/mfa/setup` · `/mfa/enable` | JWT | Alta de TOTP y activación (entrega códigos de recuperación) |
+| POST | `/api/auth/mfa/disable` · `/mfa/recovery-codes` | JWT + contraseña + 2.º factor | Desactiva MFA / regenera códigos |
+| GET | `/api/sso/login` · `/api/sso/callback` | público | SSO OpenID Connect (code + PKCE); 404 si no está configurado |
 | POST | `/api/notes` | JWT | Crea una nota (cifrada) |
 | GET | `/api/notes?page=1&limit=20` | JWT | Lista tus notas, paginadas |
 | GET | `/api/notes/:id` | JWT | Lee una nota tuya |
@@ -66,6 +71,8 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 | POST | `/api/system/test-communications` | JWT + admin (10 req/min) | Prueba los canales de alerta |
 | GET | `/api/system/security-events?hours=&type=&rule=&severity=&ip=&userId=&before=&limit=` | JWT + admin | Tabla de análisis de anomalías (filtros y paginación por cursor) |
 | GET | `/api/system/security-summary?hours=` | JWT + admin | Resumen: por tipo/severidad, IPs y reglas más activas, línea temporal |
+| POST | `/api/system/accounts/unlock` | JWT + admin | Libera una cuenta bloqueada por intentos fallidos |
+| POST | `/api/system/accounts/mfa-reset` | JWT + admin | Desactiva el MFA de un usuario (dispositivo perdido) |
 | POST | `/api/files` | JWT (20/min por usuario) | Sube **un** archivo (`multipart/form-data`, campo `file`) |
 | GET | `/api/files?limit=&before=&category=` | JWT | Lista tus archivos (cursor) |
 | GET | `/api/files/quota` | JWT | Tu uso y tus límites |
@@ -73,16 +80,20 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 | GET | `/api/files/:id/download[?inline=true]` | JWT | Descarga (soporta `Range` y `HEAD`) |
 | DELETE | `/api/files/:id` | JWT | Borra el archivo (fila y disco) |
 
+> Definición completa de la API en [`docs/openapi.json`](docs/openapi.json). Operación de las nuevas capas (MFA, SSO, KMS,
+> antivirus, copias de archivos) en [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md) §10–§14; scripts: `npm run kms`, `rescan-files`,
+> `files:backup|verify|restore`, `lint:security`.
+
 > `/api/notes` es una API **de ejemplo funcional**: sirve de plantilla para las tuyas (ver [Cómo crear una API nueva](#cómo-crear-una-api-nueva)).
 
 ### Puesta en marcha rápida
 
 ```bash
 npm install
-# 1. Crea la BD y aplica el esquema (instalaciones nuevas; ya incluye las migraciones 004-006)
+# 1. Crea la BD y aplica el esquema (instalaciones nuevas; ya incluye las migraciones 004-010)
 mysql -u <usuario> -p <base_de_datos> < database/schema.sql
-#    …si vienes de una versión anterior: migraciones 004 (tablas de seguridad), 005 (archivos) y 006
-#    (índice único de usuario) de database/migrations/ — ver docs/SEGURIDAD.md §8
+#    …si vienes de una versión anterior: migraciones 004 (tablas de seguridad), 005 (archivos), 006
+#    (índice único de usuario), 007 (bloqueo por origen), 008 (MFA), 009 (SSO) y 010 (estado del antivirus) de database/migrations/ — ver docs/SEGURIDAD.md §8
 #    …o, si ya tenías la BD de antes, solo la migración (añade users.role y user_notes):
 mysql -u <usuario> -p <base_de_datos> < database/migrations/001_roles_and_notes.sql
 # 2. Configura .env (ver "Variables de Entorno Seguras") y arranca
@@ -4731,7 +4742,7 @@ Restart=always
 
 ### Capa 4 — El servidor no puede lanzar `ping`
 
-Para ejecutar `ping -p` desde el servidor, el atacante primero necesita ejecución de comandos. Por eso `src/` **no usa `child_process`** y un test (`npm run test:icmp`) falla si alguien lo añade. Si algún día necesitas ejecutar un proceso, hazlo en un servicio aparte con sus propios permisos. El monitor (`scripts/`) sí lanza `tcpdump`, con argumentos fijos y sin shell.
+Para ejecutar `ping -p` desde el servidor, el atacante primero necesita ejecución de comandos. Por eso `src/` **no usa `child_process`** y un test (`npm run test:icmp`) falla si alguien lo añade. Única excepción, verificada por el mismo test: `src/crypto/kms.js` lanza `process.execPath` con el script fijo `kms-worker.js` (sin shell ni argumentos variables; los datos van por stdin) para mantener síncrono el arranque. Si algún día necesitas ejecutar un proceso, hazlo en un servicio aparte con sus propios permisos. El monitor (`scripts/`) sí lanza `tcpdump`, con argumentos fijos y sin shell.
 
 ### Límites que conviene conocer
 

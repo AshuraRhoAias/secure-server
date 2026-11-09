@@ -62,6 +62,7 @@ const SECRET_FIELD = /pass(?:word|wd)?|secret|token|authorization|api[-_]?key|co
 // Cabeceras que un cliente controla y que nunca deberían llevar sintaxis de ataque
 const SCANNED_HEADERS = ['user-agent', 'referer', 'origin', 'host', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-requested-with', 'accept', 'accept-language', 'content-type'];
 
+// eslint-disable-next-line security/detect-unsafe-regex -- es la expresión "unrolled" estándar de comentario C: lineal; probada con 1 000 000 de "/*" en test_security.js (ReDoS)
 const C_COMMENT = /\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\//g; // comentario /* ... */ en tiempo lineal
 
 function percentDecode(text) {

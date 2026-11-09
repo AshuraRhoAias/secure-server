@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const kms = require('./kms');
 
 // Derivación de claves a partir de variables de entorno. Módulo puro (sin estado global),
 // así el servidor y la herramienta de rotación pueden derivar a la vez el juego de claves
@@ -84,7 +85,8 @@ function deriveLegacyKeySet({ baseSeed, jwtSeed, date }) {
 
 const todayUTC = () => new Date().toISOString().split('T')[0];
 
-function deriveFromEnv(env = process.env, { today = todayUTC() } = {}) {
+function deriveFromEnv(rawEnv = process.env, { today = todayUTC() } = {}) {
+    const env = kms.resolveEnvCopy(rawEnv); // valores kms:... → texto claro (no hace nada si no los hay)
     if (env.KEY_EPOCH) {
         return deriveStableKeySet({
             baseSeed: env.BASE_SEED,

@@ -15,6 +15,9 @@ const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 
 const { filesDir } = require('./test_helpers/env');
+// Esta suite prueba almacenamiento, cifrado, límites y Range con archivos sintéticos (relleno con cabecera): el
+// saneamiento de imágenes los rechazaría con razón. El saneamiento tiene su propia suite con archivos reales: test_sanitize.js
+process.env.IMAGE_SANITIZE = 'off';
 const helpers = require('./test_helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
@@ -153,10 +156,13 @@ for (const size of SIZES) {
         const plain = crypto.randomBytes(size);
         const { file, encrypt } = await encryptToFile(plain, key);
         try {
-            assert.strictEqual(fs.statSync(file).size, cipher.cipherSize(size));
+            const onDisk = fs.readFileSync(file); // una sola lectura: tamaño y contenido salen del mismo archivo
+            assert.strictEqual(onDisk.length, cipher.cipherSize(size));
             assert.strictEqual(encrypt.plainBytes, size);
             assert.strictEqual(encrypt.sha256(), crypto.createHash('sha256').update(plain).digest('hex'));
-            assert.ok(plain.length === 0 || !fs.readFileSync(file).includes(plain.subarray(0, Math.min(16, size))));
+            // "El texto en claro no aparece en disco": solo significa algo con un patrón largo. Con 1 byte, ese byte está por azar
+            // en ~11% de los archivos cifrados (30+ bytes aleatorios), lo que hacía fallar la prueba de forma intermitente.
+            if (size >= 8) assert.ok(!onDisk.includes(plain.subarray(0, Math.min(16, size))));
 
             const back = await readAll(cipher.decryptRange({ filePath: file, key, plainSize: size }));
             assert.ok(back.equals(plain));
@@ -777,4 +783,25 @@ itDb('eventos y auditoría: subida, descarga y borrado quedan registrados (cifra
     const [rejected] = await db.query("SELECT COUNT(*) AS n FROM security_events WHERE event_type = 'FILE_REJECTED'");
     assert.ok(rejected[0].n >= 10);
     void events;
+});
+
+// Hallazgo del fuzzing: busboy emite 'error' DIRECTAMENTE en el stream del archivo si el multipart no se cierra; sin listener
+// permanente era una excepción no capturada (el proceso entero caía). Ahora es un 400 y el servidor sigue atendiendo.
+itDb('multipart sin boundary de cierre (con archivo aceptable o rechazado) → 400/415, sin tumbar el servidor', async () => {
+    const boundary = '----sincierre' + crypto.randomBytes(4).toString('hex');
+    const open = (name) => Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\n\r\n`);
+    for (const [name, body] of [
+        ['foto.jpg', bytes([0xff, 0xd8, 0xff, 0xe0, 0, 0x10], 'JFIF\0', filler(500))],   // se acepta el tipo, el cuerpo se corta
+        ['mal.exe', bytes('MZ', filler(300))],                                           // se rechaza antes de que el cuerpo termine
+        ['vacio.txt', Buffer.alloc(0)]
+    ]) {
+        const res = await api(app.base, 'POST', '/api/files', {
+            token: alice.token, ip: ipA, raw: Buffer.concat([open(name), body]),
+            headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }
+        });
+        assert.ok([400, 415].includes(res.status), `${name}: ${res.status} ${res.text}`);
+    }
+    // Pasado un momento (el error de busboy llega de forma asíncrona) el servidor sigue vivo
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.strictEqual((await api(app.base, 'GET', '/health')).status, 200);
 });

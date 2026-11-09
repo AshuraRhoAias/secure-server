@@ -136,7 +136,10 @@ CREATE TABLE `users` (
   `username_encrypted` longtext DEFAULT NULL,
   `risk_level_encrypted` longtext DEFAULT NULL,
   `encrypted_metadata` longtext DEFAULT NULL,
-  `role` enum('user','admin') NOT NULL DEFAULT 'user'
+  `role` enum('user','auditor','operator','admin') NOT NULL DEFAULT 'user',
+  `mfa_secret_encrypted` longtext DEFAULT NULL,
+  `mfa_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `mfa_last_step` bigint(20) unsigned DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -149,13 +152,22 @@ CREATE TABLE `user_sessions` (
   `id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
   `jwt_token_hash` varchar(255) NOT NULL,
+  `session_uid` char(36) DEFAULT NULL,
+  `refresh_hash` char(64) DEFAULT NULL,
+  `prev_refresh_hash` char(64) DEFAULT NULL,
+  `refreshed_at` timestamp NULL DEFAULT NULL,
   `ip_address` varchar(45) DEFAULT NULL,
   `user_agent` text DEFAULT NULL,
   `device_fingerprint` varchar(255) DEFAULT NULL,
   `risk_level` enum('low','medium','high') DEFAULT 'low',
   `location_country` varchar(2) DEFAULT NULL,
   `is_suspicious` tinyint(1) DEFAULT 0,
-  `expires_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `absolute_expires_at` timestamp NULL DEFAULT NULL,
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  `amr` varchar(60) DEFAULT NULL,
+  `revoked_at` timestamp NULL DEFAULT NULL,
+  `revoked_reason` varchar(40) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -218,7 +230,10 @@ ALTER TABLE `user_sessions`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_sessions_user_id` (`user_id`),
   ADD KEY `idx_sessions_expires` (`expires_at`),
-  ADD KEY `idx_sessions_suspicious` (`is_suspicious`);
+  ADD KEY `idx_sessions_suspicious` (`is_suspicious`),
+  ADD UNIQUE KEY `uq_sessions_uid` (`session_uid`),
+  ADD KEY `idx_sessions_refresh` (`refresh_hash`),
+  ADD KEY `idx_sessions_prev_refresh` (`prev_refresh_hash`);
 
 --
 -- AUTO_INCREMENT de las tablas volcadas
@@ -371,11 +386,13 @@ CREATE TABLE IF NOT EXISTS `login_attempts` (
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `username_hash` char(64) NOT NULL,
   `ip_address` varchar(45) NOT NULL,
+  `ip_subject` varchar(45) NOT NULL DEFAULT '',
   `user_id` int(11) DEFAULT NULL,
   `success` tinyint(1) NOT NULL,
   `reason` varchar(32) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_la_user` (`username_hash`, `id`),
+  KEY `idx_la_user_subject` (`username_hash`, `ip_subject`, `success`, `id`),
   KEY `idx_la_ip` (`ip_address`, `created_at`),
   KEY `idx_la_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -396,6 +413,8 @@ CREATE TABLE IF NOT EXISTS `user_files` (
   `category` enum('image','video','audio','document','text') NOT NULL,
   `size_bytes` bigint(20) unsigned NOT NULL,
   `sha256` char(64) NOT NULL,
+  `scan_status` enum('clean','skipped','unscanned') NOT NULL DEFAULT 'unscanned',
+  `sanitize_status` enum('none','reencoded','inspected') NOT NULL DEFAULT 'none',
   `cipher_version` varchar(10) NOT NULL DEFAULT 'f1',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
@@ -406,8 +425,146 @@ CREATE TABLE IF NOT EXISTS `user_files` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+-- --------------------------------------------------------
+
+--
+-- Códigos de recuperación de MFA (migración 008)
+--
+
+CREATE TABLE IF NOT EXISTS `user_recovery_codes` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `code_hash` char(64) NOT NULL,
+  `used_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_recovery_user_hash` (`user_id`, `code_hash`),
+  CONSTRAINT `user_recovery_codes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- SSO por OpenID Connect (migración 009)
+--
+
+CREATE TABLE IF NOT EXISTS `user_identities` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `issuer` varchar(255) NOT NULL,
+  `identity_hash` char(64) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_login_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_identity_hash` (`identity_hash`),
+  KEY `idx_identity_user` (`user_id`),
+  CONSTRAINT `user_identities_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `oidc_login_state` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `state_hash` char(64) NOT NULL,
+  `nonce` varchar(64) NOT NULL,
+  `code_verifier_encrypted` longtext NOT NULL,
+  `ip_subject` varchar(45) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` datetime NOT NULL,
+  `used_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_oidc_state` (`state_hash`),
+  KEY `idx_oidc_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
+-- Aprobación de dos administradores (migración 012)
+CREATE TABLE `admin_approvals` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `target_user_id` int(11) DEFAULT NULL,
+  `params` text DEFAULT NULL,
+  `reason` varchar(255) NOT NULL,
+  `status` enum('pending','approved','executed','failed','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  `requested_by` int(11) NOT NULL,
+  `approved_by` int(11) DEFAULT NULL,
+  `requested_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `decided_at` timestamp NULL DEFAULT NULL,
+  `executed_at` timestamp NULL DEFAULT NULL,
+  `result` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_approvals_status` (`status`, `requested_at`),
+  KEY `idx_approvals_target` (`target_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Alertas de seguridad automáticas (migración 014)
+CREATE TABLE `security_alerts` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `rule` varchar(64) NOT NULL,
+  `subject` varchar(120) NOT NULL DEFAULT 'global',
+  `dedupe_key` varchar(190) NOT NULL,
+  `severity` enum('low','medium','high','critical') NOT NULL,
+  `title` varchar(160) NOT NULL,
+  `status` enum('open','acknowledged','resolved') NOT NULL DEFAULT 'open',
+  `event_count` int(10) unsigned NOT NULL DEFAULT 1,
+  `first_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_seen` timestamp NOT NULL DEFAULT current_timestamp(),
+  `details` text DEFAULT NULL,
+  `acknowledged_by` int(11) DEFAULT NULL,
+  `acknowledged_at` timestamp NULL DEFAULT NULL,
+  `resolved_by` int(11) DEFAULT NULL,
+  `resolved_at` timestamp NULL DEFAULT NULL,
+  `notified_at` timestamp NULL DEFAULT NULL,
+  `notify_error` varchar(120) DEFAULT NULL,
+  `active_key` varchar(190) AS (IF(`status` = 'resolved', NULL, `dedupe_key`)) STORED,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_alerts_active` (`active_key`),
+  KEY `idx_alerts_status` (`status`, `last_seen`),
+  KEY `idx_alerts_rule` (`rule`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Passkeys / llaves de seguridad WebAuthn (migración 015)
+CREATE TABLE `webauthn_credentials` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `credential_id` varchar(512) NOT NULL,
+  `public_key` text NOT NULL,
+  `counter` bigint(20) unsigned NOT NULL DEFAULT 0,
+  `transports` varchar(100) DEFAULT NULL,
+  `device_type` enum('singleDevice','multiDevice') NOT NULL DEFAULT 'singleDevice',
+  `backed_up` tinyint(1) NOT NULL DEFAULT 0,
+  `aaguid` char(36) DEFAULT NULL,
+  `name` varchar(60) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_webauthn_credential` (`credential_id`),
+  KEY `idx_webauthn_user` (`user_id`),
+  CONSTRAINT `webauthn_credentials_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `webauthn_challenges` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `challenge` varchar(128) NOT NULL,
+  `purpose` enum('register','login') NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_webauthn_challenge` (`challenge`),
+  KEY `idx_webauthn_challenge_exp` (`expires_at`),
+  CONSTRAINT `webauthn_challenges_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Caché de SAML: AuthnRequest pendientes y aserciones ya usadas (migración 016)
+CREATE TABLE `saml_cache` (
+  `cache_key` varchar(190) NOT NULL,
+  `cache_value` varchar(512) NOT NULL,
+  `expires_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`cache_key`),
+  KEY `idx_saml_cache_exp` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

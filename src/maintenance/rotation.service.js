@@ -4,13 +4,14 @@ const os = require('os');
 const path = require('path');
 
 const keyProvider = require('../crypto/key-provider');
-const { ENCRYPTED_COLUMNS } = require('../crypto/encrypted-columns');
+const { ENCRYPTED_COLUMNS, isExternal } = require('../crypto/encrypted-columns');
 const { buildSnapshot, restoreSnapshot, summarize } = require('../backup/snapshot');
 const { createArchive, openArchive, readHeader, rewrapArchive } = require('../backup/archive');
 const { buildKeyring, openKeyring } = require('../backup/keyring');
 const { getPaths } = require('./paths');
 const { Maintenance } = require('./maintenance');
 const { writeFileAtomic, readJsonIfExists, isPidAlive } = require('./fsutil');
+const kms = require('../crypto/kms');
 
 // ROTACIÓN DE CLAVES Y RE-CIFRADO DE DATOS
 //
@@ -213,6 +214,7 @@ class RotationService {
                     for (const col of cols) {
                         const value = row[col];
                         if (value === null || value === undefined) continue;
+                        if (isExternal(value)) continue; // la protege el KMS, no la clave maestra
 
                         if (this.tryDecryptWith(newKey, value) !== null) { stats.alreadyMigrated++; continue; }
 
@@ -264,7 +266,7 @@ class RotationService {
             }
             for (const row of rows) {
                 for (const col of spec.columns) {
-                    if (row[col] === null) continue;
+                    if (row[col] === null || isExternal(row[col])) continue;
                     const plain = this.tryDecryptWith(newKey, row[col]);
                     if (plain === null) throw new Error(`Verificación fallida: ${table}.${col} (${spec.primaryKey}=${row[spec.primaryKey]}) no se descifra con la clave nueva`);
                     const expected = expectedHashes.get(`${table}:${row[spec.primaryKey]}:${col}`);
@@ -495,14 +497,16 @@ class RotationService {
             }
 
             const envUpdates = { ENCRYPTION_SEED: newEncSeed, JWT_SEED: newJwtSeed, KEY_EPOCH: newEpoch };
+            // Con KMS_PROVIDER definido, las semillas se ESCRIBEN envueltas por el KMS (en memoria siguen en claro)
+            const fileUpdates = kms.wrapUpdates(envUpdates, ['ENCRYPTION_SEED', 'JWT_SEED']);
             const envPending = `${this.paths.envFile}.pending`;
             const manualEnvFile = path.join(this.paths.dataDir, `new-env-${newEpoch}.txt`);
             if (writeEnv) {
                 const current = fs.existsSync(this.paths.envFile) ? fs.readFileSync(this.paths.envFile, 'utf8') : '';
-                writeFileAtomic(envPending, applyEnvUpdates(current, envUpdates), 0o600);
+                writeFileAtomic(envPending, applyEnvUpdates(current, fileUpdates), 0o600);
                 temps.push(envPending);
             } else {
-                writeFileAtomic(manualEnvFile, Object.entries(envUpdates).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', 0o600);
+                writeFileAtomic(manualEnvFile, Object.entries(fileUpdates).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', 0o600);
                 result.manualEnvFile = manualEnvFile;
             }
 

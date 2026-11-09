@@ -180,9 +180,11 @@ async function main() {
     name: 'Instalar dependencias de Node (npm)',
     run: async () => {
       const useCi = fs.existsSync(path.join(ROOT, 'package-lock.json'));
-      const r = await run(process.platform === 'win32' ? 'npm.cmd' : 'npm', [useCi ? 'ci' : 'install', '--no-audit', '--no-fund']);
+      // En producción NO se instalan las dependencias de desarrollo (nodemon, eslint, c8…): menos código, menos superficie
+      const production = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
+      const r = await run(process.platform === 'win32' ? 'npm.cmd' : 'npm', [useCi ? 'ci' : 'install', ...(production ? ['--omit=dev'] : []), '--no-audit', '--no-fund']);
       if (r.code !== 0) throw new Error('npm falló:\n' + r.out.split('\n').slice(-8).join('\n'));
-      return useCi ? 'npm ci completado' : 'npm install completado';
+      return `${useCi ? 'npm ci' : 'npm install'} completado${production ? ' (sin dependencias de desarrollo)' : ''}`;
     }
   });
 

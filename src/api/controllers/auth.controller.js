@@ -1,6 +1,10 @@
 const secureAuthService = require('../../security/secure-auth.service');
 const { AuthError } = secureAuthService;
 const { normalizeIp } = require('../../security/ip');
+const mfaService = require('../../security/mfa.service');
+const { MfaError } = mfaService;
+const webauthn = require('../../security/webauthn.service');
+const events = require('../../security/security-events.service');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
 const bcrypt = require('bcryptjs');
 
@@ -12,6 +16,9 @@ class AuthController {
         this.logout = this.logout.bind(this);
         this.getProfile = this.getProfile.bind(this);
         this.logUserAction = this.logUserAction.bind(this);
+        Object.getOwnPropertyNames(AuthController.prototype)
+            .filter(name => name !== 'constructor')
+            .forEach(name => { this[name] = this[name].bind(this); });
     }
 
     // Solo se aceptan estos campos (texto corto) de deviceInfo: alimentan la huella del dispositivo
@@ -126,57 +133,333 @@ class AuthController {
         const ip = normalizeIp(req.ip);
 
         try {
-            const authResult = await secureAuthService.authenticateUser(username, password, {
-                ...this.cleanDeviceInfo(req.body.deviceInfo),
-                ipAddress: ip,
-                userAgent: req.headers['user-agent']
-            });
+            const authResult = await secureAuthService.authenticateUser(username, password, this.deviceContext(req, ip));
 
-            const db = require('../../config/database');
-            await db.query(
-                'UPDATE users SET risk_level_encrypted = ?, updated_at = NOW() WHERE id = ?',
-                [tripleEncryptor.encrypt(authResult.riskLevel), authResult.userId]
-            );
-
-            await this.logUserAction('USER_LOGIN_SUCCESS', {
-                userId: authResult.userId,
-                usernameHash: this.generateUsernameHash(username),
-                ipAddress: ip,
-                riskLevel: authResult.riskLevel,
-                encryptionVersion: this.getCurrentEncryptionVersion()
-            });
-
-            res.json({
-                success: true,
-                message: 'Autenticación exitosa',
-                token: authResult.token,
-                expiresAt: authResult.expiresAt,
-                riskLevel: authResult.riskLevel,
-                encryptionVersion: this.getCurrentEncryptionVersion()
-            });
-
-        } catch (error) {
-            // Errores previstos (credenciales, cuenta bloqueada): mensaje y código estables
-            if (error instanceof AuthError) {
-                await this.logUserAction('USER_LOGIN_FAILED', {
-                    usernameHash: this.generateUsernameHash(username),
-                    ipAddress: ip,
-                    error: error.code
-                });
-
-                if (error.retryAfter) res.set('Retry-After', String(error.retryAfter));
-                return res.status(error.status).json({
-                    success: false,
-                    message: error.message,
-                    code: error.code,
-                    ...(error.retryAfter && { retryAfter: error.retryAfter })
+            // Contraseña correcta pero la cuenta tiene MFA: falta el segundo factor (POST /api/auth/login/mfa)
+            if (authResult.mfaRequired) {
+                return res.json({
+                    success: true,
+                    mfaRequired: true,
+                    message: 'Se requiere el segundo factor',
+                    mfaToken: authResult.mfaToken,
+                    mfaTokenExpiresIn: authResult.mfaTokenExpiresIn,
+                    methods: authResult.mfaMethods
                 });
             }
 
-            // Cualquier otro error es nuestro: se registra, pero al cliente NO se le cuenta el detalle
-            console.error('❌ Error en login:', error.code || error.message);
+            await this.finishLogin(res, authResult, { usernameHash: this.generateUsernameHash(username), ip });
+        } catch (error) {
+            await this.failedAuth(res, error, { usernameHash: this.generateUsernameHash(username), ip, where: 'login' });
+        }
+    }
+
+    // Paso 2 con MFA: canjea el reto de login() por la sesión
+    async loginMfa(req, res) {
+        const { mfaToken, otp, recoveryCode } = req.body;
+        const ip = normalizeIp(req.ip);
+        let usernameHash = 'unknown';
+
+        try {
+            if (!otp && !recoveryCode) {
+                return res.status(400).json({ success: false, message: 'Envía otp o recoveryCode', code: 'VALIDATION_ERROR' });
+            }
+            try { usernameHash = require('jsonwebtoken').decode(mfaToken)?.uh || 'unknown'; } catch { /* se valida dentro */ }
+
+            const authResult = await secureAuthService.verifyMfaChallenge(mfaToken, { otp, recoveryCode }, this.deviceContext(req, ip));
+            await this.finishLogin(res, authResult, { usernameHash, ip });
+        } catch (error) {
+            await this.failedAuth(res, error, { usernameHash, ip, where: 'login-mfa' });
+        }
+    }
+
+    // Paso 2 con passkey. A) opciones (reto)  B) firma
+    async loginWebauthnOptions(req, res) {
+        const ip = normalizeIp(req.ip);
+        try {
+            const options = await secureAuthService.beginWebauthnLogin(req.body.mfaToken, this.deviceContext(req, ip));
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, options });
+        } catch (error) {
+            if (error instanceof webauthn.WebauthnError) return this.webauthnFailure(res, error);
+            await this.failedAuth(res, error, { usernameHash: 'unknown', ip, where: 'login-webauthn-options' });
+        }
+    }
+
+    async loginWebauthn(req, res) {
+        const ip = normalizeIp(req.ip);
+        let usernameHash = 'unknown';
+        try {
+            try { usernameHash = require('jsonwebtoken').decode(req.body.mfaToken)?.uh || 'unknown'; } catch { /* se valida dentro */ }
+            const authResult = await secureAuthService.verifyWebauthnChallenge(req.body.mfaToken, req.body.credential, this.deviceContext(req, ip));
+            await this.finishLogin(res, authResult, { usernameHash, ip });
+        } catch (error) {
+            if (error instanceof webauthn.WebauthnError) return this.webauthnFailure(res, error);
+            await this.failedAuth(res, error, { usernameHash, ip, where: 'login-webauthn' });
+        }
+    }
+
+    // ------------------------------------------------------------------ gestionar passkeys (sesión iniciada)
+
+    // Contraseña SIEMPRE; y, si ya hay un segundo factor, también un código válido: una sesión robada no puede
+    // añadir su propia llave para quedarse (ni quitar la del dueño).
+    async requireManageReauth(req) {
+        if (!(await mfaService.passwordMatches(req.user.id, req.body.password))) {
+            throw new MfaError('INVALID_CREDENTIALS', 'Credenciales inválidas', 401);
+        }
+        if (await mfaService.hasSecondFactor(req.user.id)) {
+            const { otp, recoveryCode } = req.body;
+            if (!(otp || recoveryCode) || !(await mfaService.verify(req.user.id, { otp, recoveryCode })).ok) {
+                throw new MfaError('INVALID_OTP', 'Código incorrecto', 401);
+            }
+        }
+    }
+
+    async webauthnList(req, res) {
+        try {
+            const rows = await webauthn.listCredentials(req.user.id);
+            res.json({ success: true, enabled: webauthn.enabled(), credentials: rows.map(webauthn.publicCredential) });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRegisterOptions(req, res) {
+        try {
+            await this.requireManageReauth(req);
+            const options = await webauthn.beginRegistration(req.user.id, req.user.username);
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, options });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRegister(req, res) {
+        try {
+            const hadFactor = await mfaService.hasSecondFactor(req.user.id);
+            const { id } = await webauthn.finishRegistration(req.user.id, req.body.credential, req.body.name);
+            // La primera llave es el primer segundo factor: sin códigos de recuperación, perderla dejaría a la persona fuera
+            const recoveryCodes = hadFactor ? undefined : await mfaService.regenerateRecoveryCodes(req.user.id);
+            await events.record({ type: 'WEBAUTHN_REGISTERED', severity: 'low', riskScore: 10, req, userId: req.user.id, details: { credentialRow: id } });
+            res.status(201).json({
+                success: true, id,
+                ...(recoveryCodes && { recoveryCodes, message: 'Guarda estos códigos de recuperación: no se volverán a mostrar.' })
+            });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    async webauthnRemove(req, res) {
+        try {
+            await this.requireManageReauth(req);
+            if (!(await webauthn.removeCredential(req.user.id, req.validated.params.id))) {
+                return res.status(404).json({ success: false, message: 'Llave no encontrada', code: 'NOT_FOUND' });
+            }
+            // Si era el último factor, los códigos de recuperación ya no protegen nada
+            if (!(await mfaService.hasSecondFactor(req.user.id))) await mfaService.clearRecoveryCodes(req.user.id);
+            await events.record({ type: 'WEBAUTHN_REMOVED', severity: 'medium', riskScore: 20, req, userId: req.user.id, details: { credentialRow: req.validated.params.id } });
+            res.json({ success: true, message: 'Llave eliminada' });
+        } catch (error) {
+            this.webauthnFailure(res, error);
+        }
+    }
+
+    webauthnFailure(res, error) {
+        if (error instanceof webauthn.WebauthnError || error instanceof MfaError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error('❌ Error en WebAuthn:', error.code || error.message);
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+
+    deviceContext(req, ip) {
+        return { ...this.cleanDeviceInfo(req.body.deviceInfo), ipAddress: ip, userAgent: req.headers['user-agent'] };
+    }
+
+    async finishLogin(res, authResult, { usernameHash, ip }) {
+        const db = require('../../config/database');
+        await db.query(
+            'UPDATE users SET risk_level_encrypted = ?, updated_at = NOW() WHERE id = ?',
+            [tripleEncryptor.encrypt(authResult.riskLevel), authResult.userId]
+        );
+
+        await this.logUserAction('USER_LOGIN_SUCCESS', {
+            userId: authResult.userId, usernameHash, ipAddress: ip, riskLevel: authResult.riskLevel,
+            authMethods: authResult.amr, encryptionVersion: this.getCurrentEncryptionVersion()
+        });
+
+        res.json({
+            success: true,
+            message: 'Autenticación exitosa',
+            ...this.tokenFields(authResult),
+            riskLevel: authResult.riskLevel,
+            authMethods: authResult.amr,
+            encryptionVersion: this.getCurrentEncryptionVersion()
+        });
+    }
+
+    // token = JWT de acceso (corto); refreshToken = para pedir otro sin volver a iniciar sesión (POST /api/auth/refresh)
+    tokenFields(result) {
+        return {
+            token: result.token,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt,
+            expiresIn: result.expiresIn,
+            refreshExpiresAt: result.refreshExpiresAt,
+            sessionExpiresAt: result.sessionExpiresAt
+        };
+    }
+
+    // Renueva el token de acceso con el refresh token (que rota). Sin sesión previa: el refresh ES la credencial.
+    async refresh(req, res) {
+        const ip = normalizeIp(req.ip);
+        try {
+            const result = await secureAuthService.refreshSession(req.body.refreshToken, this.deviceContext(req, ip));
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, ...this.tokenFields(result), authMethods: result.amr, riskLevel: result.riskLevel });
+        } catch (error) {
+            if (error instanceof AuthError) {
+                res.set('Cache-Control', 'no-store');
+                return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+            }
+            console.error('❌ Error renovando sesión:', error.code || error.message);
             res.status(500).json({ success: false, message: 'Error interno del servidor' });
         }
+    }
+
+    // Sesiones abiertas del usuario (dispositivo, país, último uso) para que reconozca las que no son suyas
+    async listSessions(req, res) {
+        try {
+            const sessions = await secureAuthService.listSessions(req.user.id, req.user.sessionId);
+            res.json({ success: true, sessions });
+        } catch (error) {
+            console.error('❌ Error listando sesiones:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    async revokeSession(req, res) {
+        try {
+            const closed = await secureAuthService.revokeSession(req.user.id, req.validated.params.id, 'user_revoked');
+            if (!closed) return res.status(404).json({ success: false, message: 'Sesión no encontrada', code: 'NOT_FOUND' });
+            await events.record({ type: 'SESSION_REVOKED', severity: 'info', req, userId: req.user.id, details: { sessionId: req.validated.params.id } });
+            res.json({ success: true, message: 'Sesión cerrada' });
+        } catch (error) {
+            console.error('❌ Error cerrando la sesión:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    // "Cerrar todas las sesiones": la actual incluida, salvo que se pida conservarla con { keepCurrent: true }
+    async logoutAll(req, res) {
+        try {
+            const keepCurrent = req.body?.keepCurrent === true;
+            const closed = await secureAuthService.revokeAllSessions(req.user.id, {
+                exceptSessionId: keepCurrent ? req.user.sessionId : null, reason: 'user_logout_all'
+            });
+            await events.record({ type: 'LOGOUT_ALL', severity: 'info', req, userId: req.user.id, details: { closed, keepCurrent } });
+            res.json({ success: true, message: `Se cerraron ${closed} sesión(es)`, closed, keptCurrent: keepCurrent });
+        } catch (error) {
+            console.error('❌ Error cerrando todas las sesiones:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    async failedAuth(res, error, { usernameHash, ip, where }) {
+        // Errores previstos (credenciales, bloqueo, MFA): mensaje y código estables
+        if (error instanceof AuthError) {
+            await this.logUserAction('USER_LOGIN_FAILED', { usernameHash, ipAddress: ip, error: error.code });
+
+            if (error.retryAfter) res.set('Retry-After', String(error.retryAfter));
+            return res.status(error.status).json({
+                success: false,
+                message: error.message,
+                code: error.code,
+                ...(error.retryAfter && { retryAfter: error.retryAfter })
+            });
+        }
+
+        // Cualquier otro error es nuestro: se registra, pero al cliente NO se le cuenta el detalle
+        console.error(`❌ Error en ${where}:`, error.code || error.message);
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+
+    // ------------------------------------------------------------------ MFA (requiere sesión)
+
+    async mfaStatus(req, res) {
+        res.json({ success: true, mfa: await mfaService.status(req.user.id) });
+    }
+
+    async mfaSetup(req, res) {
+        try {
+            const setup = await mfaService.beginSetup(req.user.id, req.user.username);
+            await this.logUserAction('MFA_SETUP_STARTED', { userId: req.user.id, ipAddress: normalizeIp(req.ip) });
+            res.json({
+                success: true,
+                message: 'Escanea el QR con tu app de autenticación y confirma con POST /api/auth/mfa/enable',
+                ...setup
+            });
+        } catch (error) {
+            this.mfaFailure(res, error);
+        }
+    }
+
+    async mfaEnable(req, res) {
+        try {
+            const { recoveryCodes } = await mfaService.enable(req.user.id, req.body.otp);
+            await this.logUserAction('MFA_ENABLED', { userId: req.user.id, ipAddress: normalizeIp(req.ip) });
+            await events.record({ type: 'MFA_ENABLED', severity: 'info', req, userId: req.user.id });
+            res.json({
+                success: true,
+                message: 'Autenticación en dos pasos activada. Guarda estos códigos de recuperación: no se volverán a mostrar.',
+                recoveryCodes
+            });
+        } catch (error) {
+            this.mfaFailure(res, error);
+        }
+    }
+
+    // Desactivar y regenerar códigos exigen contraseña Y un segundo factor válido: una sesión robada no basta
+    async requireStrongReauth(req) {
+        const { password, otp, recoveryCode } = req.body;
+        if (!(await mfaService.passwordMatches(req.user.id, password))) {
+            throw new MfaError('INVALID_CREDENTIALS', 'Credenciales inválidas', 401);
+        }
+        if (!(await mfaService.verify(req.user.id, { otp, recoveryCode })).ok) {
+            throw new MfaError('INVALID_OTP', 'Código incorrecto', 401);
+        }
+    }
+
+    async mfaDisable(req, res) {
+        try {
+            await this.requireStrongReauth(req);
+            await mfaService.disable(req.user.id);
+            await this.logUserAction('MFA_DISABLED', { userId: req.user.id, ipAddress: normalizeIp(req.ip) });
+            await events.record({ type: 'MFA_DISABLED', severity: 'medium', riskScore: 30, req, userId: req.user.id });
+            res.json({ success: true, message: 'Autenticación en dos pasos desactivada' });
+        } catch (error) {
+            this.mfaFailure(res, error);
+        }
+    }
+
+    async mfaRegenerateCodes(req, res) {
+        try {
+            await this.requireStrongReauth(req);
+            const recoveryCodes = await mfaService.regenerateRecoveryCodes(req.user.id);
+            await events.record({ type: 'MFA_RECOVERY_CODES_REGENERATED', severity: 'low', req, userId: req.user.id });
+            res.json({ success: true, recoveryCodes, message: 'Los códigos anteriores ya no sirven' });
+        } catch (error) {
+            this.mfaFailure(res, error);
+        }
+    }
+
+    mfaFailure(res, error) {
+        if (error instanceof MfaError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error('❌ Error en MFA:', error.code || error.message);
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 
     async getProfile(req, res) {
@@ -267,19 +550,7 @@ class AuthController {
 
     async logout(req, res) {
         try {
-            // Invalidar sesión
-            const db = require('../../config/database');
-            const authHeader = req.headers.authorization;
-
-            if (authHeader && authHeader.startsWith('Bearer ')) {
-                const token = authHeader.substring(7);
-                const tokenHash = secureAuthService.hashToken(token);
-
-                await db.query(
-                    'UPDATE user_sessions SET expires_at = NOW() WHERE jwt_token_hash = ?',
-                    [tokenHash]
-                );
-            }
+            await secureAuthService.revokeSession(req.user.id, req.user.sessionId, 'user_logout');
 
             // Log del logout
             await this.logUserAction('USER_LOGOUT', {
@@ -382,7 +653,8 @@ class AuthController {
             'USER_PROFILE_ACCESS': 'low',
             'USER_REGISTRATION_ERROR': 'medium',
             'USER_LOGOUT_ERROR': 'medium',
-            'USER_PROFILE_ERROR': 'medium'
+            'USER_PROFILE_ERROR': 'medium',
+            'MFA_DISABLED': 'medium'
         };
 
         return severityMap[action] || 'low';

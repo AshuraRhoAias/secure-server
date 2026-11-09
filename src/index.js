@@ -76,11 +76,17 @@ const secureCommunications = require('./services/secure-communications.service')
 // Importar tareas programadas
 const scheduleKeyRotation = require('./tasks/scheduleKeyRotation');
 const housekeeping = require('./tasks/securityHousekeeping');
+const alertsService = require('./security/alerts.service');
+const leader = require('./tasks/leader');
+const tracing = require('./observability/tracing');
+const metrics = require('./observability/metrics');
 
 class SecureServer {
     constructor() {
         this.app = express();
         this.port = process.env.PORT || 3000;
+        this.shuttingDown = false;
+        this.readiness = { at: 0, ok: false };
         this.initializeServer();
     }
 
@@ -208,6 +214,13 @@ class SecureServer {
         this.configureTrustProxy();
         this.app.disable('x-powered-by');
 
+        // Durante el cierre ordenado cada respuesta cierra su conexión: el cliente (o el balanceador) se reconecta a otra instancia
+        this.app.use((req, res, next) => { if (this.shuttingDown) res.set('Connection', 'close'); next(); });
+
+        // Observabilidad primero, para que mida y correlacione TODO (incluidos los rechazos de las capas siguientes)
+        this.app.use(tracing.middleware());
+        this.app.use(metrics.httpMiddleware());
+
         // Middlewares de seguridad básicos
         this.app.use(helmet({
             contentSecurityPolicy: {
@@ -230,14 +243,19 @@ class SecureServer {
             credentials: true,
             methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
             allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
-            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Disposition', 'Retry-After']
+            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Disposition', 'Retry-After', 'X-Request-Id']
         }));
 
         // Modo mantenimiento / claves desincronizadas: 503 a todo (ver src/maintenance/guard.js)
         this.app.use(maintenanceGuard.middleware());
 
         this.app.use(compression());
-        this.app.use(morgan('combined'));
+        // Registro de accesos. Cada línea es una escritura SÍNCRONA a stdout (en Linux, con pipes y archivos): a miles de peticiones por
+        // segundo cuesta. ACCESS_LOG=combined (por defecto) | errors (solo respuestas ≥ 400) | off
+        const accessLog = process.env.ACCESS_LOG || 'combined';
+        if (accessLog !== 'off') {
+            this.app.use(morgan('combined', accessLog === 'errors' ? { skip: (req, res) => res.statusCode < 400 } : {}));
+        }
         // Los JSON de esta API son pequeños (la subida de archivos va por multipart, con sus propios límites)
         const bodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
         this.app.use(express.json({ limit: bodyLimit }));
@@ -272,6 +290,15 @@ class SecureServer {
                     error: error.message
                 });
             }
+        });
+
+        // Preparación (readiness) para balanceadores/orquestadores: 200 solo si esta instancia puede atender de verdad (BD alcanzable,
+        // no en mantenimiento —eso ya lo corta el guardián con 503— y no cerrándose). /health sigue siendo "el proceso vive".
+        this.app.get('/health/ready', async (req, res) => {
+            res.set('Cache-Control', 'no-store');
+            if (this.shuttingDown) return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
+            if (!(await this.databaseReachable())) return res.status(503).json({ status: 'not_ready', reason: 'database' });
+            res.json({ status: 'ready', leader: leader.isLeader(), pid: process.pid, uptime: Math.round(process.uptime()) });
         });
 
         // Ruta de diagnóstico de variables de entorno (solo para desarrollo)
@@ -317,6 +344,21 @@ class SecureServer {
         });
 
         console.log('✅ Rutas configuradas');
+    }
+
+    // Una comprobación de BD cada 2 s como mucho, aunque el balanceador pregunte cien veces por segundo
+    async databaseReachable() {
+        const now = Date.now();
+        if (now - this.readiness.at < 2000) return this.readiness.ok;
+        let ok = true;
+        try { await database.query('SELECT 1'); } catch { ok = false; }
+        this.readiness = { at: now, ok };
+        return ok;
+    }
+
+    // Solo UNA instancia avisa del arranque/cierre (en cluster, el hueco 0; sin cluster, siempre)
+    isNotifier() {
+        return process.env.CLUSTER_WORKER_INDEX === undefined || process.env.CLUSTER_WORKER_INDEX === '0';
     }
 
     setupErrorHandling() {
@@ -385,19 +427,29 @@ class SecureServer {
             console.log('✅ Variables críticas cargadas correctamente');
             console.log('========================================\n');
 
-            housekeeping.start();
+            // Tareas periódicas: las ejecuta solo la instancia LÍDER (src/tasks/leader.js)
+            leader.start([
+                { name: 'limpieza', start: () => housekeeping.start(), stop: () => housekeeping.stop() },
+                { name: 'alertas', start: () => alertsService.start(), stop: () => alertsService.stop() },
+                { name: 'rotación programada', start: () => scheduleKeyRotation.start(), stop: () => scheduleKeyRotation.stop() }
+            ]).catch((error) => console.error('❌ Elección de líder:', error.message));
 
             // Enviar notificación de inicio (si hay canales configurados)
-            this.sendStartupNotification();
+            if (this.isNotifier()) this.sendStartupNotification();
         });
 
-        // Límites de conexión: cabeceras rápidas (contra slowloris) y tiempo total holgado para subidas grandes
-        this.server.headersTimeout = 30 * 1000;
+        // Límites de conexión: cabeceras rápidas (contra slowloris) y tiempo total holgado para subidas grandes.
+        // keepAliveTimeout MAYOR que el de inactividad de los balanceadores (ALB/nginx suelen usar 60 s): si el servidor cerrara antes,
+        // el balanceador reutilizaría una conexión ya cerrada y devolvería 502 de forma intermitente.
+        this.server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS) || 65 * 1000;
+        this.server.headersTimeout = Math.max(30 * 1000, this.server.keepAliveTimeout + 1000);
         this.server.requestTimeout = Number(process.env.REQUEST_TIMEOUT_MS) || 10 * 60 * 1000;
 
         // Manejo graceful de cierre
         process.on('SIGTERM', () => this.gracefulShutdown());
         process.on('SIGINT', () => this.gracefulShutdown());
+        // Con cluster: si el proceso principal desaparece, el worker no se queda huérfano
+        process.on('disconnect', () => this.gracefulShutdown());
     }
 
     async sendStartupNotification() {
@@ -416,35 +468,52 @@ class SecureServer {
         }
     }
 
+    // Cierre ordenado: deja de ser "ready", no acepta conexiones nuevas, deja terminar las peticiones en curso (cerrando las
+    // conexiones keep-alive ociosas), suelta el liderazgo y cierra el pool de la BD. Pasado el plazo, corta lo que quede.
     async gracefulShutdown() {
+        if (this.shuttingDown) return;
+        this.shuttingDown = true;
         console.log('\n🛑 Iniciando cierre graceful del servidor...');
+        const deadlineMs = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000;
+
+        const force = setTimeout(() => {
+            console.log('⚠️ Forzando cierre del servidor');
+            this.server?.closeAllConnections?.();
+            process.exit(1);
+        }, deadlineMs + 2000);
+        force.unref();
 
         try {
-            // Enviar notificación de cierre
-            const commStats = secureCommunications.getStats();
-            if (commStats.availableChannels > 0) {
-                await secureCommunications.sendSecureAlert({
-                    type: 'SYSTEM_SHUTDOWN',
-                    severity: 'info',
-                    details: 'Servidor iniciando proceso de cierre',
-                    timestamp: new Date().toISOString()
-                }, 'normal');
+            if (this.isNotifier()) {
+                const commStats = secureCommunications.getStats();
+                if (commStats.availableChannels > 0) {
+                    await Promise.race([
+                        secureCommunications.sendSecureAlert({
+                            type: 'SYSTEM_SHUTDOWN', severity: 'info',
+                            details: 'Servidor iniciando proceso de cierre', timestamp: new Date().toISOString()
+                        }, 'normal'),
+                        new Promise(resolve => setTimeout(resolve, 2000))
+                    ]).catch(() => {});
+                }
             }
 
-            housekeeping.stop();
+            const closed = new Promise(resolve => this.server ? this.server.close(resolve) : resolve());
+            // Las conexiones ociosas NO se cierran de inmediato: una recién aceptada cuya petición todavía viaja por la red también
+            // parece "ociosa", y cerrarla da un reset al cliente. Se espera un momento (los clientes que llegaron ya recibirán su
+            // respuesta con Connection: close) y después se barren las que sigan ociosas.
+            const drainMs = Math.min(Number(process.env.SHUTDOWN_DRAIN_MS) || 1500, deadlineMs);
+            let sweep;
+            const startSweep = setTimeout(() => { sweep = setInterval(() => this.server?.closeIdleConnections?.(), 250); }, drainMs);
+            const cut = setTimeout(() => this.server?.closeAllConnections?.(), deadlineMs);
+            await closed;
+            clearTimeout(startSweep);
+            if (sweep) clearInterval(sweep);
+            clearTimeout(cut);
 
-            // Cerrar servidor
-            this.server.close(() => {
-                console.log('✅ Servidor cerrado correctamente');
-                process.exit(0);
-            });
-
-            // Timeout de emergencia
-            setTimeout(() => {
-                console.log('⚠️ Forzando cierre del servidor');
-                process.exit(1);
-            }, 10000);
-
+            await leader.stop().catch(() => {});
+            await database.close().catch(() => {});
+            console.log('✅ Servidor cerrado correctamente');
+            process.exit(0);
         } catch (error) {
             console.error('❌ Error en cierre graceful:', error);
             process.exit(1);

@@ -1,0 +1,44 @@
+name: Fuzzing
+
+# Fuzzing con propiedades (fast-check) con MUCHAS más iteraciones que en el CI normal. Cada noche y a demanda.
+# Si una propiedad falla, el informe incluye la semilla (FUZZ_SEED) y el contraejemplo reducido para reproducirlo.
+
+on:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+    inputs:
+      runs: { description: 'Iteraciones por propiedad (FUZZ_RUNS)', default: '1500' }
+      seed: { description: 'Semilla para repetir una ejecución (opcional)', default: '' }
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env: { MARIADB_ROOT_PASSWORD: root }
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Preparar bases de datos de prueba
+        run: |
+          mysql -h127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE secure_platform_test_app CHARACTER SET utf8mb4;
+            CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_test_pw';
+            GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
+      - name: Fuzzing
+        env:
+          FUZZ_RUNS: ${{ github.event.inputs.runs || '1500' }}
+          FUZZ_SEED: ${{ github.event.inputs.seed }}
+        run: npm run test:fuzz

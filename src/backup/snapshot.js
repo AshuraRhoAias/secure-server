@@ -1,4 +1,4 @@
-const { ENCRYPTED_COLUMNS } = require('../crypto/encrypted-columns');
+const { ENCRYPTED_COLUMNS, isExternal } = require('../crypto/encrypted-columns');
 
 // Snapshot lógico de toda la base de datos.
 //
@@ -42,7 +42,7 @@ async function buildSnapshot(conn, { decryptCell }) {
         const pkIndex = columns.indexOf(ENCRYPTED_COLUMNS[table]?.primaryKey || 'id');
 
         const outRows = rows.map(row => row.map((value, i) => {
-            if (value !== null && encryptedIndexes.includes(i)) {
+            if (value !== null && encryptedIndexes.includes(i) && !isExternal(value)) {
                 try {
                     // La fila completa permite al descifrador legacy deducir la clave por fecha
                     const rowObject = Object.fromEntries(columns.map((c, idx) => [c, row[idx]]));
@@ -93,7 +93,7 @@ async function restoreSnapshot(conn, snapshot, { encryptCell, skip = DEFAULT_RES
 
             for (let i = 0; i < rows.length; i += INSERT_BATCH) {
                 const batch = rows.slice(i, i + INSERT_BATCH).map(row => row.map((value, idx) =>
-                    value !== null && encryptedIndexes.includes(idx) ? encryptCell(name, columns[idx], value) : decodeCell(value)
+                    value !== null && encryptedIndexes.includes(idx) && !isExternal(value) ? encryptCell(name, columns[idx], value) : decodeCell(value)
                 ));
                 await conn.query(`INSERT INTO ${q(name)} (${columns.map(q).join(', ')}) VALUES ?`, [batch]);
             }

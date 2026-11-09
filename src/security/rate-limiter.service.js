@@ -9,7 +9,18 @@ const { sqlInt } = require('../config/sql');
 // - Ventana deslizante aproximada: se pondera la ventana anterior según lo que falta de la actual.
 //   Así no se puede duplicar el límite disparando una ráfaga justo en el cambio de ventana.
 //
-// Coste: dos sentencias por comprobación sobre una clave primaria (sin escaneos).
+// Coste: UNA sentencia por comprobación (sobre la clave primaria). Truco: `hits = LAST_INSERT_ID(hits + 1)` hace que MariaDB
+// devuelva en `insertId` el contador ya incrementado de la ventana actual, sin una lectura aparte. La ventana ANTERIOR ya está
+// cerrada y no cambia (salvo escrituras rezagadas de otra instancia con el reloj algo atrasado), así que se lee una vez por
+// (sujeto, ventana) y se recuerda en memoria: es una caché de un valor casi inmutable, no estado de seguridad.
+
+const PREVIOUS_CACHE_MAX = 50_000;
+const previousCache = new Map(); // "scope\0subject\0windowStart" -> hits de esa ventana (ya cerrada)
+
+function remember(key, hits) {
+    if (previousCache.size >= PREVIOUS_CACHE_MAX) previousCache.clear(); // simple y acotado; se vuelve a llenar sola
+    previousCache.set(key, hits);
+}
 
 class RateLimiter {
     async hit(scope, subject, windowSec) {
@@ -17,25 +28,29 @@ class RateLimiter {
         const nowSec = Math.floor(Date.now() / 1000);
         const windowStart = nowSec - (nowSec % windowSeconds);
         const previousStart = windowStart - windowSeconds;
+        const previousKey = `${scope}\0${subject}\0${previousStart}`;
 
-        return db.withConnection(async (conn) => {
-            await conn.query(
-                `INSERT INTO rate_limit_counters (scope, subject, window_start, hits) VALUES (?, ?, ?, 1)
-                 ON DUPLICATE KEY UPDATE hits = hits + 1`,
-                [scope, subject, windowStart]
+        const [result] = await db.query(
+            `INSERT INTO rate_limit_counters (scope, subject, window_start, hits) VALUES (?, ?, ?, 1)
+             ON DUPLICATE KEY UPDATE hits = LAST_INSERT_ID(hits + 1)`,
+            [scope, subject, windowStart]
+        );
+        const current = Number(result.insertId) > 0 ? Number(result.insertId) : 1; // 0 = fila nueva = primer golpe
+
+        let previous = previousCache.get(previousKey);
+        if (previous === undefined) {
+            const [rows] = await db.query(
+                'SELECT hits FROM rate_limit_counters WHERE scope = ? AND subject = ? AND window_start = ?',
+                [scope, subject, previousStart]
             );
-            const [rows] = await conn.query(
-                'SELECT window_start, hits FROM rate_limit_counters WHERE scope = ? AND subject = ? AND window_start IN (?, ?)',
-                [scope, subject, windowStart, previousStart]
-            );
+            previous = rows[0] ? Number(rows[0].hits) : 0;
+            remember(previousKey, previous);
+        }
 
-            const current = rows.find(r => Number(r.window_start) === windowStart)?.hits || 0;
-            const previous = rows.find(r => Number(r.window_start) === previousStart)?.hits || 0;
-            const elapsed = (nowSec - windowStart) / windowSeconds;
-            const count = Math.ceil(current + previous * (1 - elapsed));
+        const elapsed = (nowSec - windowStart) / windowSeconds;
+        const count = Math.ceil(current + previous * (1 - elapsed));
 
-            return { count, current, windowStart, retryAfter: windowStart + windowSeconds - nowSec };
-        });
+        return { count, current, windowStart, retryAfter: windowStart + windowSeconds - nowSec };
     }
 
     // Borra contadores de ventanas ya irrelevantes
