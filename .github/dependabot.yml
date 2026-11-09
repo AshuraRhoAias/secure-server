@@ -13,3 +13,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+  # Imagen base del API (Dockerfile) e imágenes del montaje de varias réplicas (deploy/docker-compose.yml)
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule: { interval: weekly }

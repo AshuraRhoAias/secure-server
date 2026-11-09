@@ -301,7 +301,11 @@ class SecureServer {
             res.set('Cache-Control', 'no-store');
             if (this.shuttingDown) return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
             if (!(await this.databaseReachable())) return res.status(503).json({ status: 'not_ready', reason: 'database' });
-            res.json({ status: 'ready', leader: leader.isLeader(), pid: process.pid, uptime: Math.round(process.uptime()) });
+            res.json({
+                status: 'ready', leader: leader.isLeader(), pid: process.pid, uptime: Math.round(process.uptime()),
+                // Nombre de la máquina/contenedor: solo si se pide (HEALTH_EXPOSE_INSTANCE=true), p. ej. para ver el reparto entre réplicas
+                ...(process.env.HEALTH_EXPOSE_INSTANCE === 'true' && { instance: require('os').hostname() })
+            });
         });
 
         // Ruta de diagnóstico de variables de entorno (solo para desarrollo)

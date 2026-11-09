@@ -1,0 +1,24 @@
+# Nada de secretos, estado local, pruebas ni la interfaz web en la imagen del API
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.git
+.github
+node_modules
+web
+PruebasLinux
+benchmarks
+coverage
+storage
+data
+backups
+logs
+reports
+deploy
+docs
+test_*.js
+test_helpers
+*.md
+*.stackdump

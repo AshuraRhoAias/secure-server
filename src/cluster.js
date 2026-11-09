@@ -9,7 +9,7 @@
 //   - SIGTERM / SIGINT: cierre ordenado de todos (cada uno deja terminar sus peticiones), con plazo y después SIGKILL;
 //   - SIGHUP: REINICIO EN CALIENTE (rolling): sustituye los workers de uno en uno, esperando a que el nuevo esté escuchando antes de
 //     parar el viejo: se puede desplegar código o recargar claves sin cortar el servicio;
-//   - /api/metrics: agrega las métricas de TODOS los workers (prom-client AggregatorRegistry), vengan de donde vengan.
+//   - /api/metrics: agrega las métricas de TODOS los workers (@prometheus-io/client, antes prom-client: AggregatorRegistry), vengan de donde vengan.
 //
 // El principal NO carga secretos, base de datos ni código de la aplicación: es un supervisor mínimo (menos superficie).
 // Reparto de conexiones a la BD: cada worker abre su pool (DB_POOL_SIZE). Total = WEB_CONCURRENCY × DB_POOL_SIZE: debe quedar por debajo
@@ -28,7 +28,7 @@ const intEnv = (name, fallback) => { const n = Number(process.env[name]); return
 const workerCount = () => Math.min(intEnv('WEB_CONCURRENCY', os.availableParallelism ? os.availableParallelism() : os.cpus().length), MAX_WORKERS);
 
 function runPrimary() {
-    const { AggregatorRegistry } = require('prom-client');
+    const { AggregatorRegistry } = require('@prometheus-io/client');
     const aggregator = new AggregatorRegistry();
     const total = workerCount();
     const slots = new Map();           // hueco (0..N-1) -> worker vivo

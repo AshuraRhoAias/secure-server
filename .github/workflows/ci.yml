@@ -137,6 +137,37 @@ jobs:
         working-directory: web
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
+  # Escalabilidad horizontal REAL: 2 réplicas del API (contenedores) detrás de nginx, con MariaDB y MinIO (S3) compartidos.
+  # Construye la imagen de producción (Dockerfile) y comprueba reparto, un solo líder, archivos y límites compartidos y SSE.
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Secretos efímeros (aleatorios en cada ejecución)
+        run: |
+          {
+            for v in DB_ROOT_PASSWORD DB_PASSWORD BASE_SEED ENCRYPTION_SEED JWT_SEED MINIO_PASSWORD; do echo "$v=$(openssl rand -hex 24)"; done
+            echo "MINIO_USER=ci-minio"
+            echo "API_REPLICAS=2"
+            echo "RATE_LIMIT_GLOBAL_PER_MIN=1000000"
+          } > deploy/compose.env
+      - name: Construir y levantar
+        run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build
+      - name: Varias réplicas
+        run: node --test test_compose.js
+        env:
+          COMPOSE_ENV_FILE: deploy/compose.env
+      - name: Registros si algo falló
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
+      - name: Apagar
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env down -v
+
   production-install:
     runs-on: ubuntu-latest
     timeout-minutes: 10

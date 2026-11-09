@@ -59,14 +59,34 @@ function createTempWriteStream(name) {
     return fs.createWriteStream(tmpPath(name), { flags: 'wx', mode: 0o600 });
 }
 
+// Dónde viven los archivos ya confirmados: 'local' (FILES_DIR/files, por defecto) o 's3' (ver s3-store.js).
+// Las subidas en curso SIEMPRE se cifran a FILES_DIR/tmp (disco local de cada instancia) y se confirman con commit().
+const driver = () => (process.env.FILES_STORAGE === 's3' ? 's3' : 'local');
+const s3 = () => require('./s3-store');
+
 async function commit(name) {
+    if (driver() === 's3') {
+        await s3().put(assertName(name), tmpPath(name));
+        await removeTemp(name);
+        return;
+    }
     const target = finalPath(name);
     await fs.promises.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
     await fs.promises.rename(tmpPath(name), target);
 }
 
 const removeTemp = (name) => fs.promises.rm(tmpPath(name), { force: true });
-const removeFinal = (name) => fs.promises.rm(finalPath(name), { force: true });
+const removeFinal = (name) => (driver() === 's3' ? s3().remove(assertName(name)) : fs.promises.rm(finalPath(name), { force: true }));
+
+// Fuente de bytes CIFRADOS de un archivo confirmado, para file-cipher.decryptRange({ blob })
+function blob(name) {
+    if (driver() === 's3') return s3().blob(assertName(name));
+    const file = finalPath(name);
+    return {
+        size: async () => (await fs.promises.stat(file)).size,
+        stream: (from, to) => fs.createReadStream(file, { start: from, end: to, highWaterMark: 64 * 1024 + 16 })
+    };
+}
 
 // Subidas que se quedaron a medias (caída del proceso, cliente que desapareció...)
 async function purgeStaleTemp(maxAgeMs = 60 * 60 * 1000) {
@@ -95,5 +115,5 @@ async function purgeStaleTemp(maxAgeMs = 60 * 60 * 1000) {
 
 module.exports = {
     root, limits, newStorageName, tmpPath, finalPath, ensureDirs, createTempWriteStream,
-    commit, removeTemp, removeFinal, purgeStaleTemp, UUID
+    commit, removeTemp, removeFinal, purgeStaleTemp, blob, driver, UUID
 };

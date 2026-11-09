@@ -26,6 +26,11 @@ const INDEX = 'index.json';
 const UUID_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.enc$/;
 
 function backupRoot() {
+    // Con FILES_STORAGE=s3 los archivos no están en FILES_DIR: copiar esa carpeta daría una copia vacía que PARECE buena.
+    // En S3 las copias son del propio bucket (versionado + bloqueo de objetos o replicación a otra región/cuenta).
+    if (storage.driver() === 's3') {
+        throw new Error('FILES_STORAGE=s3: los archivos están en el bucket, no en FILES_DIR. Usa el versionado y la replicación del bucket (docs/SEGURIDAD.md §13)');
+    }
     const dir = process.env.FILES_BACKUP_DIR;
     if (!dir) throw new Error('Define FILES_BACKUP_DIR (directorio de destino de las copias)');
     const target = path.resolve(dir);

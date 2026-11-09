@@ -77,30 +77,36 @@ class EncryptStream extends Transform {
     }
 }
 
-async function readExactly(handle, length, position) {
-    const buffer = Buffer.allocUnsafe(length);
-    let offset = 0;
-    while (offset < length) {
-        const { bytesRead } = await handle.read(buffer, offset, length - offset, position + offset);
-        if (bytesRead === 0) throw new Error('FILE_CORRUPT');
-        offset += bytesRead;
-    }
-    return buffer;
-}
+// Fuente de bytes cifrados de un archivo en disco local. El almacenamiento S3 (storage.js) ofrece la misma forma:
+//   { size(): Promise<number>, stream(from, to): AsyncIterable<Buffer> }   (from/to inclusivos, en bytes del archivo CIFRADO)
+// Leer el tramo necesario como UN stream (y no bloque a bloque) importa en S3: una descarga es una petición, no una por bloque.
+const localBlob = (filePath) => ({
+    size: async () => (await fs.promises.stat(filePath)).size,
+    stream: (from, to) => fs.createReadStream(filePath, { start: from, end: to, highWaterMark: CHUNK + TAG })
+});
 
-// Descifra los bytes [start, end] (inclusive) del texto claro
-async function* decryptRange({ filePath, key, plainSize, start = 0, end = plainSize - 1 }) {
-    const stat = await fs.promises.stat(filePath);
-    if (stat.size !== cipherSize(plainSize)) throw new Error('FILE_CORRUPT'); // truncado o ampliado
+// Descifra los bytes [start, end] (inclusive) del texto claro. `filePath` (disco) o `blob` (cualquier fuente con size/stream).
+async function* decryptRange({ filePath, blob, key, plainSize, start = 0, end = plainSize - 1 }) {
+    const source = blob || localBlob(filePath);
+    if ((await source.size()) !== cipherSize(plainSize)) throw new Error('FILE_CORRUPT'); // truncado o ampliado
 
     if (plainSize === 0) return;
     const lastChunk = chunkCount(plainSize) - 1;
-    const handle = await fs.promises.open(filePath, 'r');
+    const firstWanted = Math.floor(start / CHUNK);
+    const lastWanted = Math.floor(end / CHUNK);
+    const sealedLength = (i) => (i === lastChunk ? plainSize - i * CHUNK : CHUNK) + TAG;
+    const from = firstWanted * (CHUNK + TAG);
+    const to = lastWanted * (CHUNK + TAG) + sealedLength(lastWanted) - 1;
 
-    try {
-        for (let i = Math.floor(start / CHUNK); i <= Math.floor(end / CHUNK); i++) {
-            const plainLength = i === lastChunk ? plainSize - i * CHUNK : CHUNK;
-            const sealed = await readExactly(handle, plainLength + TAG, i * (CHUNK + TAG));
+    let pending = Buffer.alloc(0);
+    let i = firstWanted;
+    for await (const piece of source.stream(from, to)) {
+        pending = pending.length ? Buffer.concat([pending, piece]) : Buffer.from(piece);
+        while (i <= lastWanted && pending.length >= sealedLength(i)) {
+            const length = sealedLength(i);
+            const plainLength = length - TAG;
+            const sealed = pending.subarray(0, length);
+            pending = pending.subarray(length);
 
             const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonceFor(i), { authTagLength: TAG });
             decipher.setAAD(aadFor(i === lastChunk));
@@ -112,13 +118,13 @@ async function* decryptRange({ filePath, key, plainSize, start = 0, end = plainS
                 throw new Error('FILE_CORRUPT'); // la autenticación del bloque falló
             }
 
-            const from = i === Math.floor(start / CHUNK) ? start - i * CHUNK : 0;
-            const to = i === Math.floor(end / CHUNK) ? end - i * CHUNK + 1 : plain.length;
-            yield plain.subarray(from, to);
+            const sliceFrom = i === firstWanted ? start - i * CHUNK : 0;
+            const sliceTo = i === lastWanted ? end - i * CHUNK + 1 : plain.length;
+            yield plain.subarray(sliceFrom, sliceTo);
+            i++;
         }
-    } finally {
-        await handle.close();
     }
+    if (i <= lastWanted) throw new Error('FILE_CORRUPT'); // la fuente entregó menos bytes de los que dice su tamaño
 }
 
 const createDecryptStream = (options) => Readable.from(decryptRange(options), { objectMode: false });

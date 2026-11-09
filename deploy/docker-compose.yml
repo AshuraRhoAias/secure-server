@@ -1,0 +1,115 @@
+# Varias réplicas del API detrás de un balanceador, con la base de datos y el almacenamiento de archivos COMPARTIDOS.
+# Es el montaje con el que se prueba la escalabilidad horizontal en el CI (job "compose", test_compose.js) y sirve de punto de
+# partida para un despliegue. NO es una configuración de producción tal cual: falta TLS (balanceador y BD), secretos en un gestor
+# (aquí llegan por variables de entorno) y copias del bucket.
+#
+#   cp deploy/compose.env.example deploy/compose.env   # y rellena los secretos
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build --wait
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --scale api=4
+#
+# Piezas:
+#   mariadb  estado de seguridad, sesiones, cerrojo de líder: lo comparten todas las réplicas
+#   minio    almacenamiento S3 de los archivos cifrados (FILES_STORAGE=s3): cualquier réplica sirve cualquier archivo
+#   api      N réplicas (cada una con su cluster de WEB_CONCURRENCY procesos); UNA es líder de las tareas periódicas
+#   lb       nginx: reparto, X-Forwarded-For real, SSE sin búfer
+
+name: secure-server
+
+x-api-env: &api-env
+  NODE_ENV: production
+  TRUST_PROXY: '1'
+  WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_SSL: 'off'                       # red interna de Docker; en producción, TLS hacia la BD (DB_SSL=verify)
+  DB_FRAGMENT_1: mysql://secure:${DB_PASSWORD:?define DB_PASSWORD}@
+  DB_FRAGMENT_2: mariadb:3306
+  DB_FRAGMENT_3: /secure_platform
+  BASE_SEED: ${BASE_SEED:?define BASE_SEED}
+  ENCRYPTION_SEED: ${ENCRYPTION_SEED:?define ENCRYPTION_SEED}
+  JWT_SEED: ${JWT_SEED:?define JWT_SEED}
+  KEY_EPOCH: ${KEY_EPOCH:-E00000000T000000Z}
+  DISABLE_EMAIL_NOTIFICATIONS: 'true'
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+  FILES_STORAGE: s3
+  S3_BUCKET: secure-files
+  S3_ENDPOINT: http://minio:9000
+  S3_ALLOW_HTTP: 'true'               # red interna; en producción, https
+  S3_FORCE_PATH_STYLE: 'true'
+  S3_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${MINIO_USER:?define MINIO_USER}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD:?define MINIO_PASSWORD}
+  HEALTH_EXPOSE_INSTANCE: 'true'
+  RATE_LIMIT_GLOBAL_PER_MIN: ${RATE_LIMIT_GLOBAL_PER_MIN:-600}
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?define DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: secure_platform
+      MARIADB_USER: secure
+      MARIADB_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD}
+    volumes:
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:?define MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?define MINIO_PASSWORD}
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Crea el bucket (una vez) y termina
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - mc alias set local http://minio:9000 "$$MINIO_USER" "$$MINIO_PASSWORD" && mc mb --ignore-existing local/secure-files && mc version enable local/secure-files
+    environment:
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASSWORD: ${MINIO_PASSWORD}
+
+  api:
+    build: { context: .., dockerfile: Dockerfile }
+    environment: *api-env
+    depends_on:
+      mariadb: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+    read_only: true
+    tmpfs:
+      - /app/storage:uid=10001,gid=10001,mode=0700
+      - /app/data:uid=10001,gid=10001,mode=0700
+      - /app/backups:uid=10001,gid=10001,mode=0700
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+
+  lb:
+    image: nginx:1.28-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - '127.0.0.1:${LB_PORT:-8080}:8080'
+
+volumes:
+  db-data:
+  s3-data:

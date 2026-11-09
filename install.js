@@ -5,7 +5,7 @@
  * Al ejecutarlo pregunta en qué sistema se quiere instalar (Linux o Windows),
  * e instala todo lo necesario mostrando una barra de progreso.
  *
- * No añade dependencias: usa sólo módulos nativos de Node (>=18).
+ * No añade dependencias: usa sólo módulos nativos de Node (>=22; 18 y 20 ya no tienen soporte).
  *
  * Uso:
  *   node install.js                 # modo interactivo (pregunta el SO)
@@ -162,7 +162,7 @@ async function main() {
 
   // Validación de Node
   const major = parseInt(process.versions.node.split('.')[0], 10);
-  if (major < 18) { errline(`Se requiere Node >= 18 (tienes ${process.versions.node}).`); return 1; }
+  if (major < 22) { errline(`Se requiere Node >= 22 (tienes ${process.versions.node}).`); return 1; }
 
   // Construir la lista de pasos
   const steps = [];
