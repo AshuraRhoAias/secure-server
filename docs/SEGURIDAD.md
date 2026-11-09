@@ -300,6 +300,7 @@ Todas opcionales. Plantilla comentada en `.env.example`.
 | `INJECTION_STRIKES_TO_BLOCK` | `5` | Rechazos por inyección (10 min) antes de bloquear la IP |
 | `INJECTION_BODY_MODE` | `critical` | `critical` (rechaza solo en `INJECTION_BLOCK_PATHS`) · `block` (en todas) · `log` (solo registra); ver §4 y §18 |
 | `SCANNER_HITS_TO_BLOCK` / `AUTH_FAILURES_TO_BLOCK` | `5` / `30` | Umbrales de bloqueo |
+| `DISABLE_IP_BLOCKING` | — | `true` solo para pruebas de carga: quita bloqueos y límites (también los de login). **Con `NODE_ENV=production` el servidor no arranca** y el middleware lo ignora |
 | `MAX_FAILED_ATTEMPTS` / `LOCKOUT_WINDOW_SECONDS` | `5` / `900` | Bloqueo de cuenta |
 | `LOGIN_IP_FAILURES_TO_BLOCK` | `20` | Fallos de login desde una IP antes de bloquearla |
 | `ACCESS_TOKEN_MINUTES` / `REFRESH_IDLE_DAYS` / `SESSION_ABSOLUTE_DAYS` | `15` / `7` / `30` | Vida del JWT de acceso, inactividad máxima y tope absoluto de la sesión (§15). Sustituyen a `SESSION_TTL_HOURS` |
@@ -438,7 +439,7 @@ ENCRYPTION_SEED=kms:aws:AQICAHj...     # en vez del valor en claro
 
 | Proveedor (`KMS_PROVIDER`) | Qué es | Configuración |
 |---|---|---|
-| `file` | Clave de envoltura (KEK) en un archivo `0400` (secreto montado, systemd-creds, volumen aparte) | `KMS_KEK_FILE` |
+| `file` | Clave de envoltura (KEK) en un archivo `0400` (secreto montado, systemd-creds, volumen aparte). En Linux/macOS el arranque falla si otros usuarios pueden leerla; en **Windows** los bits de modo no reflejan las ACL de NTFS y no se comprueban: protégela con `icacls <kek> /inheritance:r /grant:r "<usuario-del-servicio>:R"` | `KMS_KEK_FILE` |
 | `vault` | HashiCorp Vault, motor Transit | `VAULT_ADDR` (https en producción), `VAULT_TOKEN`/`VAULT_TOKEN_FILE`, `VAULT_TRANSIT_KEY`, `VAULT_NAMESPACE` |
 | `aws` | AWS KMS (clave simétrica; con CloudHSM si así se configura en AWS) | `KMS_KEY_ID`, `AWS_REGION`, credenciales AWS estándar; `KMS_ENDPOINT` opcional |
 

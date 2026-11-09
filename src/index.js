@@ -134,6 +134,9 @@ class SecureServer {
         try {
             console.log('🔍 Validando configuración...');
 
+            // Un .env de pruebas de carga copiado a producción no debe dejar el login sin límites
+            protectionMiddleware.assertProtectionBypassAllowed();
+
             // Mostrar información de entorno
             console.log(`   Entorno: ${process.env.NODE_ENV || 'development'}`);
             console.log(`   Puerto: ${this.port}`);

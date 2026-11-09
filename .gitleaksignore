@@ -6,3 +6,10 @@
 # antiguo (que sigue en el historial del PR) en vez de reescribir historia.
 14623a76133905fe361711e1feb421453de6a75c:.github/workflows/security.yml:generic-api-key:111
 14623a76133905fe361711e1feb421453de6a75c:.github/workflows/security.yml:generic-api-key:113
+#
+# web/e2e-support/harness.cjs y ci.yml (commit 600be88): WEB_SESSION_SECRET literal de las pruebas e2e de la
+# interfaz web. Solo cifraba las cookies de un servidor de pruebas efímero; el commit e938a7f lo sustituyó por un
+# valor aleatorio generado en cada ejecución. Igual que arriba: se ignora el commit antiguo en vez de reescribir
+# historia. (Regla y líneas deducidas del commit; si gitleaks informa otro fingerprint, copiar el de su resumen.)
+600be887ea4f0e6344ac691913a3576d8fb00ce0:web/e2e-support/harness.cjs:generic-api-key:60
+600be887ea4f0e6344ac691913a3576d8fb00ce0:.github/workflows/ci.yml:generic-api-key:119

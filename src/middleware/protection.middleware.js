@@ -47,6 +47,19 @@ const isCriticalPath = (path, criticalPaths) => {
 
 const SCANNER_PATH = /(?:^|\/)\.(?:env|git|svn|hg|aws|ssh|ds_store|htaccess|htpasswd)\b|wp-(?:admin|login|content|includes)|xmlrpc\.php|phpmyadmin|cgi-bin|\.(?:php\d?|asp|aspx|jsp|cgi)$|\/(?:actuator|manager\/html|solr|boaform)(?:\/|$)/i;
 
+// DISABLE_IP_BLOCKING=true desactiva TODA la protección por IP (bloqueos, límites globales y los de login/registro):
+// solo existe para medir carga pura (benchmarks/). En producción se ignora aquí y además el servidor se niega a arrancar
+// (assertProtectionBypassAllowed, llamado desde src/index.js), para que un .env de pruebas copiado a producción no deje
+// el login sin límite de intentos.
+const isProduction = () => process.env.NODE_ENV === 'production';
+const protectionBypassed = () => process.env.DISABLE_IP_BLOCKING === 'true' && !isProduction();
+
+function assertProtectionBypassAllowed() {
+    if (process.env.DISABLE_IP_BLOCKING === 'true' && isProduction()) {
+        throw new Error('DISABLE_IP_BLOCKING=true no está permitido con NODE_ENV=production: desactiva el bloqueo de IP y los límites de login. Quítalo del entorno de producción.');
+    }
+}
+
 const unavailable = (res) => res.status(503).json({
     success: false,
     message: 'Servicio temporalmente no disponible',
@@ -58,8 +71,8 @@ class ProtectionMiddleware {
         return async (req, res, next) => {
             this.addSecurityHeaders(req, res);
 
-            // Bypass explícito para pruebas de carga. Por defecto DESACTIVADO.
-            if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
+            // Bypass explícito para pruebas de carga. Por defecto DESACTIVADO y nunca en producción.
+            if (protectionBypassed()) return next();
 
             // /health y /health/ready: las sondas de un balanceador no se cuentan ni se limitan (y /health no toca la BD)
             if (req.path === '/health' || req.path === '/health/ready') return next();
@@ -175,7 +188,7 @@ class ProtectionMiddleware {
     //   router.post('/', protection.limit({ scope: 'upload', limit: 20, key: req => `u:${req.user.id}` }), ...)
     limit({ scope, limit, windowSec = 60, key = (req) => ipSubject(req.ip), code = 'RATE_LIMITED', message = 'Demasiadas solicitudes' }) {
         return async (req, res, next) => {
-            if (process.env.DISABLE_IP_BLOCKING === 'true') return next();
+            if (protectionBypassed()) return next();
 
             try {
                 const max = typeof limit === 'function' ? limit() : limit;
@@ -231,3 +244,5 @@ class ProtectionMiddleware {
 
 module.exports = new ProtectionMiddleware();
 module.exports.isCriticalPath = isCriticalPath;
+module.exports.protectionBypassed = protectionBypassed;
+module.exports.assertProtectionBypassAllowed = assertProtectionBypassAllowed;

@@ -214,6 +214,16 @@ itDb('códigos de recuperación: valen una vez, se descuentan y quedan registrad
     assert.strictEqual(trail[0].n, 2);
 });
 
+itDb('otp y recoveryCode a la vez se rechazan (no se elige uno en silencio) y no gastan el código de recuperación', async () => {
+    const user = await userWithMfa();
+    const [code] = user.recoveryCodes;
+    const both = await loginStep2((await loginStep1(user)).body.mfaToken, { otp: nextStepCode(user.secret), recoveryCode: code }, user.ip);
+    assert.strictEqual(both.status, 401);
+    const [left] = await db.query('SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL', [user.userId]);
+    assert.strictEqual(left[0].n, 10, 'el código de recuperación sigue sin usar');
+    assert.strictEqual((await loginStep2((await loginStep1(user)).body.mfaToken, { recoveryCode: code }, user.ip)).status, 200, 'y sigue valiendo solo');
+});
+
 itDb('retos manipulados, de otra clave o caducados → 401 INVALID_MFA_TOKEN', async () => {
     const user = await userWithMfa();
     const credentialBuilder = require('./src/config/credential-builder');

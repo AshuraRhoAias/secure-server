@@ -30,7 +30,7 @@
     "test:rotation": "node --test test_rotation.js",
     "check-system": "node -e \"require('./src/middleware/serverCheck.middleware').performAsyncCheck()\"",
     "security-audit": "node scripts/securityAudit.js",
-    "health-check": "node -e \"console.log('Sistema funcionando'); process.exit(0)\"",
+    "health-check": "node scripts/healthCheck.js",
     "test:security": "node --test test_security.js",
     "test:files": "node --test test_files.js",
     "test:all": "node --test --test-concurrency=1 test_api.js test_icmp.js test_rotation.js test_security.js test_mfa.js test_sessions.js test_rbac.js test_webauthn.js test_sso.js test_saml.js test_kms.js test_kms_files.js test_files.js test_sanitize.js test_ops.js test_scale.js test_av.js test_files_backup.js test_fuzz.js",

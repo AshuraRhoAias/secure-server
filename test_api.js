@@ -354,3 +354,51 @@ test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no 
     assert.deepStrictEqual([...implemented].filter(r => !documented.has(r)), [], 'rutas sin documentar en docs/openapi.json');
     assert.deepStrictEqual([...documented].filter(r => !implemented.has(r)), [], 'rutas documentadas que no existen');
 });
+
+// ---------- MFA: exactamente un factor y de tipo texto ----------
+test('mfa.verify: sin factor, con los dos a la vez o con tipos no textuales → no válido y sin tocar la BD', async () => {
+    const mfa = require('./src/security/mfa.service');
+    const originalQuery = fakeDb.query;
+    let queries = 0;
+    fakeDb.query = async (...args) => { queries++; return originalQuery.apply(fakeDb, args); };
+    try {
+        for (const input of [{}, undefined, { otp: '123456', recoveryCode: 'AAAA-BBBB-CCCC-DDDD' }, { otp: 123456 }, { recoveryCode: ['AAAA-BBBB-CCCC-DDDD'] }, { otp: '', recoveryCode: '' }]) {
+            assert.deepStrictEqual(await mfa.verify(1, input), { ok: false }, JSON.stringify(input));
+        }
+        assert.strictEqual(queries, 0, 'se rechaza antes de consultar nada');
+    } finally { fakeDb.query = originalQuery; }
+});
+
+// ---------- Bypass de pruebas de carga (DISABLE_IP_BLOCKING) ----------
+test('DISABLE_IP_BLOCKING: nunca en producción (el servidor no arranca y el middleware lo ignora)', async () => {
+    const protection = require('./src/middleware/protection.middleware');
+    const saved = { NODE_ENV: process.env.NODE_ENV, DISABLE_IP_BLOCKING: process.env.DISABLE_IP_BLOCKING };
+    const set = (env) => Object.entries(env).forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
+    try {
+        set({ NODE_ENV: 'production', DISABLE_IP_BLOCKING: 'true' });
+        assert.throws(() => protection.assertProtectionBypassAllowed(), /no está permitido con NODE_ENV=production/);
+        assert.strictEqual(protection.protectionBypassed(), false, 'en producción el middleware no se salta la protección');
+
+        // Con el bypass ignorado, limit() consulta el limitador: si este falla responde 503 (falla cerrado), no deja pasar
+        let passed = false;
+        const res = { statusCode: 0, status(c) { this.statusCode = c; return this; }, json() { return this; }, set() { return this; } };
+        const rateLimiter = require('./src/security/rate-limiter.service');
+        const originalHit = rateLimiter.hit;
+        rateLimiter.hit = async () => { throw new Error('limitador caído'); };
+        try {
+            await protection.limit({ scope: 'login', limit: 10 })({ ip: '198.51.100.7' }, res, () => { passed = true; });
+        } finally { rateLimiter.hit = originalHit; }
+        assert.strictEqual(passed, false);
+        assert.strictEqual(res.statusCode, 503);
+
+        set({ NODE_ENV: 'test', DISABLE_IP_BLOCKING: 'true' });
+        assert.doesNotThrow(() => protection.assertProtectionBypassAllowed());
+        assert.strictEqual(protection.protectionBypassed(), true, 'fuera de producción sigue sirviendo para los benchmarks');
+
+        set({ NODE_ENV: 'production', DISABLE_IP_BLOCKING: undefined });
+        assert.doesNotThrow(() => protection.assertProtectionBypassAllowed());
+        assert.strictEqual(protection.protectionBypassed(), false);
+    } finally {
+        set(saved);
+    }
+});
