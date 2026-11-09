@@ -8,7 +8,16 @@ import { useApi } from '@/hooks/useApi';
 import { apiCall } from '@/lib/client';
 import { dateTime, duration } from '@/lib/format';
 
-interface Status { server: { uptime: number; nodeVersion: string; platform: string; environment: string }; security: Record<string, unknown>; encryption: unknown; protection: unknown; timestamp: string }
+interface Worker { pid: number; slot: number | null; uptimeSeconds?: number; rssMb?: number; heapUsedMb?: number; leader?: boolean; shuttingDown?: boolean; open?: boolean; streams?: number; unresponsive?: boolean }
+interface ClusterInfo { mode: 'single' | 'cluster'; primaryPid?: number; workers: Worker[]; missing: number | null; error?: string }
+interface Status { server: { uptime: number; nodeVersion: string; platform: string; environment: string }; security: Record<string, unknown>; encryption: unknown; protection: unknown; cluster?: ClusterInfo; timestamp: string }
+
+function WorkerState({ w }: { w: Worker }) {
+  if (w.unresponsive) return <Badge tone="high">sin respuesta</Badge>;
+  if (w.shuttingDown) return <Badge tone="medium">cerrándose</Badge>;
+  if (w.open === false) return <Badge tone="medium">mantenimiento</Badge>;
+  return <Badge tone="ok">atendiendo</Badge>;
+}
 interface Rotation { keys: Record<string, unknown>; guard: { maintenance?: boolean; outOfSync?: boolean } & Record<string, unknown>; lastRotation: Record<string, unknown> | null; backups: { name: string; epoch: string; createdAt: string; bytes: number }[] }
 
 export default function SystemPage() {
@@ -38,7 +47,7 @@ export default function SystemPage() {
         <div className="grid two">
           <Card title="Servidor">
             <dl className="kv"><dt>Entorno</dt><dd><Badge tone={s.server.environment === 'production' ? 'ok' : 'medium'}>{s.server.environment}</Badge></dd><dt>Activo</dt><dd>{duration(s.server.uptime)}</dd><dt>Node</dt><dd>{s.server.nodeVersion} · {s.server.platform}</dd><dt>Leído</dt><dd>{dateTime(s.timestamp)}</dd></dl>
-            <p className="muted">Con varios procesos esta lectura es de UNO de ellos (el que atendió la petición).</p>
+            <p className="muted">Entorno, versión y tiempo activo del proceso que atendió esta petición; todos los procesos, abajo.</p>
           </Card>
           <Card title="Operaciones" >
             <div className="stack">
@@ -47,6 +56,26 @@ export default function SystemPage() {
               <p className="muted">La rotación de claves no se lanza desde aquí: <code>npm run rotate-keys</code> en el servidor, con confirmación.</p>
             </div>
           </Card>
+          {s.cluster ? (
+            <Card title={s.cluster.mode === 'cluster' ? `Procesos del cluster (${s.cluster.workers.length})` : 'Proceso (sin cluster)'}>
+              {s.cluster.error ? <Banner tone="warn">{s.cluster.error}</Banner> : null}
+              {s.cluster.missing ? <Banner tone="warn">{s.cluster.missing} proceso(s) no respondieron a tiempo.</Banner> : null}
+              <div className="table-wrap"><table>
+                <caption className="visually-hidden">Estado de cada proceso del servidor</caption>
+                <thead><tr><th scope="col">Hueco</th><th scope="col">PID</th><th scope="col">Estado</th><th scope="col">Líder</th><th scope="col" className="num">Activo</th><th scope="col" className="num">Memoria</th><th scope="col" className="num">En vivo</th></tr></thead>
+                <tbody>{s.cluster.workers.map(w => (
+                  <tr key={w.pid}>
+                    <td>{w.slot ?? '—'}</td><td className="mono">{w.pid}</td><td><WorkerState w={w} /></td>
+                    <td>{w.leader ? <Badge tone="ok">líder</Badge> : '—'}</td>
+                    <td className="num">{w.uptimeSeconds != null ? duration(w.uptimeSeconds) : '—'}</td>
+                    <td className="num">{w.rssMb != null ? `${w.rssMb} MB` : '—'}</td>
+                    <td className="num">{w.streams ?? '—'}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+              <p className="muted">«Líder»: el único proceso que ejecuta las tareas periódicas (limpieza, alertas, rotación programada). «En vivo»: conexiones abiertas del panel.</p>
+            </Card>
+          ) : null}
           <Card title="Seguridad"><JsonView value={s.security} /></Card>
           <Card title="Protección y cifrado"><JsonView value={{ proteccion: s.protection, cifrado: s.encryption }} /></Card>
         </div>

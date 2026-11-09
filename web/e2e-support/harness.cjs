@@ -37,8 +37,8 @@ function launch(name, command, args, { env, cwd }) {
   return { name, child, logs, stop: () => new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', resolve); child.kill('SIGTERM'); setTimeout(() => child.kill('SIGKILL'), 8000).unref(); }) };
 }
 
-async function startApi(extraEnv = {}) {
-  const port = await freePort();
+async function startApi(extraEnv = {}, { port: fixedPort } = {}) {
+  const port = fixedPort || await freePort();
   // Directorio propio (mkdtemp, 0700): nada con nombre predecible en /tmp
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-e2e-'));
   const envFile = path.join(envDir, 'api.env');
@@ -51,8 +51,8 @@ async function startApi(extraEnv = {}) {
   return { ...proc, port, base: `http://127.0.0.1:${port}`, envFile, envDir };
 }
 
-async function startWeb(apiBase, extraEnv = {}) {
-  const port = await freePort();
+async function startWeb(apiBase, extraEnv = {}, { port: fixedPort } = {}) {
+  const port = fixedPort || await freePort();
   if (!fs.existsSync(path.join(WEB, '.next', 'BUILD_ID'))) throw new Error('Falta `npm run build` en web/ antes de las pruebas de extremo a extremo');
   const proc = launch('web', process.execPath, [path.join(WEB, 'node_modules/next/dist/bin/next'), 'start', '-p', String(port), '-H', '127.0.0.1'], {
     cwd: WEB,
@@ -76,4 +76,9 @@ function playwright() {
   try { return require('playwright'); } catch { return createRequire(path.join(WEB, 'package.json'))('playwright'); }
 }
 
-module.exports = { WEB, ROOT, helpers, totp, startApi, startWeb, db, playwright, sleep, filesDir, waitFor };
+// axe-core para Playwright (accesibilidad). Como Playwright, se instala en el CI con --no-save: no es dependencia del paquete.
+function axe() {
+  try { return require('@axe-core/playwright'); } catch { return createRequire(path.join(WEB, 'package.json'))('@axe-core/playwright'); }
+}
+
+module.exports = { WEB, ROOT, helpers, totp, startApi, startWeb, db, playwright, axe, sleep, filesDir, waitFor, freePort };

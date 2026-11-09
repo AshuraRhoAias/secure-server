@@ -171,3 +171,6 @@ coverage/
 # Interfaz web (web/): compilación y dependencias propias
 web/node_modules/
 web/.next/
+
+# Volcados de bash de Windows (Git Bash)
+*.stackdump

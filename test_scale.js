@@ -255,6 +255,18 @@ itDb('cluster: reparte entre procesos, un solo líder, métricas agregadas sin m
         const count = [...text.matchAll(/^secure_server_http_requests_total\{[^}]*route="\/health\/ready"[^}]*\} (\d+)/gm)].reduce((sum, m) => sum + Number(m[1]), 0);
         assert.ok(count >= 100, `peticiones contadas entre procesos: ${count}`);
 
+        // /api/system/status describe TODOS los procesos (el principal pregunta a cada worker), no solo el que atendió
+        const admin = await helpers.registerAndLogin(cluster.base, { ip: helpers.testIp() });
+        await db.query("UPDATE users SET role = 'admin' WHERE id = ?", [admin.userId]);
+        const status = await helpers.api(cluster.base, 'GET', '/api/system/status', { token: admin.token, ip: helpers.testIp() });
+        assert.strictEqual(status.status, 200, status.text);
+        const info = status.body.status.cluster;
+        assert.strictEqual(info.mode, 'cluster');
+        assert.strictEqual(info.missing, 0);
+        assert.deepStrictEqual(info.workers.map(w => w.pid).sort(), [...seen.keys()].sort(), 'los dos workers, con sus pid');
+        assert.strictEqual(info.workers.filter(w => w.leader).length, 1, 'un solo líder');
+        assert.ok(info.workers.every(w => w.open === true && w.shuttingDown === false && w.rssMb > 0));
+
         // Cierre ordenado: SIGTERM al supervisor → sale con 0, sin procesos huérfanos y el cerrojo de líder liberado
         const started = Date.now();
         cluster.child.kill('SIGTERM');

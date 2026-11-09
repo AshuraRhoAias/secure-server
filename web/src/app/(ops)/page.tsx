@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { BarChart, HBars } from '@/components/Charts';
 import { Badge, Banner, Card, Empty, Loading, Segmented, SeverityBadge, Stat, StatusBadge } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
+import { useLiveRefresh } from '@/components/Live';
 import { bytes, duration, number, relativeTime } from '@/lib/format';
 import type { Dashboard } from '@/lib/types';
 
@@ -13,7 +14,8 @@ const sumValues = (o: Record<string, number>) => Object.values(o).reduce((a, b) 
 
 export default function DashboardPage() {
   const [hours, setHours] = useState(24);
-  const { data, error, loading, reload } = useApi<{ dashboard: Dashboard }>(`/api/system/dashboard?hours=${hours}`, { refreshMs: 15_000 });
+  const { data, error, loading, reload } = useApi<{ dashboard: Dashboard }>(`/api/system/dashboard?hours=${hours}`, { refreshMs: 60_000 });
+  useLiveRefresh(['alerts-summary', 'alert', 'security-event'], reload, 5000);
   const d = data?.dashboard;
 
   return (

@@ -568,3 +568,24 @@ CREATE TABLE `saml_cache` (
   PRIMARY KEY (`cache_key`),
   KEY `idx_saml_cache_exp` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Entrega del login SSO a la interfaz web por código de un solo uso ligado al navegador (migración 017)
+CREATE TABLE `sso_handoffs` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `begin_hash` char(64) NOT NULL,
+  `provider` enum('oidc','saml') NOT NULL,
+  `challenge` char(43) NOT NULL,
+  `code_hash` char(64) DEFAULT NULL,
+  `payload_encrypted` longtext DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `expires_at` datetime NOT NULL,
+  `code_expires_at` datetime DEFAULT NULL,
+  `used_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_handoff_begin` (`begin_hash`),
+  UNIQUE KEY `uq_handoff_code` (`code_hash`),
+  KEY `idx_handoff_expires` (`expires_at`),
+  KEY `idx_handoff_user` (`user_id`),
+  CONSTRAINT `sso_handoffs_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,4 +1,4 @@
-import { mfaCookieName, cookieSecure, sessionCookieName } from './config';
+import { mfaCookieName, cookieSecure, sessionCookieName, ssoCookieName } from './config';
 import { seal, unseal } from './seal';
 
 // Lo que guarda la cookie de sesión (cifrada): los tokens del API y cuándo caducan.
@@ -12,18 +12,22 @@ export interface Session {
 }
 
 export interface MfaChallenge { token: string; u: string }
+// Login SSO en curso: verificador (solo en esta cookie cifrada) y proveedor
+export interface SsoStart { v: string; p: 'oidc' | 'saml' }
 
 const SESSION = 'session';
 const MFA = 'mfa';
+const SSO = 'sso';
 export const MFA_TTL_MS = 5 * 60_000;
+export const SSO_TTL_MS = 10 * 60_000;
 
 export interface CookieSpec {
   name: string;
   value: string;
-  options: { httpOnly: true; secure: boolean; sameSite: 'strict'; path: '/'; maxAge: number };
+  options: { httpOnly: true; secure: boolean; sameSite: 'strict' | 'lax'; path: '/'; maxAge: number };
 }
 
-const options = (maxAgeSeconds: number): CookieSpec['options'] => ({ httpOnly: true, secure: cookieSecure(), sameSite: 'strict', path: '/', maxAge: maxAgeSeconds });
+const options = (maxAgeSeconds: number, sameSite: 'strict' | 'lax' = 'strict'): CookieSpec['options'] => ({ httpOnly: true, secure: cookieSecure(), sameSite, path: '/', maxAge: maxAgeSeconds });
 
 export function sessionCookie(session: Session): CookieSpec {
   const ttl = Math.max(1000, session.se - Date.now());
@@ -44,6 +48,14 @@ export function readSession(value: string | undefined | null): Session | null {
 }
 
 export const readMfaChallenge = (value: string | undefined | null): MfaChallenge | null => unseal<MfaChallenge>(value, MFA);
+
+export const ssoCookie = (start: SsoStart): CookieSpec =>
+  ({ name: ssoCookieName(), value: seal(start, SSO, SSO_TTL_MS), options: options(SSO_TTL_MS / 1000, 'lax') });
+export const clearSsoCookie = (): CookieSpec => ({ name: ssoCookieName(), value: '', options: options(0, 'lax') });
+export function readSsoStart(value: string | undefined | null): SsoStart | null {
+  const start = unseal<SsoStart>(value, SSO);
+  return start && typeof start.v === 'string' && (start.p === 'oidc' || start.p === 'saml') ? start : null;
+}
 
 const toMs = (value: unknown, fallback: number): number => {
   const ms = typeof value === 'string' ? Date.parse(value) : NaN;

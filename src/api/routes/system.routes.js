@@ -81,6 +81,12 @@ router.get('/dashboard',
     validate.query({ hours: { type: 'integer', min: 1, max: 720, default: 24 } }),
     systemController.getDashboard
 );
+// Novedades en vivo (Server-Sent Events): eventos de seguridad, alertas nuevas y resumen de alertas. Ver src/observability/live-stream.js
+router.get('/stream',
+    allow('dashboard:read'),
+    validate.query({ minSeverity: { type: 'enum', values: ['info', 'low', 'medium', 'high', 'critical'], default: 'medium' } }),
+    require('../../observability/live-stream').handler
+);
 
 // Datos personales e incidentes (SOLO admin)
 router.get('/users/:id/export', allow('privacy:export'), protectionMiddleware.highSecurity(), idParam, systemController.exportUserData);

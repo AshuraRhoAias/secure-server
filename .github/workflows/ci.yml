@@ -81,7 +81,7 @@ jobs:
   # Interfaz web de operación (web/): tipos, pruebas unitarias del BFF, compilación y extremo a extremo con el API REAL + Chromium
   web:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       NEXT_TELEMETRY_DISABLED: '1'
     services:
@@ -120,10 +120,11 @@ jobs:
       - name: Dependencias de producción de la web sin vulnerabilidades altas
         run: npm audit --omit=dev --audit-level=high
         working-directory: web
-      - name: Chromium para Playwright
+      # Navegadores reales (Chromium, Firefox y WebKit) y axe-core para la prueba de accesibilidad: con --no-save, no son dependencias del paquete
+      - name: Navegadores de Playwright y axe-core
         run: |
-          npm install --no-save playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save playwright@1.56.1 @axe-core/playwright@4.10.1
+          npx playwright install --with-deps chromium firefox webkit
         working-directory: web
       - name: Base de datos de pruebas
         run: |

@@ -13,7 +13,7 @@ import { callApi, parseJson, refreshSession, type UpstreamResult } from './upstr
 // El navegador habla SOLO con esta aplicación (mismo origen, cookie httpOnly cifrada); esta aplicación habla con el API con el
 // Bearer. Resultado: los tokens no están al alcance del JavaScript de la página y no hay CORS que abrir.
 
-const json = (status: number, body: unknown, cookies: CookieSpec[] = [], extra: HeadersInit = {}): Response => {
+export const json = (status: number, body: unknown, cookies: CookieSpec[] = [], extra: HeadersInit = {}): Response => {
   const headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra });
   const response = new Response(JSON.stringify(body), { status, headers });
   for (const cookie of cookies) response.headers.append('Set-Cookie', serializeCookie(cookie));
@@ -21,12 +21,12 @@ const json = (status: number, body: unknown, cookies: CookieSpec[] = [], extra: 
 };
 
 export function serializeCookie({ name, value, options }: CookieSpec): string {
-  const parts = [`${name}=${value}`, `Path=${options.path}`, `Max-Age=${options.maxAge}`, 'HttpOnly', 'SameSite=Strict'];
+  const parts = [`${name}=${value}`, `Path=${options.path}`, `Max-Age=${options.maxAge}`, 'HttpOnly', options.sameSite === 'lax' ? 'SameSite=Lax' : 'SameSite=Strict'];
   if (options.secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-const cookieValue = (request: Request, name: string): string | undefined => {
+export const cookieValue = (request: Request, name: string): string | undefined => {
   const header = request.headers.get('cookie');
   if (!header) return undefined;
   for (const part of header.split(';')) {
@@ -107,13 +107,14 @@ export async function proxyData(request: Request, segments: string[], query: str
 }
 
 // ---------------------------------------------------------------- inicio de sesión
-interface CompleteResult { response: Response }
+export type Established = { ok: true; session: Session } | { ok: false; status: number; code: string; message: string };
 
-// Entrega tokens → comprueba que el usuario es ADMINISTRADOR (la interfaz es solo para ellos) → cookie de sesión
-async function completeLogin(request: Request, body: Record<string, unknown>): Promise<CompleteResult> {
+// Tokens del API → comprueba que el usuario es ADMINISTRADOR (la interfaz es solo para ellos). Si no lo es, cierra esa sesión en el API.
+// La usan el login con contraseña, el segundo factor (código o passkey) y el SSO.
+export async function establishSession(request: Request, body: Record<string, unknown>): Promise<Established> {
   const claims = typeof body.token === 'string' ? decodeAccessToken(body.token) : null;
   const session = claims ? sessionFromTokens(body, { u: claims.username, uid: claims.userId }) : null;
-  if (!session) return { response: json(502, { success: false, message: 'Respuesta inesperada del API', code: 'BAD_UPSTREAM' }) };
+  if (!session) return { ok: false, status: 502, code: 'BAD_UPSTREAM', message: 'Respuesta inesperada del API' };
 
   // dashboard:read es solo de admin: si lo permite, es admin (y si exige MFA y no se usó, lo dirá el API con 403 MFA_REQUIRED)
   const probe = await callApi('/api/system/dashboard', { method: 'GET', token: session.at, query: 'hours=1', headers: request.headers });
@@ -121,14 +122,22 @@ async function completeLogin(request: Request, body: Record<string, unknown>): P
     await callApi('/api/auth/logout', { method: 'POST', token: session.at, text: '{}', headers: request.headers }).catch(() => undefined);
     const code = parseJson(probe.body)?.code;
     if (probe.status === 403 && code === 'MFA_REQUIRED') {
-      return { response: json(403, { success: false, message: 'Los administradores necesitan autenticación en dos pasos: activa TOTP o una passkey', code: 'MFA_REQUIRED' }, [clearMfaCookie()]) };
+      return { ok: false, status: 403, code: 'MFA_REQUIRED', message: 'Los administradores necesitan autenticación en dos pasos: activa TOTP o una passkey' };
     }
-    return { response: json(403, { success: false, message: 'Esta interfaz es solo para administradores', code: 'NOT_ADMIN' }, [clearMfaCookie()]) };
+    return { ok: false, status: 403, code: 'NOT_ADMIN', message: 'Esta interfaz es solo para administradores' };
   }
-  return { response: json(200, { success: true, user: session.u, sessionExpiresAt: new Date(session.se).toISOString() }, [sessionCookie(session), clearMfaCookie()]) };
+  return { ok: true, session };
 }
 
-const upstreamError = (result: UpstreamResult): Response => {
+// Versión JSON (login con contraseña, segundo factor): cookie de sesión y fuera el reto de MFA
+export async function completeLogin(request: Request, body: Record<string, unknown>): Promise<Response> {
+  const outcome = await establishSession(request, body);
+  if (!outcome.ok) return json(outcome.status, { success: false, message: outcome.message, code: outcome.code }, [clearMfaCookie()]);
+  const { session } = outcome;
+  return json(200, { success: true, user: session.u, sessionExpiresAt: new Date(session.se).toISOString() }, [sessionCookie(session), clearMfaCookie()]);
+}
+
+export const upstreamError = (result: UpstreamResult): Response => {
   const body = parseJson(result.body);
   const status = result.status >= 400 && result.status < 600 ? result.status : 502;
   return json(status, {
@@ -155,10 +164,10 @@ export async function login(request: Request): Promise<Response> {
 
   if (body.mfaRequired === true && typeof body.mfaToken === 'string') {
     // El reto de MFA (5 min) no pasa por JavaScript: va a una cookie httpOnly cifrada
-    const methods = Array.isArray(body.methods) ? body.methods.filter((m): m is string => typeof m === 'string') : ['otp', 'recovery'];
+    const methods = Array.isArray(body.methods) ? body.methods.filter((m): m is string => typeof m === 'string') : ['totp', 'recovery'];
     return json(200, { success: true, mfaRequired: true, methods }, [mfaCookie({ token: body.mfaToken, u: username.slice(0, 64) })]);
   }
-  return (await completeLogin(request, body)).response;
+  return completeLogin(request, body);
 }
 
 export async function loginMfa(request: Request): Promise<Response> {
@@ -180,7 +189,7 @@ export async function loginMfa(request: Request): Promise<Response> {
 
   const body = parseJson(result.body);
   if (result.status !== 200 || !body) return upstreamError(result);
-  return (await completeLogin(request, body)).response;
+  return completeLogin(request, body);
 }
 
 export async function logout(request: Request): Promise<Response> {

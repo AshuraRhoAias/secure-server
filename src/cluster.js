@@ -49,6 +49,11 @@ function runPrimary() {
         worker.slot = slot;
         slots.set(slot, worker);
         worker.on('message', (message) => {
+            // Estado de todos los workers para /api/system/status (src/observability/cluster-status.js)
+            if (message?.type === 'secure-server:cluster-status') {
+                require('./observability/cluster-status').answerFromPrimary(worker, message.id, Object.values(cluster.workers || {}));
+                return;
+            }
             if (message?.type !== 'secure-server:metrics') return;
             aggregator.clusterMetrics()
                 .then(text => worker.isConnected() && worker.send({ type: 'secure-server:metrics:result', id: message.id, text }))

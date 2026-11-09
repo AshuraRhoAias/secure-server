@@ -16,6 +16,9 @@ export const cookieSecure = (): boolean =>
   process.env.WEB_COOKIE_SECURE ? process.env.WEB_COOKIE_SECURE === 'true' : process.env.NODE_ENV === 'production';
 export const sessionCookieName = (): string => (cookieSecure() ? '__Host-ops_session' : 'ops_session');
 export const mfaCookieName = (): string => (cookieSecure() ? '__Host-ops_mfa' : 'ops_mfa');
+// Verificador del login SSO en curso (10 min). SameSite=Lax a propósito: tiene que llegar en la navegación de VUELTA desde el
+// proveedor (otro sitio), que con Strict no la llevaría. Solo sirve junto con un código de un solo uso de 60 s.
+export const ssoCookieName = (): string => (cookieSecure() ? '__Host-ops_sso' : 'ops_sso');
 
 // Cuántos proxies de confianza hay DELANTE de esta aplicación (balanceador, CDN…). 0 = expuesta directamente: se ignora X-Forwarded-For
 export const trustedProxyHops = (): number => {

@@ -565,3 +565,146 @@ itDb('interruptor de emergencia: cerrar TODAS las sesiones exige la frase de con
     const [[event]] = await db.query("SELECT severity FROM security_events WHERE event_type = 'SESSIONS_REVOKED_ALL' ORDER BY id DESC LIMIT 1");
     assert.strictEqual(event.severity, 'critical');
 });
+
+// ============================================================================ novedades en vivo (SSE) y estado del cluster
+
+// Abre GET /api/system/stream y va leyendo eventos SSE hasta que `until(eventos)` diga basta (o se acabe el tiempo)
+async function openStream(user, { headers = {}, query = '' } = {}) {
+    const controller = new AbortController();
+    const res = await fetch(`${app.base}/api/system/stream${query}`, {
+        headers: { Authorization: `Bearer ${user.token}`, 'X-Forwarded-For': user.ip, Accept: 'text/event-stream', ...headers },
+        signal: controller.signal
+    });
+    const received = [];
+    let ended = false;
+    const reader = res.status === 200 ? res.body?.getReader() : null;
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const pump = (async () => {
+        if (!reader) { ended = true; return; }
+        try {
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let index;
+                while ((index = buffer.indexOf('\n\n')) >= 0) {
+                    const block = buffer.slice(0, index);
+                    buffer = buffer.slice(index + 2);
+                    const item = { event: 'message', data: null, id: null };
+                    for (const line of block.split('\n')) {
+                        if (line.startsWith('event: ')) item.event = line.slice(7);
+                        else if (line.startsWith('data: ')) item.data = JSON.parse(line.slice(6));
+                        else if (line.startsWith('id: ')) item.id = line.slice(4);
+                    }
+                    if (item.data !== null || item.event !== 'message') received.push(item);
+                }
+            }
+        } catch { /* abortado */ }
+        ended = true;
+    })();
+    const until = async (predicate, ms = 8000) => {
+        const deadline = Date.now() + ms;
+        while (Date.now() < deadline) {
+            const found = predicate(received);
+            if (found) return found;
+            if (ended) break;
+            await wait(50);
+        }
+        return predicate(received);
+    };
+    return { res, events: received, until, ended: () => ended, close: async () => { controller.abort(); await pump; } };
+}
+
+itDb('stream: solo admin con sesión; entrega eventos >= medium y alertas nuevas al momento, con resumen', async () => {
+    assert.strictEqual((await api(app.base, 'GET', '/api/system/stream', { ip: testIp() })).status, 401);
+    const plain = await roleUser('user');
+    assert.strictEqual((await call(plain, 'GET', '/api/system/stream')).status, 403);
+    const auditor = await roleUser('auditor');
+    assert.strictEqual((await call(auditor, 'GET', '/api/system/stream')).status, 403, 'dashboard:read es solo de admin');
+
+    await withEnv({ STREAM_POLL_MS: '250' }, async () => {
+        const stream = await openStream(admin);
+        try {
+            assert.strictEqual(stream.res.status, 200);
+            assert.match(stream.res.headers.get('content-type'), /^text\/event-stream/);
+            assert.match(stream.res.headers.get('cache-control'), /no-transform/);
+            assert.ok(await stream.until(e => e.find(x => x.event === 'hello')), 'hello');
+
+            const ip = testIp();
+            await events().record({ type: 'LIVE_TEST_LOW', severity: 'low', ip });
+            await events().record({ type: 'LIVE_TEST_HIGH', rule: 'LIVE_RULE', severity: 'high', ip, details: { secreto: 'no-debe-viajar' } });
+            const title = `Alerta en vivo ${crypto.randomBytes(3).toString('hex')}`;
+            await db.query("INSERT INTO security_alerts (rule, subject, dedupe_key, severity, title) VALUES ('LIVE_RULE', 'global', ?, 'critical', ?)", [`live:${title}`, title]);
+
+            const high = await stream.until(e => e.find(x => x.event === 'security-event' && x.data.type === 'LIVE_TEST_HIGH'));
+            assert.ok(high, 'el evento high llega');
+            assert.strictEqual(high.data.ip, ip);
+            assert.ok(!JSON.stringify(stream.events).includes('no-debe-viajar'), 'los details no viajan');
+            assert.match(high.id, /^e\d+\.a\d+$/);
+            const alert = await stream.until(e => e.find(x => x.event === 'alert' && x.data.title === title));
+            assert.ok(alert, 'la alerta nueva llega');
+            assert.strictEqual(alert.data.severity, 'critical');
+            assert.ok(await stream.until(e => e.find(x => x.event === 'alerts-summary' && x.data.critical >= 1)), 'resumen con la crítica');
+            assert.ok(!stream.events.some(x => x.data?.type === 'LIVE_TEST_LOW'), 'low no llega con el mínimo por defecto (medium)');
+        } finally { await stream.close(); }
+    });
+});
+
+itDb('stream: al reconectar con Last-Event-ID sigue desde ahí (sin perder ni repetir)', async () => {
+    await withEnv({ STREAM_POLL_MS: '250' }, async () => {
+        const first = await openStream(admin);
+        assert.ok(await first.until(e => e.find(x => x.event === 'hello')));
+        const ip = testIp();
+        await events().record({ type: 'LIVE_RESUME_A', severity: 'medium', ip });
+        const a = await first.until(e => e.find(x => x.data?.type === 'LIVE_RESUME_A'));
+        await first.close();
+        assert.ok(a);
+
+        await events().record({ type: 'LIVE_RESUME_B', severity: 'medium', ip });   // ocurre mientras estaba desconectado
+        const second = await openStream(admin, { headers: { 'Last-Event-ID': a.id } });
+        try {
+            assert.ok(await second.until(e => e.find(x => x.data?.type === 'LIVE_RESUME_B')), 'recibe lo que pasó mientras no estaba');
+            assert.ok(!second.events.some(x => x.data?.type === 'LIVE_RESUME_A'), 'no repite lo ya entregado');
+        } finally { await second.close(); }
+    });
+});
+
+itDb('stream: cerrar la sesión o quitar el rol corta la conexión (reauth); límite de conexiones por usuario → 429', async () => {
+    await withEnv({ STREAM_POLL_MS: '250', STREAM_AUTH_RECHECK_MS: '1000' }, async () => {
+        const victim = await roleUser('admin');
+        const stream = await openStream(victim);
+        assert.ok(await stream.until(e => e.find(x => x.event === 'hello')));
+        assert.strictEqual((await call(victim, 'POST', '/api/auth/logout', {})).status, 200);
+        assert.ok(await stream.until(e => e.find(x => x.event === 'reauth')), 'reauth tras cerrar la sesión');
+        assert.ok(await stream.until(() => stream.ended()), 'y se cierra');
+        await stream.close();
+
+        const demoted = await roleUser('admin');
+        const s2 = await openStream(demoted);
+        assert.ok(await s2.until(e => e.find(x => x.event === 'hello')));
+        await db.query("UPDATE users SET role = 'user' WHERE id = ?", [demoted.userId]);
+        assert.ok(await s2.until(e => e.find(x => x.event === 'reauth')), 'reauth al perder el rol');
+        await s2.close();
+    });
+
+    await withEnv({ STREAM_MAX_PER_USER: '1', STREAM_POLL_MS: '250' }, async () => {
+        const one = await openStream(adminB);
+        try {
+            assert.ok(await one.until(e => e.find(x => x.event === 'hello')));
+            const two = await call(adminB, 'GET', '/api/system/stream');
+            assert.strictEqual(two.status, 429);
+            assert.strictEqual(two.body.code, 'STREAM_LIMIT');
+        } finally { await one.close(); }
+    });
+});
+
+itDb('status: incluye el bloque cluster (sin cluster: un solo proceso, este)', async () => {
+    const res = await call(admin, 'GET', '/api/system/status');
+    assert.strictEqual(res.status, 200);
+    const cluster = res.body.status.cluster;
+    assert.strictEqual(cluster.mode, 'single');
+    assert.strictEqual(cluster.workers.length, 1);
+    assert.strictEqual(cluster.workers[0].pid, process.pid);
+    assert.ok(cluster.workers[0].rssMb > 0);
+});

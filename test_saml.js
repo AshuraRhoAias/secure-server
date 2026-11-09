@@ -378,3 +378,40 @@ itDb('la limpieza periódica borra de saml_cache lo caducado', async () => {
     assert.ok(await require('./src/sso/saml.service').purgeExpired() >= 1);
     assert.strictEqual((await db.query("SELECT 1 FROM saml_cache WHERE cache_key = 'viejo'"))[0].length, 0);
 });
+
+// ---------------------------------------------------------------- entrega a la interfaz web (SSO_HANDOFF_URL)
+
+itDb('handoff SAML: RelayState aleatorio de ida y vuelta → 303 con código (sin tokens) → canje con el verificador; otro RelayState no recibe la entrega', async () => {
+    await withEnv({ SSO_HANDOFF_URL: 'https://ops.test/session/sso/callback' }, async () => {
+        const verifier = crypto.randomBytes(32).toString('base64url');
+        const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+        const ip = testIp();
+        const start = await api(app.base, 'GET', `/api/saml/login?format=json&handoff=${challenge}`, { ip });
+        assert.strictEqual(start.status, 200, start.text);
+        const relayState = new URL(start.body.url).searchParams.get('RelayState');
+        assert.match(relayState, /^[A-Za-z0-9_-]{43}$/, 'el IdP recibe un RelayState aleatorio');
+
+        const request = { ...idp.parseAuthnRequest(start.body.url), ip };
+        const built = idp.response(request, { audience: SP_ENTITY, nameId: `h-${crypto.randomBytes(4).toString('hex')}` });
+        const res = await api(app.base, 'POST', '/api/saml/acs', {
+            ip, redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            raw: new URLSearchParams({ SAMLResponse: built.base64, RelayState: relayState }).toString()
+        });
+        assert.strictEqual(res.status, 303, res.text);
+        const location = new URL(res.headers.get('location'));
+        assert.strictEqual(location.origin + location.pathname, 'https://ops.test/session/sso/callback');
+        assert.strictEqual(location.hash, '', 'nada en el fragmento');
+        const code = location.searchParams.get('code');
+
+        const done = await api(app.base, 'POST', '/api/sso/exchange', { ip: testIp(), json: { code, verifier } });
+        assert.strictEqual(done.status, 200, done.text);
+        assert.deepStrictEqual(done.body.authMethods, ['saml']);
+
+        // Una respuesta válida con un RelayState que nadie inició (o inventado) no crea entrega: respuesta clásica
+        const other = await begin();
+        const built2 = idp.response(other, { audience: SP_ENTITY, nameId: `h2-${crypto.randomBytes(4).toString('hex')}` });
+        const res2 = await acsPost(built2.base64, other.ip, { RelayState: crypto.randomBytes(32).toString('base64url') });
+        assert.strictEqual(res2.status, 200, res2.text);
+        assert.ok(res2.body.token);
+    });
+});

@@ -5,6 +5,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toasts';
 import { Banner, Empty, Loading, Segmented, StatusBadge } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
+import { useLiveRefresh } from '@/components/Live';
 import { apiCall } from '@/lib/client';
 import { dateTime, relativeTime } from '@/lib/format';
 import type { ApprovalItem } from '@/lib/types';
@@ -18,7 +19,8 @@ export default function ApprovalsPage() {
   const [me, setMe] = useState<number | null>(null);
   const [confirm, setConfirm] = useState<{ item: ApprovalItem; decision: 'approve' | 'reject' } | null>(null);
   const [busy, setBusy] = useState(false);
-  const { data, error, loading, reload } = useApi<{ approvals: ApprovalItem[] }>(`/api/system/approvals${status ? `?status=${status}` : ''}`, { refreshMs: 15_000 });
+  const { data, error, loading, reload } = useApi<{ approvals: ApprovalItem[] }>(`/api/system/approvals${status ? `?status=${status}` : ''}`, { refreshMs: 30_000 });
+  useLiveRefresh(['security-event'], reload, 5000);
 
   useEffect(() => { void apiCall<{ userId: number }>('GET', '/session/me').then(r => { if (r.ok && r.data) setMe(r.data.userId); }); }, []);
 

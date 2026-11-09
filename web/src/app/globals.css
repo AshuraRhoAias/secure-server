@@ -151,3 +151,17 @@ pre.json { background: var(--surface-2); border: 1px solid var(--border); border
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-word; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Accesibilidad y modo en vivo ---------- */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip-link { position: absolute; left: 8px; top: -48px; z-index: 100; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+.skip-link:focus { top: 8px; }
+main:focus { outline: none; }
+.banner[data-tone='info'] { background: var(--info-bg); color: var(--info); border-color: transparent; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.live[data-state='live'] .live-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.live[data-state='connecting'] .live-dot { background: var(--medium); }
+.live[data-state='offline'] .live-dot { background: var(--critical); }
+.login-divider { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 12px 0; }
+.login-divider::before, .login-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }

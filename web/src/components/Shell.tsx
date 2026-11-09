@@ -7,7 +7,18 @@ import { apiCall } from '@/lib/client';
 import { dateTime } from '@/lib/format';
 import type { Dashboard } from '@/lib/types';
 import { useApi } from '@/hooks/useApi';
-import { ToastProvider } from './Toasts';
+import { LiveIndicator, LiveProvider, useLive, useLiveRefresh } from './Live';
+import { ToastProvider, useToast } from './Toasts';
+
+// Aviso inmediato de las alertas nuevas graves (high/critical) que llegan por el canal en vivo
+function LiveAlertToasts() {
+  const { subscribe } = useLive();
+  const { toast } = useToast();
+  useEffect(() => subscribe(['alert'], ({ data }) => {
+    if (data.severity === 'critical' || data.severity === 'high') toast(`Alerta ${String(data.severity)}: ${String(data.title ?? data.rule ?? '')}`, 'error');
+  }), [subscribe, toast]);
+  return null;
+}
 
 const NAV = [
   { href: '/', label: 'Panel', icon: '▦' },
@@ -35,11 +46,24 @@ function useTheme() {
 }
 
 export function Shell({ user, children }: { user: string; children: ReactNode }) {
+  return (
+    <ToastProvider>
+      <LiveProvider>
+        <LiveAlertToasts />
+        <ShellFrame user={user}>{children}</ShellFrame>
+      </LiveProvider>
+    </ToastProvider>
+  );
+}
+
+function ShellFrame({ user, children }: { user: string; children: ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [theme, cycleTheme] = useTheme();
   const [session, setSession] = useState<string | null>(null);
-  const summary = useApi<{ dashboard: Dashboard }>('/api/system/dashboard?hours=1', { refreshMs: 30_000 });
+  // Contadores del menú: se actualizan al momento con el canal en vivo; el sondeo queda como respaldo
+  const summary = useApi<{ dashboard: Dashboard }>('/api/system/dashboard?hours=1', { refreshMs: 120_000 });
+  useLiveRefresh(['alerts-summary', 'alert'], summary.reload, 3000);
 
   useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
@@ -53,7 +77,8 @@ export function Shell({ user, children }: { user: string; children: ReactNode })
   const logout = async () => { await apiCall('POST', '/session/logout', {}); window.location.assign('/login'); };
 
   return (
-    <ToastProvider>
+    <>
+      <a className="skip-link" href="#contenido">Saltar al contenido</a>
       <div className="shell">
         <aside className="sidebar" data-open={open} aria-label="Navegación">
           <div className="brand"><span className="brand-mark" aria-hidden="true">⛨</span><span>secure-server<br /><span className="muted">Operación</span></span></div>
@@ -78,12 +103,13 @@ export function Shell({ user, children }: { user: string; children: ReactNode })
           <div className="topbar">
             <button type="button" className="menu-button" onClick={() => setOpen(o => !o)} aria-label="Abrir menú" aria-expanded={open}>☰</button>
             <span className="spacer" />
+            <LiveIndicator />
             <button type="button" className="ghost" onClick={cycleTheme} title="Cambiar tema">{theme === 'auto' ? 'Tema: auto' : theme === 'dark' ? 'Tema: oscuro' : 'Tema: claro'}</button>
             <button type="button" onClick={logout}>Cerrar sesión</button>
           </div>
-          <main>{children}</main>
+          <main id="contenido" tabIndex={-1}>{children}</main>
         </div>
       </div>
-    </ToastProvider>
+    </>
   );
 }

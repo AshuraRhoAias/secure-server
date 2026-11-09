@@ -418,6 +418,14 @@ class SecureServer {
     }
 
     startServer() {
+        // Lo que este proceso aporta al estado del cluster (/api/system/status → cluster.workers)
+        require('./observability/cluster-status').registerProvider(() => ({
+            leader: leader.isLeader(),
+            shuttingDown: this.shuttingDown,
+            open: maintenanceGuard.isOpen(),
+            streams: require('./observability/live-stream').stats().open
+        }));
+
         this.server = this.app.listen(this.port, () => {
             console.log('\n🎉 ========================================');
             console.log('🔐 SERVIDOR ULTRA SEGURO INICIADO');
@@ -477,6 +485,8 @@ class SecureServer {
         if (this.shuttingDown) return;
         this.shuttingDown = true;
         console.log('\n🛑 Iniciando cierre graceful del servidor...');
+        // Los streams en vivo no terminan solos: se avisa (`bye`) y se cierran ya, para no agotar el plazo de cierre
+        require('./observability/live-stream').closeAll();
         const deadlineMs = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000;
 
         const force = setTimeout(() => {
