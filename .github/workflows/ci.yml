@@ -137,6 +137,41 @@ jobs:
         working-directory: web
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
+  # Entorno independiente de pruebas de seguridad (PruebasLinux): perfil seguro (repositorio y localhost) como informe, y las
+  # comprobaciones de invariantes y Semgrep con reglas propias como puerta (fallan si algo se deshace).
+  pruebaslinux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: web
+      - name: Herramientas (las que falten se omiten y quedan en el informe)
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck yamllint jq
+          pipx install semgrep==1.95.0
+      - name: Perfil seguro (informe)
+        run: ./pruebas.sh --safe-all --no-color --yes || true
+        working-directory: PruebasLinux
+      - name: Invariantes de seguridad (refresh, SSO, BFF, Dockerfile)
+        working-directory: PruebasLinux
+        run: |
+          ./pruebas.sh --run 119 120 121 124 --no-color --yes | tee invariantes.txt
+          if grep -F "[!]" invariantes.txt; then echo "::error::Una comprobación de invariantes ha fallado"; exit 1; fi
+      - name: Semgrep con las reglas propias (las de severidad ERROR bloquean)
+        run: semgrep scan --metrics=off --error --severity ERROR --config PruebasLinux/rules/semgrep-node.yml src scripts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with: { name: pruebaslinux, path: PruebasLinux/reports/, retention-days: 14 }
+
   # Escalabilidad horizontal REAL: 2 réplicas del API (contenedores) detrás de nginx, con MariaDB y MinIO (S3) compartidos.
   # Construye la imagen de producción (Dockerfile) y comprueba reparto, un solo líder, archivos y límites compartidos y SSE.
   compose:
