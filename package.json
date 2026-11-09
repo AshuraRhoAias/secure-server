@@ -70,7 +70,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "@aws-sdk/client-kms": "^3.1155.0",
+    "@aws-sdk/client-kms": "^3.1163.0",
     "@node-saml/node-saml": "^5.2.0",
     "@simplewebauthn/server": "^14.0.3",
     "@xmldom/xmldom": "^0.8.15",
