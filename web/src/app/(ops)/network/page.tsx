@@ -40,7 +40,7 @@ export default function NetworkPage() {
         <p className="muted">Los bloqueos son progresivos (1 h, 2 h, 4 h… hasta 7 días) y viven en la base de datos: sobreviven a reinicios y valen para todas las instancias (hasta 1 s de retraso entre instancias por la caché de bloqueos).</p>
         {data && ips.length === 0 ? <div className="card"><Empty>No hay IP bloqueadas.</Empty></div> : null}
         {ips.length > 0 ? (
-          <div className="table-wrap"><table>
+          <div className="table-wrap" tabIndex={0}><table>
             <thead><tr><th>IP</th><th>Motivo</th><th>Hasta</th><th className="num">Veces</th><th>Desde</th><th /></tr></thead>
             <tbody>{ips.map(ip => (
               <tr key={ip.ip_address}>

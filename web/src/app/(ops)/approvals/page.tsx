@@ -42,7 +42,7 @@ export default function ApprovalsPage() {
       {loading && !data ? <Loading /> : null}
       {data && items.length === 0 ? <div className="card"><Empty>No hay solicitudes con este filtro.</Empty></div> : null}
       {items.length > 0 ? (
-        <div className="table-wrap"><table>
+        <div className="table-wrap" tabIndex={0}><table>
           <thead><tr><th>#</th><th>Acción</th><th>Usuario afectado</th><th>Motivo</th><th>Pidió</th><th>Estado</th><th>Caduca</th><th>Decisión</th></tr></thead>
           <tbody>{items.map(item => {
             const own = me !== null && item.requestedBy.id === me;

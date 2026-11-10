@@ -52,7 +52,7 @@ export default function DashboardPage() {
             </Card>
             <Card title="Alertas abiertas" actions={<Link href="/alerts">Ver todas</Link>}>
               {d.alerts.latest.length === 0 ? <Empty>Sin alertas abiertas 🎉</Empty> : (
-                <div className="table-wrap"><table>
+                <div className="table-wrap" tabIndex={0}><table>
                   <thead><tr><th>Severidad</th><th>Alerta</th><th>Estado</th><th>Última vez</th></tr></thead>
                   <tbody>{d.alerts.latest.slice(0, 8).map(a => (
                     <tr key={a.id}><td><SeverityBadge severity={a.severity} /></td><td className="truncate" title={a.title}>{a.title}</td><td><StatusBadge status={a.status} /></td><td>{relativeTime(a.lastSeen)}</td></tr>

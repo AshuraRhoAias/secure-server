@@ -3,7 +3,7 @@
   --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #dfe3ea; --text: #1b2330; --muted: #5d6879;
   --accent: #2456d6; --accent-contrast: #ffffff; --focus: #2456d6;
   --critical: #b42318; --critical-bg: #fdeceb; --high: #b54708; --high-bg: #fff1e0; --medium: #8a6d00; --medium-bg: #fff8d6;
-  --low: #1d6b7a; --low-bg: #e1f4f7; --info: #536071; --info-bg: #eceff3; --ok: #1a7f46; --ok-bg: #e2f6ea;
+  --low: #1d6b7a; --low-bg: #e1f4f7; --info: #536071; --info-bg: #eceff3; --ok: #146c3a; --ok-bg: #e2f6ea;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --chart-1: #2456d6; --chart-2: #1a7f46; --chart-3: #b54708; --chart-grid: #e4e8ee;
