@@ -133,8 +133,13 @@ jobs:
             CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_test_pw';
             GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
       - name: Extremo a extremo (API real + web real + navegador)
-        run: npm run test:e2e
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee "$RUNNER_TEMP/e2e.log"
         working-directory: web
+      - name: Resumen del fallo (anotación)
+        if: failure()
+        run: bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/e2e.log" "web e2e" 80
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   # Escalabilidad horizontal REAL: 2 réplicas del API (contenedores) detrás de nginx, con MariaDB y MinIO (S3) compartidos.
@@ -166,10 +171,8 @@ jobs:
         run: |
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
-          # Resumen como anotación: se puede leer sin iniciar sesión (API pública de check-runs)
           for s in api mariadb minio-init lb; do
-            msg=$(docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 25 "$s" 2>&1 | tr -d '\015' | cut -c1-300 | awk '{ gsub(/%/, "%25"); printf "%s%%0A", $0 }')
-            echo "::error title=compose $s::$msg"
+            docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 40 "$s" 2>&1 | bash .github/scripts/annotate-log.sh - "compose $s" 40
           done
       - name: Apagar
         if: always()
