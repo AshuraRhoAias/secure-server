@@ -8,16 +8,20 @@ class SecureCommunications {
     constructor() {
         this.channels = new Map();
         this.emailDisabled = process.env.DISABLE_EMAIL_NOTIFICATIONS === 'true';
-        this.notificationsDir = path.join(__dirname, '../notifications');
+        // NOTIFICATIONS_DIR: en contenedores (código de solo lectura) debe apuntar a un directorio escribible
+        this.notificationsDir = path.resolve(process.env.NOTIFICATIONS_DIR || path.join(__dirname, '../notifications'));
         this.setupChannels();
         this.messageQueue = [];
         this.retryAttempts = new Map();
         this.ensureNotificationsDir();
     }
 
+    // No debe impedir el arranque: si el directorio no se puede crear, solo falla guardar notificaciones en JSON (saveAsJSON lo registra)
     ensureNotificationsDir() {
-        if (!fs.existsSync(this.notificationsDir)) {
-            fs.mkdirSync(this.notificationsDir, { recursive: true });
+        try {
+            fs.mkdirSync(this.notificationsDir, { recursive: true, mode: 0o700 });
+        } catch (error) {
+            console.error(`⚠️ No se pudo crear el directorio de notificaciones (${error.code || error.message}); define NOTIFICATIONS_DIR con una ruta escribible`);
         }
     }
 
