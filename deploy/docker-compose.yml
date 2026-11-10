@@ -84,7 +84,7 @@ services:
 
   # Crea el bucket (una vez, con reintentos mientras el S3 termina de arrancar) y termina
   s3-init:
-    image: amazon/aws-cli:2.38.6
+    image: amazon/aws-cli:2.39.6
     depends_on:
       s3: { condition: service_healthy }
     entrypoint: ['/bin/sh', '-c']
