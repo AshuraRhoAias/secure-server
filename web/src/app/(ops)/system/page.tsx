@@ -60,7 +60,7 @@ export default function SystemPage() {
             <Card title={s.cluster.mode === 'cluster' ? `Procesos del cluster (${s.cluster.workers.length})` : 'Proceso (sin cluster)'}>
               {s.cluster.error ? <Banner tone="warn">{s.cluster.error}</Banner> : null}
               {s.cluster.missing ? <Banner tone="warn">{s.cluster.missing} proceso(s) no respondieron a tiempo.</Banner> : null}
-              <div className="table-wrap"><table>
+              <div className="table-wrap" tabIndex={0}><table>
                 <caption className="visually-hidden">Estado de cada proceso del servidor</caption>
                 <thead><tr><th scope="col">Hueco</th><th scope="col">PID</th><th scope="col">Estado</th><th scope="col">Líder</th><th scope="col" className="num">Activo</th><th scope="col" className="num">Memoria</th><th scope="col" className="num">En vivo</th></tr></thead>
                 <tbody>{s.cluster.workers.map(w => (
@@ -85,7 +85,7 @@ export default function SystemPage() {
           <Card title="Claves y rotación"><JsonView value={{ claves: rot.keys, guardian: rot.guard, ultimaRotacion: rot.lastRotation }} /></Card>
           <Card title={`Copias previas a la rotación (${rot.backups.length})`}>
             {rot.backups.length === 0 ? <p className="muted">No hay copias.</p> : (
-              <div className="table-wrap"><table><thead><tr><th>Archivo</th><th>Época</th><th>Creada</th></tr></thead>
+              <div className="table-wrap" tabIndex={0}><table><thead><tr><th>Archivo</th><th>Época</th><th>Creada</th></tr></thead>
                 <tbody>{rot.backups.map(b => <tr key={b.name}><td className="mono truncate">{b.name}</td><td>{b.epoch}</td><td>{dateTime(b.createdAt)}</td></tr>)}</tbody></table></div>
             )}
           </Card>
