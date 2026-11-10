@@ -790,7 +790,7 @@ navegador) y datos en vivo; archivos en S3; varias réplicas probadas con Docker
 - **DoS volumétrico** de capa 7: hace falta un WAF/CDN delante.
 - **Interfaz web** (`web/`, §24): passkey solo como segundo factor (no inicio sin contraseña); SSO probado contra un proveedor simulado;
   e2e en Chromium, Firefox y WebKit de escritorio (no navegadores móviles).
-- **Archivos en S3**: probado contra un S3 simulado y MinIO (CI); no contra AWS S3, R2 o B2 reales. Las copias del bucket (versionado,
+- **Archivos en S3**: probado contra un S3 simulado y SeaweedFS (CI, job `compose`); no contra AWS S3, R2 o B2 reales. Las copias del bucket (versionado,
   bloqueo de objetos, replicación) son configuración del proveedor; `files:backup` solo copia `FILES_DIR`.
 - **`.env` versionado**: decisión del propietario mientras contenga datos de prueba (ver más abajo).
 - `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/`; **`.env` no se ha tocado** (decisión
@@ -848,7 +848,7 @@ del descifrado: se reparte entre procesos, no se acelera por proceso.
   - **`security_events` por meses** (`npm run events:partition -- enable`, reconstruye la tabla: ventana de mantenimiento si es grande): la
     retención pasa de `DELETE … LIMIT 5000` a `DROP PARTITION` (instantáneo) y la tarea de limpieza del líder crea los meses por delante.
 - **Varias máquinas**: `FILES_STORAGE=s3` (§13) para que cualquier réplica sirva cualquier archivo, `TRUST_PROXY`, sondas a `/health/ready`.
-  Montaje de referencia en `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + MinIO) y `Dockerfile` (producción, usuario sin
+  Montaje de referencia en `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + SeaweedFS como S3) y `Dockerfile` (producción, usuario sin
   privilegios, solo lectura). Lo prueba `test_compose.js` en el CI: reparto entre réplicas, **un solo líder entre todas**, un archivo subido
   a una réplica lo sirve otra, el límite de login es común a todas y el stream en vivo atraviesa nginx sin búfer.
 

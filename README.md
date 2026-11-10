@@ -140,7 +140,7 @@ npm run test:api          # sin base de datos
 npm run test:all          # con MariaDB
 ```
 
-**Con Docker** (varias réplicas detrás de nginx, MariaDB y MinIO como S3): ver [`deploy/docker-compose.yml`](deploy/docker-compose.yml) y `docs/SEGURIDAD.md` §23.
+**Con Docker** (varias réplicas detrás de nginx, MariaDB y SeaweedFS como S3): ver [`deploy/docker-compose.yml`](deploy/docker-compose.yml) y `docs/SEGURIDAD.md` §23.
 
 ---
 
@@ -586,7 +586,7 @@ Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de u
 
 ### Producción
 
-- **Imagen**: `Dockerfile` (solo dependencias de producción, usuario sin privilegios, `HEALTHCHECK` real con `npm run health-check`). Varias réplicas: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) (nginx + MariaDB + MinIO), probado en el CI (job `compose`).
+- **Imagen**: `Dockerfile` (solo dependencias de producción, usuario sin privilegios, `HEALTHCHECK` real con `npm run health-check`). Varias réplicas: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) (nginx + MariaDB + SeaweedFS como S3), probado en el CI (job `compose`).
 - **Sin Docker**: `npm ci --omit=dev` y `npm run start:cluster` bajo systemd/PM2 (nunca `npm run dev` en producción: se niega con `NODE_ENV=production`).
 - **Configuración**: solo por variables de entorno o un `.env` fuera del repositorio (plantilla: `.env.example`); secretos envueltos con el KMS (`npm run kms -- migrate-env`).
 - **Delante**: TLS en el balanceador, `TRUST_PROXY`, sondas a `/health/ready`, y la interfaz web en otra máquina o detrás de VPN/SSO (`web/README.md`).
