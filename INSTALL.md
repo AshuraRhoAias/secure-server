@@ -6,7 +6,7 @@ mostrando una barra de progreso**.
 
 ## Requisito previo
 
-- **Node.js ≥ 18** (incluye `npm`). Descárgalo de <https://nodejs.org> si no lo tienes.
+- **Node.js ≥ 22** (incluye `npm`). Descárgalo de <https://nodejs.org> si no lo tienes.
 
 ## Cómo instalar
 
@@ -32,7 +32,7 @@ continuación, ejecutará los pasos con una barra de progreso.
 
 ## Qué hace el instalador
 
-1. **Comprueba requisitos** (Node ≥ 18 y `npm`).
+1. **Comprueba requisitos** (Node ≥ 22 y `npm`).
 2. **Instala las dependencias** del proyecto (`npm ci` si hay `package-lock.json`, si no `npm install`).
 3. **Prepara `.env`** a partir de `.env.example` si aún no existe (en Linux lo deja con permisos `600`).
 4. **Ajusta permisos** (sólo Linux).

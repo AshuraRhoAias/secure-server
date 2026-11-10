@@ -13,7 +13,14 @@ const protectionMiddleware = require('../../middleware/protection.middleware');
 
 router.get('/status', samlController.status);
 router.get('/metadata', samlController.metadata);
-router.get('/login', protectionMiddleware.highSecurity(), samlController.login);
+router.get('/login',
+    protectionMiddleware.highSecurity(),
+    require('../utils/validate').query({
+        format: { type: 'enum', values: ['json'] },
+        handoff: { type: 'string', pattern: /^[A-Za-z0-9_-]{43}$/ }
+    }),
+    samlController.login
+);
 router.post('/acs', protectionMiddleware.highSecurity(), samlController.acs);
 
 router.access = 'public';

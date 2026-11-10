@@ -1,4 +1,4 @@
-const client = require('prom-client');
+const client = require('@prometheus-io/client');
 
 // Métricas Prometheus (GET /api/metrics, SOLO admin; ver api/routes/metrics.routes.js).
 //
@@ -55,11 +55,11 @@ gauge('db_pool_connections', 'Conexiones del pool de la base de datos', ['state'
 }, 'sum');
 
 // Texto de /api/metrics. Con el cluster (src/cluster.js) cada proceso tiene SU registro: se pide al proceso principal que agregue el de
-// todos (prom-client AggregatorRegistry) para que el scrape sea el mismo caiga en el proceso que caiga. Sin cluster, el registro local.
+// todos (@prometheus-io/client, antes prom-client: AggregatorRegistry) para que el scrape sea el mismo caiga en el proceso que caiga. Sin cluster, el registro local.
 let nextRequest = 1;
 const pending = new Map();
 if (process.env.CLUSTER_METRICS === 'true' && typeof process.send === 'function') {
-    // prom-client solo responde a las peticiones del principal si el worker construye un AggregatorRegistry; y hay que indicarle
+    // La librería de métricas (@prometheus-io/client, antes prom-client) solo responde a las peticiones del principal si el worker construye un AggregatorRegistry; y hay que indicarle
     // que agregue NUESTRO registro (no el global)
     client.AggregatorRegistry.setRegistries([registry]);
     new client.AggregatorRegistry();

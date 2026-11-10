@@ -44,6 +44,8 @@ class SystemController {
                     },
                     encryption: encryptionMetrics,
                     protection: protectionStats,
+                    // Con el cluster, una petición la atiende UN worker: aquí están todos (pid, memoria, líder, streams…)
+                    cluster: await require('../../observability/cluster-status').clusterStatus(),
                     timestamp: new Date().toISOString()
                 }
             });

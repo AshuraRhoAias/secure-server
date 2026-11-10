@@ -102,7 +102,9 @@ test('file: un blob alterado, truncado o con otra KEK se rechaza', () => {
 test('file: KEK con permisos abiertos, ausente o de tamaño erróneo → error claro', () => {
     const loose = newKekFile('loose', 0o644);
     withKms({ KMS_PROVIDER: 'file', KMS_KEK_FILE: loose }, (kms) => {
-        assert.throws(() => kms.wrapValue('X', 'v'), /legible por otros usuarios.*chmod 400/);
+        // En Windows los bits de modo no representan las ACL: allí no se comprueban (kms-providers.js)
+        if (process.platform === 'win32') assert.ok(kms.wrapValue('X', 'v'));
+        else assert.throws(() => kms.wrapValue('X', 'v'), /legible por otros usuarios.*chmod 400/);
     });
     withKms({ KMS_PROVIDER: 'file', KMS_KEK_FILE: loose, KMS_KEK_ALLOW_LOOSE_PERMS: 'true' }, (kms) => {
         assert.ok(kms.wrapValue('X', 'v'));
@@ -263,8 +265,10 @@ test('CLI: migrate-env envuelve en el sitio, conserva comentarios y otras variab
     assert.match(migrated, /NODE_ENV=production\n$/);
     for (const name of ['BASE_SEED', 'ENCRYPTION_SEED', 'JWT_SEED', 'DB_FRAGMENT_1']) assert.match(migrated, new RegExp(`^${name}=kms:file:`, 'm'));
     assert.strictEqual(fs.readFileSync(`${file}.pre-kms`, 'utf8'), original);
-    assert.strictEqual(fs.statSync(`${file}.pre-kms`).mode & 0o777, 0o600);
-    assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') { // en Windows los bits de modo no representan las ACL
+        assert.strictEqual(fs.statSync(`${file}.pre-kms`).mode & 0o777, 0o600);
+        assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+    }
 
     assert.match(cli(['migrate-env', '--file', file], { env }).stdout, /Nada que migrar/, 'idempotente');
     assert.strictEqual(cli(['unwrap-env', '--file', file], { env }).stdout, original);

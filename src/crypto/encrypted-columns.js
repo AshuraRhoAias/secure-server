@@ -28,7 +28,9 @@ const ENCRYPTED_COLUMNS = {
     // al rotar solo se re-envuelven estas claves, los bytes de los archivos no se tocan.
     user_files: { primaryKey: 'id', columns: ['filename_encrypted', 'key_encrypted'] },
     // Estado de logins SSO en curso (caduca a los 10 min): si un valor queda ilegible se puede borrar
-    oidc_login_state: { primaryKey: 'id', columns: ['code_verifier_encrypted'], regenerable: true }
+    oidc_login_state: { primaryKey: 'id', columns: ['code_verifier_encrypted'], regenerable: true },
+    // Tokens de un login SSO esperando a que el BFF los canjee (60 s, un solo uso): si uno queda ilegible se puede borrar
+    sso_handoffs: { primaryKey: 'id', columns: ['payload_encrypted'], regenerable: true }
 };
 
 // Columnas con "encrypted" en el nombre que NO guardan texto cifrado con tripleEncryptor

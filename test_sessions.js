@@ -79,6 +79,9 @@ test('el JWT de acceso caduca solo y se recupera con el refresh', async (t) => {
         assert.strictEqual((await me(user.token, ip)).status, 200);
         await wait(2500);
         assert.strictEqual((await me(user.token, ip)).status, 401, 'caducó');
+        // El token renovado, con la duración normal: con 1,2 s (y `exp` contado desde `iat` truncado) podía caducar antes
+        // de comprobarlo en un runner lento
+        delete process.env.ACCESS_TOKEN_MINUTES;
         const r = await refresh(user.refreshToken, ip);
         assert.strictEqual(r.status, 200);
         assert.strictEqual((await me(r.body.token, ip)).status, 200);

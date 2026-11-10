@@ -5,7 +5,7 @@ const events = require('./security-events.service');
 // Panel de operación (GET /api/system/dashboard, SOLO admin): una foto de cómo está la seguridad ahora mismo.
 // Son consultas de lectura con índice; no incluye secretos, tokens ni contenidos de usuarios.
 
-const count = async (sql, params = []) => Number((await db.query(sql, params))[0][0].n);
+const count = async (sql, params = []) => Number((await db.readQuery(sql, params))[0][0].n);
 
 // Peticiones idénticas simultáneas (varios administradores con el panel abierto, o varias pestañas) comparten UN cálculo: son ~13
 // consultas. No hay caché con caducidad: en cuanto termina, la siguiente petición vuelve a calcular con datos frescos.
@@ -25,17 +25,17 @@ async function compute(h) {
         alertRows, openAlerts, severityRows, loginRows, topUsersTargeted, activeSessions, refreshReuse,
         pendingApprovals, blockedIps, fileRows, rejectedUploads, summary, dbPing
     ] = await Promise.all([
-        db.query("SELECT severity, COUNT(*) AS n FROM security_alerts WHERE status <> 'resolved' GROUP BY severity"),
-        db.query("SELECT id, rule, subject, severity, title, status, event_count, first_seen, last_seen FROM security_alerts WHERE status <> 'resolved' ORDER BY FIELD(severity, 'critical', 'high', 'medium', 'low'), id DESC LIMIT 10"),
-        db.query('SELECT severity, COUNT(*) AS n FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY severity', [h]),
-        db.query('SELECT success, COUNT(*) AS n FROM login_attempts WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY success', [h]),
-        db.query(`SELECT username_hash, COUNT(*) AS n FROM login_attempts
+        db.readQuery("SELECT severity, COUNT(*) AS n FROM security_alerts WHERE status <> 'resolved' GROUP BY severity"),
+        db.readQuery("SELECT id, rule, subject, severity, title, status, event_count, first_seen, last_seen FROM security_alerts WHERE status <> 'resolved' ORDER BY FIELD(severity, 'critical', 'high', 'medium', 'low'), id DESC LIMIT 10"),
+        db.readQuery('SELECT severity, COUNT(*) AS n FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY severity', [h]),
+        db.readQuery('SELECT success, COUNT(*) AS n FROM login_attempts WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY success', [h]),
+        db.readQuery(`SELECT username_hash, COUNT(*) AS n FROM login_attempts
                   WHERE success = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) GROUP BY username_hash HAVING COUNT(*) >= ? LIMIT 20`, [lockout.windowSec, lockout.maxFailures]),
         count("SELECT COUNT(*) AS n FROM user_sessions WHERE revoked_at IS NULL AND expires_at > NOW() AND (absolute_expires_at IS NULL OR absolute_expires_at > NOW())"),
         count("SELECT COUNT(*) AS n FROM security_events WHERE event_type = 'REFRESH_TOKEN_REUSE' AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)", [h]),
         count("SELECT COUNT(*) AS n FROM admin_approvals WHERE status = 'pending' AND expires_at > NOW()"),
         count('SELECT COUNT(*) AS n FROM blocked_ips WHERE blocked_until > NOW()'),
-        db.query('SELECT scan_status, sanitize_status, COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS bytes FROM user_files GROUP BY scan_status, sanitize_status'),
+        db.readQuery('SELECT scan_status, sanitize_status, COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS bytes FROM user_files GROUP BY scan_status, sanitize_status'),
         count("SELECT COUNT(*) AS n FROM security_events WHERE event_type = 'FILE_REJECTED' AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)", [h]),
         events.summary({ hours: h }),
         count('SELECT 1 AS n')

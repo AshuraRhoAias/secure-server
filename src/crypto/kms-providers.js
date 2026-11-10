@@ -29,7 +29,10 @@ function loadKek() {
     try {
         const stat = fs.fstatSync(fd);
         if (!stat.isFile()) throw new Error(`${file} no es un archivo regular`);
-        if ((stat.mode & 0o077) !== 0 && process.env.KMS_KEK_ALLOW_LOOSE_PERMS !== 'true') {
+        // Solo en POSIX: en Windows los bits de modo NO reflejan las ACL de NTFS (un archivo con chmod 400 aparece como 444),
+        // así que la comprobación rechazaría cualquier KEK y empujaría a desactivarla con KMS_KEK_ALLOW_LOOSE_PERMS en todas
+        // partes. En Windows la KEK se protege con ACL (icacls), ver docs/SEGURIDAD.md §11.
+        if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0 && process.env.KMS_KEK_ALLOW_LOOSE_PERMS !== 'true') {
             throw new Error(`${file} es legible por otros usuarios (permisos ${(stat.mode & 0o777).toString(8)}): usa chmod 400`);
         }
         text = fs.readFileSync(fd, 'utf8').trim();

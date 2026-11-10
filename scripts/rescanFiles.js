@@ -36,7 +36,7 @@ async function main() {
     for (const file of files) {
         const key = await fileKeys.recover(file.storage_name, file.key_encrypted);
         const verdict = await av.scanBuffers(cipher.decryptRange({
-            filePath: storage.finalPath(file.storage_name), key, plainSize: Number(file.size_bytes)
+            blob: storage.blob(file.storage_name), key, plainSize: Number(file.size_bytes)
         }));
         summary.scanned++;
 

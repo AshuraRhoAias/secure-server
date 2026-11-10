@@ -13,18 +13,18 @@
     "start": "next start -p 3100",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "node --test e2e/ops.test.cjs"
+    "test:e2e": "node --test --test-concurrency=1 e2e/ops.test.cjs e2e/live-auth.test.cjs"
   },
   "dependencies": {
-    "next": "16.4.3",
+    "next": "16.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "typescript": "6.0.3",
-    "vitest": "5.0.5"
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
   }
 }

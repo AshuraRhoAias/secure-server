@@ -17,14 +17,14 @@ const CLIENT_SECRET = 'secreto-del-cliente-de-pruebas';
 let dbAvailable = false;
 let app, db, idp, oidc;
 const ENV_KEYS = ['SSO_ISSUER', 'SSO_CLIENT_ID', 'SSO_CLIENT_SECRET', 'SSO_REDIRECT_URI', 'SSO_ALLOWED_EMAIL_DOMAINS', 'SSO_AUTO_PROVISION',
-    'SSO_REQUIRE_EMAIL_VERIFIED', 'SSO_ADMIN_CLAIM', 'SSO_ADMIN_VALUE', 'SSO_POST_LOGIN_URL', 'MFA_REQUIRED_FOR_ADMINS'];
+    'SSO_REQUIRE_EMAIL_VERIFIED', 'SSO_ADMIN_CLAIM', 'SSO_ADMIN_VALUE', 'SSO_POST_LOGIN_URL', 'MFA_REQUIRED_FOR_ADMINS', 'SSO_HANDOFF_URL'];
 
 function configureSso() {
     Object.assign(process.env, {
         SSO_ISSUER: idp.issuer, SSO_CLIENT_ID: CLIENT_ID, SSO_CLIENT_SECRET: CLIENT_SECRET,
         SSO_REDIRECT_URI: `${app.base}/api/sso/callback`
     });
-    for (const key of ['SSO_ALLOWED_EMAIL_DOMAINS', 'SSO_AUTO_PROVISION', 'SSO_REQUIRE_EMAIL_VERIFIED', 'SSO_ADMIN_CLAIM', 'SSO_ADMIN_VALUE', 'SSO_POST_LOGIN_URL', 'MFA_REQUIRED_FOR_ADMINS']) delete process.env[key];
+    for (const key of ['SSO_ALLOWED_EMAIL_DOMAINS', 'SSO_AUTO_PROVISION', 'SSO_REQUIRE_EMAIL_VERIFIED', 'SSO_ADMIN_CLAIM', 'SSO_ADMIN_VALUE', 'SSO_POST_LOGIN_URL', 'MFA_REQUIRED_FOR_ADMINS', 'SSO_HANDOFF_URL']) delete process.env[key];
     idp.behaviors.issuerOverride = null;
     idp.behaviors.jwksOverride = null;
     idp.behaviors.tokenStatus = null;
@@ -331,4 +331,89 @@ itDb('quien insiste con states o tokens falsos termina bloqueado', async () => {
 itDb('limpieza: los estados caducados se borran', async () => {
     await db.query("INSERT INTO oidc_login_state (state_hash, nonce, code_verifier_encrypted, expires_at) VALUES (?, 'n', 'v4:x', DATE_SUB(NOW(), INTERVAL 3 DAY))", [crypto.randomBytes(32).toString('hex')]);
     assert.ok((await oidc.purgeExpired()) >= 1);
+});
+
+// ============================================================================ entrega a la interfaz web (SSO_HANDOFF_URL)
+
+const HANDOFF_URL = 'https://ops.test/session/sso/callback';
+const newVerifier = () => crypto.randomBytes(32).toString('base64url');
+const challengeOf = (verifier) => crypto.createHash('sha256').update(verifier).digest('base64url');
+
+// Lo que hace el BFF: inicia con ?handoff, el proveedor autentica, y el callback del API redirige con un código
+async function handoffLogin(verifier, options = {}, ip = testIp()) {
+    process.env.SSO_HANDOFF_URL = HANDOFF_URL;
+    const begin = await api(app.base, 'GET', `/api/sso/login?format=json&handoff=${challengeOf(verifier)}`, { ip });
+    assert.strictEqual(begin.status, 200, begin.text);
+    const { callbackPath } = idp.authorize(begin.body.url, { sub: 'sub-' + crypto.randomUUID(), email: 'web@acme.com', ...options });
+    const res = await api(app.base, 'GET', callbackPath, { ip, redirect: 'manual' });
+    return { res, ip, location: res.headers.get('location') };
+}
+const exchange = (code, verifier, ip = testIp()) => api(app.base, 'POST', '/api/sso/exchange', { ip, json: { code, verifier } });
+
+itDb('handoff: el callback redirige con un código (sin tokens en la URL) y el canje con el verificador da una sesión que funciona, una sola vez', async () => {
+    const verifier = newVerifier();
+    const { res, location } = await handoffLogin(verifier);
+    assert.strictEqual(res.status, 302, res.text);
+    const target = new URL(location);
+    assert.strictEqual(`${target.origin}${target.pathname}`, HANDOFF_URL);
+    const code = target.searchParams.get('code');
+    assert.match(code, /^[A-Za-z0-9_-]{43}$/);
+    assert.ok(!/token|rt_|ey[A-Za-z0-9]/.test(location.replace(code, '')), 'ningún token en la URL de vuelta');
+    assert.strictEqual(target.hash, '');
+
+    // En la BD los tokens van cifrados y el código no está en claro
+    const [[row]] = await db.query('SELECT code_hash, payload_encrypted FROM sso_handoffs ORDER BY id DESC LIMIT 1');
+    assert.notStrictEqual(row.code_hash, code);
+    assert.ok(!row.payload_encrypted.includes('rt_'));
+
+    const done = await exchange(code, verifier);
+    assert.strictEqual(done.status, 200, done.text);
+    assert.deepStrictEqual(done.body.authMethods, ['sso']);
+    assert.strictEqual(done.headers.get('cache-control'), 'no-store');
+    assert.strictEqual((await api(app.base, 'GET', '/api/notes', { ip: testIp(), token: done.body.token })).status, 200);
+
+    assert.strictEqual((await exchange(code, verifier)).status, 401, 'un solo uso');
+    const [[after]] = await db.query('SELECT payload_encrypted, used_at FROM sso_handoffs WHERE code_hash = ?', [row.code_hash]);
+    assert.strictEqual(after.payload_encrypted, null, 'tras el canje no queda el payload');
+    assert.ok(after.used_at);
+});
+
+itDb('handoff: un código presentado con OTRO verificador se quema y deja un evento crítico (código robado)', async () => {
+    const verifier = newVerifier();
+    const { location } = await handoffLogin(verifier);
+    const code = new URL(location).searchParams.get('code');
+    const attackerIp = testIp();
+
+    const stolen = await exchange(code, newVerifier(), attackerIp);
+    assert.strictEqual(stolen.status, 401);
+    assert.strictEqual(stolen.body.code, 'SSO_HANDOFF_INVALID');
+    const [[ev]] = await db.query("SELECT severity, rule FROM security_events WHERE event_type = 'SSO_HANDOFF_STOLEN' AND ip_address = ? ORDER BY id DESC LIMIT 1", [attackerIp]);
+    assert.strictEqual(ev.severity, 'critical');
+    assert.strictEqual(ev.rule, 'SSO_HANDOFF_VERIFIER_MISMATCH');
+
+    assert.strictEqual((await exchange(code, verifier)).status, 401, 'ni siquiera el legítimo puede usarlo ya');
+});
+
+itDb('handoff: el código caduca a los 60 s; sin ?handoff el login sigue como antes (JSON); formatos raros → 400', async () => {
+    const verifier = newVerifier();
+    const { location } = await handoffLogin(verifier);
+    const code = new URL(location).searchParams.get('code');
+    await db.query('UPDATE sso_handoffs SET code_expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE code_hash = ?', [crypto.createHash('sha256').update(code).digest('hex')]);
+    assert.strictEqual((await exchange(code, verifier)).status, 401, 'caducado');
+
+    // Mismo SSO_HANDOFF_URL configurado, pero el inicio no pidió entrega: respuesta clásica con tokens
+    process.env.SSO_HANDOFF_URL = HANDOFF_URL;
+    const classic = await fullLogin({ sub: 'sub-' + crypto.randomUUID(), email: 'clasico@acme.com' });
+    assert.strictEqual(classic.status, 200, classic.text);
+    assert.ok(classic.body.token);
+
+    assert.strictEqual((await api(app.base, 'GET', '/api/sso/login?format=json&handoff=corto', { ip: testIp() })).status, 400);
+    assert.strictEqual((await exchange('x', verifier)).status, 400);
+    assert.strictEqual((await exchange(code, 'v')).status, 400);
+});
+
+itDb('handoff: sin SSO_HANDOFF_URL, pedir entrega devuelve 404 SSO_HANDOFF_NOT_CONFIGURED (no se manda al usuario al proveedor)', async () => {
+    const res = await api(app.base, 'GET', `/api/sso/login?format=json&handoff=${challengeOf(newVerifier())}`, { ip: testIp() });
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.body.code, 'SSO_HANDOFF_NOT_CONFIGURED');
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useToast } from '@/components/Toasts';
 import { Banner, Empty, JsonView, Loading, SeverityBadge } from '@/components/ui';
 import { apiCall } from '@/lib/client';
+import { useLive } from '@/components/Live';
 import { dateTime } from '@/lib/format';
 import type { EventItem } from '@/lib/types';
 
@@ -44,7 +45,12 @@ export default function EventsPage() {
     setMore(list.length === PAGE);
   }, []);
 
-  useEffect(() => { void load(applied); }, [applied, load]);
+  useEffect(() => { void load(applied); setFresh(0); }, [applied, load]);
+
+  // Eventos nuevos por el canal en vivo: se avisa en lugar de recargar (no se mueve la tabla mientras se revisa)
+  const [fresh, setFresh] = useState(0);
+  const { subscribe } = useLive();
+  useEffect(() => subscribe(['security-event'], () => setFresh(n => n + 1)), [subscribe]);
 
   const submit = (event: FormEvent) => { event.preventDefault(); setApplied({ ...draft }); };
   const field = (key: keyof Filters, label: string, props: { placeholder?: string; inputMode?: 'numeric' } = {}) => (
@@ -83,10 +89,16 @@ export default function EventsPage() {
       </form>
 
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {fresh > 0 ? (
+        <div className="banner" data-tone="info" role="status" aria-live="polite">
+          {fresh === 1 ? '1 evento nuevo' : `${fresh} eventos nuevos`} (severidad media o superior) desde la última carga.{' '}
+          <button type="button" onClick={() => { setFresh(0); void load(applied); }}>Mostrar</button>
+        </div>
+      ) : null}
       {loading && rows.length === 0 ? <Loading /> : null}
       {!loading && rows.length === 0 && !error ? <div className="card"><Empty>Ningún evento con estos filtros.</Empty></div> : null}
       {rows.length > 0 ? (
-        <div className="table-wrap"><table>
+        <div className="table-wrap" tabIndex={0}><table>
           <thead><tr><th>Fecha</th><th>Severidad</th><th>Tipo / regla</th><th>IP</th><th>Usuario</th><th>Petición</th><th className="num">Riesgo</th></tr></thead>
           <tbody>{rows.map(row => (
             <FragmentRow key={row.id} row={row} open={open === row.id} toggle={() => setOpen(open === row.id ? null : row.id)} />

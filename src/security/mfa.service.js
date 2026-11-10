@@ -96,9 +96,18 @@ class MfaService {
 
     // Verifica un código TOTP O uno de recuperación. Devuelve { ok, method }.
     // Los códigos de recuperación valen aunque el único factor sean passkeys; el TOTP solo si está activo.
-    async verify(userId, { otp, recoveryCode }) {
+    //
+    // Exactamente UN factor y de tipo texto (las rutas ya validan formato; esto protege a cualquier otro llamante): con
+    // los dos a la vez se rechaza en lugar de elegir uno en silencio. CodeQL marca la elección de rama como
+    // "js/user-controlled-bypass": es un falso positivo revisado, porque el valor elige QUÉ factor se verifica, no SI se
+    // verifica, y ambas ramas comprueban de verdad (hash de un código de 80 bits de un solo uso / TOTP con anti-replay).
+    async verify(userId, { otp, recoveryCode } = {}) {
+        const hasOtp = typeof otp === 'string' && otp.length > 0;
+        const hasRecovery = typeof recoveryCode === 'string' && recoveryCode.length > 0;
+        if (hasOtp === hasRecovery) return { ok: false };
+
         const state = await this.getState(userId);
-        if (recoveryCode) {
+        if (hasRecovery) {
             if (!(await this.hasSecondFactor(userId))) return { ok: false };
             const [result] = await db.query(
                 'UPDATE user_recovery_codes SET used_at = NOW() WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',

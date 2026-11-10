@@ -210,7 +210,7 @@ class FilesController {
         // Se descifra y AUTENTICA el primer bloque ANTES de enviar cabeceras: si el archivo falta, está truncado o
         // alterado desde el principio, se responde con un error normal en vez de cortar la conexión a mitad.
         const iterator = cipher.decryptRange({
-            filePath: storage.finalPath(row.storage_name), key, plainSize: size, start, end
+            blob: storage.blob(row.storage_name), key, plainSize: size, start, end
         })[Symbol.asyncIterator]();
         let first;
         try {

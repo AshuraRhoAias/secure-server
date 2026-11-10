@@ -498,14 +498,24 @@
               ]
             },
             "description": ""
+          },
+          {
+            "name": "handoff",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "description": "base64url(sha256(verificador)) del BFF de la interfaz web: el resultado se entrega por código de un solo uso en SSO_HANDOFF_URL (ver /api/sso/exchange)"
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirección al proveedor"
-          },
           "200": {
             "description": "URL (format=json)"
+          },
+          "302": {
+            "description": "Redirección al proveedor"
           },
           "404": {
             "description": "SSO no configurado"
@@ -856,6 +866,9 @@
           "201": {
             "description": "Subido"
           },
+          "401": {
+            "description": "Sin sesión"
+          },
           "413": {
             "description": "Demasiado grande o cuota"
           },
@@ -865,14 +878,11 @@
           "422": {
             "description": "Malware detectado"
           },
-          "503": {
-            "description": "Antivirus no disponible (FILE_SCAN=required)"
-          },
-          "401": {
-            "description": "Sin sesión"
-          },
           "429": {
             "description": "Límite"
+          },
+          "503": {
+            "description": "Antivirus no disponible (FILE_SCAN=required)"
           }
         },
         "security": [
@@ -1027,14 +1037,14 @@
           "206": {
             "description": "Rango"
           },
-          "416": {
-            "description": "Rango no satisfacible"
+          "401": {
+            "description": "Sin sesión"
           },
           "404": {
             "description": "No existe o no es tuyo"
           },
-          "401": {
-            "description": "Sin sesión"
+          "416": {
+            "description": "Rango no satisfacible"
           }
         },
         "security": [
@@ -1053,16 +1063,16 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK. Incluye cluster: { mode, workers[{pid, slot, uptimeSeconds, rssMb, heapUsedMb, leader, shuttingDown, open, streams}], missing }"
           },
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1115,11 +1125,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1144,11 +1154,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1173,11 +1183,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1211,11 +1221,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1324,11 +1334,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1365,11 +1375,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1394,11 +1404,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1439,20 +1449,20 @@
           "200": {
             "description": "Ejecutado (ADMIN_APPROVALS_REQUIRED=1)"
           },
-          "401": {
-            "description": "Sin sesión válida"
-          },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "202": {
             "description": "Pendiente de aprobación de otro administrador"
+          },
+          "401": {
+            "description": "Sin sesión válida"
           },
           "403": {
             "description": "Sin permiso"
           },
           "404": {
             "description": "Usuario no encontrado"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1502,11 +1512,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1531,11 +1541,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1560,11 +1570,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "No es administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1589,11 +1599,11 @@
           "401": {
             "description": "Credenciales inválidas"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "409": {
             "description": "Otra petición acaba de renovar la sesión: reintenta con el refresh más reciente"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [],
@@ -1713,11 +1723,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "404": {
             "description": "No existe o no es tuya"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1757,11 +1767,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Sin permiso"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1795,9 +1805,6 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Autoaprobación o sin permiso"
           },
@@ -1809,6 +1816,9 @@
           },
           "410": {
             "description": "Caducada"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1842,9 +1852,6 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Sin permiso"
           },
@@ -1853,6 +1860,9 @@
           },
           "409": {
             "description": "Ya no está pendiente"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1919,11 +1929,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1947,11 +1957,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -1985,9 +1995,6 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
           },
@@ -1996,6 +2003,9 @@
           },
           "409": {
             "description": "Estado no válido"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2029,9 +2039,6 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
           },
@@ -2040,6 +2047,9 @@
           },
           "409": {
             "description": "Ya resuelta"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2073,11 +2083,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2111,14 +2121,14 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
           },
           "404": {
             "description": "No existe"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2149,17 +2159,14 @@
           "200": {
             "description": "Ejecutado (ADMIN_APPROVALS_REQUIRED=1)"
           },
-          "401": {
-            "description": "Sin sesión válida"
-          },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "202": {
             "description": "Pendiente de aprobación"
           },
           "400": {
             "description": "Confirmación errónea"
+          },
+          "401": {
+            "description": "Sin sesión válida"
           },
           "403": {
             "description": "Solo admin"
@@ -2169,6 +2176,9 @@
           },
           "409": {
             "description": "Cuenta con privilegios"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2228,11 +2238,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2277,11 +2287,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2333,11 +2343,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "403": {
             "description": "Solo admin"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2361,11 +2371,11 @@
           "401": {
             "description": "Credenciales inválidas"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "404": {
             "description": "WebAuthn no activado"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [],
@@ -2479,14 +2489,14 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "404": {
             "description": "WebAuthn no activado"
           },
           "409": {
             "description": "Máximo de llaves"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2533,20 +2543,20 @@
           "200": {
             "description": "Registrada"
           },
-          "401": {
-            "description": "Sin sesión válida"
-          },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "201": {
             "description": "Registrada"
           },
           "400": {
             "description": "Reto o firma no válidos"
           },
+          "401": {
+            "description": "Sin sesión válida"
+          },
           "409": {
             "description": "Ya registrada"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2603,11 +2613,11 @@
           "401": {
             "description": "Sin sesión válida"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "404": {
             "description": "No existe"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [
@@ -2678,11 +2688,11 @@
           "401": {
             "description": "Credenciales inválidas"
           },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "404": {
             "description": "SAML no configurado"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": []
@@ -2704,23 +2714,33 @@
                 "json"
               ]
             }
+          },
+          {
+            "name": "handoff",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "description": "base64url(sha256(verificador)) del BFF de la interfaz web: el resultado se entrega por código de un solo uso en SSO_HANDOFF_URL (ver /api/sso/exchange)"
           }
         ],
         "responses": {
           "200": {
             "description": "{ url }"
           },
-          "401": {
-            "description": "Credenciales inválidas"
-          },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "302": {
             "description": "Redirección al IdP"
           },
+          "401": {
+            "description": "Credenciales inválidas"
+          },
           "404": {
             "description": "SAML no configurado"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           },
           "503": {
             "description": "Mal configurado"
@@ -2740,23 +2760,23 @@
           "200": {
             "description": "Token de sesión (o 303 a SAML_POST_LOGIN_URL)"
           },
-          "401": {
-            "description": "Respuesta no válida (firma, audiencia, repetición...)"
-          },
-          "429": {
-            "description": "Límite de peticiones"
-          },
           "303": {
             "description": "Redirección a la URL fija de la aplicación"
           },
           "400": {
             "description": "Respuesta mal formada"
           },
+          "401": {
+            "description": "Respuesta no válida (firma, audiencia, repetición...)"
+          },
           "403": {
             "description": "Dominio o usuario no permitido"
           },
           "404": {
             "description": "SAML no configurado"
+          },
+          "429": {
+            "description": "Límite de peticiones"
           }
         },
         "security": [],
@@ -2783,6 +2803,113 @@
             }
           }
         }
+      }
+    },
+    "/api/sso/exchange": {
+      "post": {
+        "summary": "Canjea el código de entrega de un login SSO (OIDC o SAML) por los tokens. Lo usa el BFF de la interfaz web, servidor a servidor: un solo uso, 60 s, exige el verificador",
+        "tags": [
+          "SSO"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "verifier"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "verifier": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43,128}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens (token, refreshToken, expiresAt, sessionExpiresAt…)"
+          },
+          "400": {
+            "description": "Formato no válido"
+          },
+          "401": {
+            "description": "Código caducado, usado o verificador incorrecto (este último lo quema y registra un evento crítico)"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/system/stream": {
+      "get": {
+        "summary": "Novedades en vivo (Server-Sent Events): eventos de seguridad, alertas nuevas y resumen de alertas (solo admin). Reconecta con Last-Event-ID",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "minSeverity",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "info",
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^ed+.ad+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream: eventos hello, security-event, alert, alerts-summary, reauth, stream-error, bye",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Solo admin"
+          },
+          "429": {
+            "description": "Demasiadas conexiones (STREAM_LIMIT) o límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     }
   }

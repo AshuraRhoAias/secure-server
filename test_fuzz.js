@@ -38,7 +38,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fuzz-'));
 test.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); fs.rmSync(filesDir, { recursive: true, force: true }); });
 
 const bytes = fc.uint8Array({ maxLength: 4096 }).map(a => Buffer.from(a));
-const anyString = fc.oneof(fc.string({ maxLength: 300 }), fc.string({ unit: 'binary', maxLength: 300 }), fc.fullUnicodeString({ maxLength: 300 }));
+// fast-check 4: fullUnicodeString() ya es string({ unit: 'binary' }); 'grapheme' añade grafemas compuestos (ZWJ, diacríticos)
+const anyString = fc.oneof(fc.string({ maxLength: 300 }), fc.string({ unit: 'binary', maxLength: 300 }), fc.string({ unit: 'grapheme', maxLength: 300 }));
 // Caracteres bidi / invisibles construidos desde su código (sin escribirlos literales en el fuente)
 const INVISIBLE = new RegExp(`[${[0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff].map(c => String.fromCodePoint(c)).join('')}]`);
 const CONTROL = new RegExp(`[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}${String.fromCharCode(0x7f)}-${String.fromCharCode(0x9f)}]`);

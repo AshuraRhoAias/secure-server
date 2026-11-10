@@ -134,6 +134,9 @@ class SecureServer {
         try {
             console.log('🔍 Validando configuración...');
 
+            // Un .env de pruebas de carga copiado a producción no debe dejar el login sin límites
+            protectionMiddleware.assertProtectionBypassAllowed();
+
             // Mostrar información de entorno
             console.log(`   Entorno: ${process.env.NODE_ENV || 'development'}`);
             console.log(`   Puerto: ${this.port}`);
@@ -298,7 +301,11 @@ class SecureServer {
             res.set('Cache-Control', 'no-store');
             if (this.shuttingDown) return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
             if (!(await this.databaseReachable())) return res.status(503).json({ status: 'not_ready', reason: 'database' });
-            res.json({ status: 'ready', leader: leader.isLeader(), pid: process.pid, uptime: Math.round(process.uptime()) });
+            res.json({
+                status: 'ready', leader: leader.isLeader(), pid: process.pid, uptime: Math.round(process.uptime()),
+                // Nombre de la máquina/contenedor: solo si se pide (HEALTH_EXPOSE_INSTANCE=true), p. ej. para ver el reparto entre réplicas
+                ...(process.env.HEALTH_EXPOSE_INSTANCE === 'true' && { instance: require('os').hostname() })
+            });
         });
 
         // Ruta de diagnóstico de variables de entorno (solo para desarrollo)
@@ -415,6 +422,14 @@ class SecureServer {
     }
 
     startServer() {
+        // Lo que este proceso aporta al estado del cluster (/api/system/status → cluster.workers)
+        require('./observability/cluster-status').registerProvider(() => ({
+            leader: leader.isLeader(),
+            shuttingDown: this.shuttingDown,
+            open: maintenanceGuard.isOpen(),
+            streams: require('./observability/live-stream').stats().open
+        }));
+
         this.server = this.app.listen(this.port, () => {
             console.log('\n🎉 ========================================');
             console.log('🔐 SERVIDOR ULTRA SEGURO INICIADO');
@@ -474,6 +489,8 @@ class SecureServer {
         if (this.shuttingDown) return;
         this.shuttingDown = true;
         console.log('\n🛑 Iniciando cierre graceful del servidor...');
+        // Los streams en vivo no terminan solos: se avisa (`bye`) y se cierran ya, para no agotar el plazo de cierre
+        require('./observability/live-stream').closeAll();
         const deadlineMs = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000;
 
         const force = setTimeout(() => {

@@ -132,7 +132,8 @@ class OidcService {
             response_type: 'code', client_id: c.clientId, redirect_uri: c.redirectUri, scope: c.scopes,
             state, nonce, code_challenge: challenge, code_challenge_method: 'S256'
         }).toString();
-        return { url: url.toString() };
+        // `state` vuelve con el proveedor: sirve de asa para la entrega a la interfaz web (handoff.service.js)
+        return { url: url.toString(), state };
     }
 
     // Paso 2: el proveedor devuelve al usuario aquí con ?code&state

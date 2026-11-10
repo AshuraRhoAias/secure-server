@@ -72,6 +72,17 @@ class DatabaseConfig {
             const nodeEnv = this.getEnvVariable('NODE_ENV');
             this.pool = mysql.createPool(this.poolOptions(buildSslConfig(nodeEnv)));
             console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
+
+            // Réplica de LECTURA opcional (DB_READ_HOST=host[:puerto], mismas credenciales y base de datos). Solo la usan las
+            // consultas de análisis del panel (readQuery): lo que decide la seguridad (bloqueos, límites, sesiones) va SIEMPRE
+            // a la principal, porque una réplica va con retraso.
+            if (process.env.DB_READ_HOST) {
+                const options = this.poolOptions(buildSslConfig(nodeEnv));
+                const uri = new URL(options.uri);
+                uri.host = process.env.DB_READ_HOST;
+                this.readPool = mysql.createPool({ ...options, uri: uri.toString(), connectionLimit: intFromEnv('DB_READ_POOL_SIZE', options.connectionLimit) });
+                console.log('🗄️ Réplica de lectura configurada para las consultas de análisis');
+            }
         } catch (error) {
             console.error('❌ Error inicializando pool de base de datos:', error);
             throw error;
@@ -101,6 +112,29 @@ class DatabaseConfig {
             throw error;
         } finally {
             if (connection) connection.release();
+        }
+    }
+
+    // Consulta de SOLO LECTURA que puede ir a la réplica (DB_READ_HOST): panel, resúmenes y tablas de análisis, que toleran unos
+    // segundos de retraso. Sin réplica, o si la réplica no responde, va a la principal (el panel no se cae por la réplica).
+    async readQuery(sql, params = []) {
+        if (!/^\s*(SELECT|WITH)\b/i.test(sql)) throw new Error('readQuery solo admite SELECT');
+        if (!this.readPool) return this.query(sql, params);
+        let connection;
+        try {
+            connection = await this.readPool.getConnection();
+        } catch (error) {
+            console.error(`⚠️ Réplica de lectura no disponible (${error.code || error.message}): se usa la principal`);
+            return this.query(sql, params);
+        }
+        try {
+            const [results] = await this.measured(sql, () => connection.execute(sql, params));
+            return [results];
+        } catch (error) {
+            console.error(`❌ Error en consulta SQL (réplica): ${error.code || error.message}`);
+            throw error;
+        } finally {
+            connection.release();
         }
     }
 
@@ -147,6 +181,11 @@ class DatabaseConfig {
 
     // Cierra el pool (cierre ordenado: las consultas en curso terminan)
     async close() {
+        if (this.readPool) {
+            const readPool = this.readPool;
+            this.readPool = null;
+            await readPool.end().catch(() => {});
+        }
         if (this.pool) {
             const pool = this.pool;
             this.pool = null;

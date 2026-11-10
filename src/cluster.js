@@ -9,7 +9,7 @@
 //   - SIGTERM / SIGINT: cierre ordenado de todos (cada uno deja terminar sus peticiones), con plazo y después SIGKILL;
 //   - SIGHUP: REINICIO EN CALIENTE (rolling): sustituye los workers de uno en uno, esperando a que el nuevo esté escuchando antes de
 //     parar el viejo: se puede desplegar código o recargar claves sin cortar el servicio;
-//   - /api/metrics: agrega las métricas de TODOS los workers (prom-client AggregatorRegistry), vengan de donde vengan.
+//   - /api/metrics: agrega las métricas de TODOS los workers (@prometheus-io/client, antes prom-client: AggregatorRegistry), vengan de donde vengan.
 //
 // El principal NO carga secretos, base de datos ni código de la aplicación: es un supervisor mínimo (menos superficie).
 // Reparto de conexiones a la BD: cada worker abre su pool (DB_POOL_SIZE). Total = WEB_CONCURRENCY × DB_POOL_SIZE: debe quedar por debajo
@@ -28,7 +28,7 @@ const intEnv = (name, fallback) => { const n = Number(process.env[name]); return
 const workerCount = () => Math.min(intEnv('WEB_CONCURRENCY', os.availableParallelism ? os.availableParallelism() : os.cpus().length), MAX_WORKERS);
 
 function runPrimary() {
-    const { AggregatorRegistry } = require('prom-client');
+    const { AggregatorRegistry } = require('@prometheus-io/client');
     const aggregator = new AggregatorRegistry();
     const total = workerCount();
     const slots = new Map();           // hueco (0..N-1) -> worker vivo
@@ -49,6 +49,11 @@ function runPrimary() {
         worker.slot = slot;
         slots.set(slot, worker);
         worker.on('message', (message) => {
+            // Estado de todos los workers para /api/system/status (src/observability/cluster-status.js)
+            if (message?.type === 'secure-server:cluster-status') {
+                require('./observability/cluster-status').answerFromPrimary(worker, message.id, Object.values(cluster.workers || {}));
+                return;
+            }
             if (message?.type !== 'secure-server:metrics') return;
             aggregator.clusterMetrics()
                 .then(text => worker.isConnected() && worker.send({ type: 'secure-server:metrics:result', id: message.id, text }))

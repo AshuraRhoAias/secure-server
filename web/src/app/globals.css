@@ -3,7 +3,7 @@
   --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --border: #dfe3ea; --text: #1b2330; --muted: #5d6879;
   --accent: #2456d6; --accent-contrast: #ffffff; --focus: #2456d6;
   --critical: #b42318; --critical-bg: #fdeceb; --high: #b54708; --high-bg: #fff1e0; --medium: #8a6d00; --medium-bg: #fff8d6;
-  --low: #1d6b7a; --low-bg: #e1f4f7; --info: #536071; --info-bg: #eceff3; --ok: #1a7f46; --ok-bg: #e2f6ea;
+  --low: #1d6b7a; --low-bg: #e1f4f7; --info: #536071; --info-bg: #eceff3; --ok: #146c3a; --ok-bg: #e2f6ea;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --chart-1: #2456d6; --chart-2: #1a7f46; --chart-3: #b54708; --chart-grid: #e4e8ee;
@@ -151,3 +151,17 @@ pre.json { background: var(--surface-2); border: 1px solid var(--border); border
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-word; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Accesibilidad y modo en vivo ---------- */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip-link { position: absolute; left: 8px; top: -48px; z-index: 100; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+.skip-link:focus { top: 8px; }
+main:focus { outline: none; }
+.banner[data-tone='info'] { background: var(--info-bg); color: var(--info); border-color: transparent; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.live[data-state='live'] .live-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.live[data-state='connecting'] .live-dot { background: var(--medium); }
+.live[data-state='offline'] .live-dot { background: var(--critical); }
+.login-divider { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 12px 0; }
+.login-divider::before, .login-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }

@@ -300,6 +300,7 @@ Todas opcionales. Plantilla comentada en `.env.example`.
 | `INJECTION_STRIKES_TO_BLOCK` | `5` | Rechazos por inyección (10 min) antes de bloquear la IP |
 | `INJECTION_BODY_MODE` | `critical` | `critical` (rechaza solo en `INJECTION_BLOCK_PATHS`) · `block` (en todas) · `log` (solo registra); ver §4 y §18 |
 | `SCANNER_HITS_TO_BLOCK` / `AUTH_FAILURES_TO_BLOCK` | `5` / `30` | Umbrales de bloqueo |
+| `DISABLE_IP_BLOCKING` | — | `true` solo para pruebas de carga: quita bloqueos y límites (también los de login). **Con `NODE_ENV=production` el servidor no arranca** y el middleware lo ignora |
 | `MAX_FAILED_ATTEMPTS` / `LOCKOUT_WINDOW_SECONDS` | `5` / `900` | Bloqueo de cuenta |
 | `LOGIN_IP_FAILURES_TO_BLOCK` | `20` | Fallos de login desde una IP antes de bloquearla |
 | `ACCESS_TOKEN_MINUTES` / `REFRESH_IDLE_DAYS` / `SESSION_ABSOLUTE_DAYS` | `15` / `7` / `30` | Vida del JWT de acceso, inactividad máxima y tope absoluto de la sesión (§15). Sustituyen a `SESSION_TTL_HOURS` |
@@ -414,7 +415,8 @@ Authorization code + **PKCE**. Funciona con cualquier proveedor que publique `/.
 | `SSO_AUTO_PROVISION` | `false` ⇒ solo entran los usuarios ya dados de alta |
 | `SSO_REQUIRE_EMAIL_VERIFIED` | `false` para aceptar emails sin verificar (por defecto se exige) |
 | `SSO_ADMIN_CLAIM` + `SSO_ADMIN_VALUE` | Rol admin según un claim (p. ej. `groups` = `secure-server-admins`); se retira al salir del grupo |
-| `SSO_POST_LOGIN_URL` | Aplicación web: redirige a esa URL **fija** con el token en el fragmento (`#token=…`) |
+| `SSO_POST_LOGIN_URL` | Aplicación web (modo antiguo): redirige a esa URL **fija** con el token en el fragmento (`#token=…`); el JavaScript de esa página ve los tokens |
+| `SSO_HANDOFF_URL` | **Preferible**: URL fija del BFF (`https://ops…/session/sso/callback`) a la que se entrega un **código de un solo uso** cuando el inicio lo pidió con `?handoff=`; sirve también para SAML (§24) |
 
 Flujo: `GET /api/sso/login` (redirige al proveedor; `?format=json` devuelve la URL) → el usuario se autentica →
 `GET /api/sso/callback?code&state` → sesión con `amr=['sso']`.
@@ -438,7 +440,7 @@ ENCRYPTION_SEED=kms:aws:AQICAHj...     # en vez del valor en claro
 
 | Proveedor (`KMS_PROVIDER`) | Qué es | Configuración |
 |---|---|---|
-| `file` | Clave de envoltura (KEK) en un archivo `0400` (secreto montado, systemd-creds, volumen aparte) | `KMS_KEK_FILE` |
+| `file` | Clave de envoltura (KEK) en un archivo `0400` (secreto montado, systemd-creds, volumen aparte). En Linux/macOS el arranque falla si otros usuarios pueden leerla; en **Windows** los bits de modo no reflejan las ACL de NTFS y no se comprueban: protégela con `icacls <kek> /inheritance:r /grant:r "<usuario-del-servicio>:R"` | `KMS_KEK_FILE` |
 | `vault` | HashiCorp Vault, motor Transit | `VAULT_ADDR` (https en producción), `VAULT_TOKEN`/`VAULT_TOKEN_FILE`, `VAULT_TRANSIT_KEY`, `VAULT_NAMESPACE` |
 | `aws` | AWS KMS (clave simétrica; con CloudHSM si así se configura en AWS) | `KMS_KEY_ID`, `AWS_REGION`, credenciales AWS estándar; `KMS_ENDPOINT` opcional |
 
@@ -489,6 +491,13 @@ o hecho a medida pasa. Es una capa más, no una garantía. Mantén `freshclam` a
 ---
 
 ## 13. Copias de `FILES_DIR`
+
+> **Con `FILES_STORAGE=s3`** los archivos confirmados no están en `FILES_DIR` sino en el bucket (`src/files/s3-store.js`): mismos objetos
+> cifrados por archivo (el proveedor no ve el contenido; `S3_SSE` es una capa adicional), una petición `GetObject` con `Range` por descarga y
+> cada bloque autenticado igual. `files:backup` se **niega** en ese modo (copiaría una carpeta vacía que parecería buena): las copias son
+> del bucket (versionado + bloqueo de objetos o replicación a otra cuenta/región). La subida se sigue cifrando en streaming a
+> `FILES_DIR/tmp` y se confirma dentro de la transacción: si el bucket falla, no queda fila. Pruebas: `test_s3.js` (sin BD) y
+> `test_files_s3.js`.
 
 Los archivos ya están cifrados con clave propia, así que la copia no vuelve a cifrar nada: el destino solo ve bytes aleatorios
 con nombres UUID y un índice sin nombres reales. Para restaurar hacen falta **las dos cosas**: los archivos (aquí) y la BD (con las claves
@@ -762,8 +771,13 @@ Resuelto desde la versión anterior: MFA (TOTP, passkeys), SSO (OIDC y SAML), se
 finos con aprobación de dos administradores, KMS para secretos **y** para las claves de archivo, antivirus, recodificación de imágenes y
 filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura, fuzzing y CI endurecido. Lo que **sigue sin estar** o tiene límites:
 
+Resuelto en la entrega de noviembre de 2026 (ver `ReadmeLogsMejoras.md` #21–#27): interfaz web con passkeys, SSO (sin tokens en el
+navegador) y datos en vivo; archivos en S3; varias réplicas probadas con Docker; réplica de lectura y particionado de eventos opcionales;
+`prom-client` sustituido por `@prometheus-io/client`.
+
 - **Multi-organización** (varios clientes aislados en una misma instalación): no existe.
-- **Escala medida solo en una máquina de 4 vCPU** (§23): no hay prueba de carga con varias máquinas, réplicas de BD ni cientos de miles de usuarios.
+- **Escala**: medida en una máquina de 4 vCPU (§23) y con **varias réplicas en contenedores en una sola máquina** (job `compose` del CI).
+  No hay prueba de carga con varias máquinas físicas, réplicas de BD reales bajo carga ni cientos de miles de usuarios.
 - **HSM por operación**: la clave maestra de los campos cifrados sigue en memoria del proceso (ver §11). Con `KMS_DATA_KEYS` los **archivos** ya no dependen de ella.
 - **Pentest externo y certificaciones** (ISO 27001, SOC 2…): dependen de terceros y de la organización (ver §14 y `docs/CONTROLES.md`). Que el código pase sus
   pruebas **no es** una certificación.
@@ -774,9 +788,11 @@ filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura
 - **Proveedores simulados**: OIDC, SAML, WebAuthn, Vault y AWS KMS están probados contra simuladores que firman/cifran de verdad, **no contra un Entra ID, Okta o AWS reales**:
   prueba tu integración en un entorno de preproducción. Los workflows de CodeQL/gitleaks/ZAP/dependency-review no se han podido ejecutar fuera de GitHub; la primera ejecución puede pedir ajustes.
 - **DoS volumétrico** de capa 7: hace falta un WAF/CDN delante.
-- **Interfaz web** (`web/`, §24): solo contraseña + TOTP/código de recuperación; sin passkeys ni SSO desde la interfaz; datos por sondeo, no en tiempo real.
-- **Archivos con varias máquinas**: `FILES_DIR` es disco local; con varias máquinas hace falta un volumen compartido (NFS/EFS). No hay almacenamiento S3 propio.
-- **Mantenimiento**: `prom-client` avisa de que su paquete fue sustituido por `@prometheus-io/client`; migrar es trabajo pendiente (sin impacto de seguridad conocido).
+- **Interfaz web** (`web/`, §24): passkey solo como segundo factor (no inicio sin contraseña); SSO probado contra un proveedor simulado;
+  e2e en Chromium, Firefox y WebKit de escritorio (no navegadores móviles).
+- **Archivos en S3**: probado contra un S3 simulado y SeaweedFS (CI, job `compose`); no contra AWS S3, R2 o B2 reales. Las copias del bucket (versionado,
+  bloqueo de objetos, replicación) son configuración del proveedor; `files:backup` solo copia `FILES_DIR`.
+- **`.env` versionado**: decisión del propietario mientras contenga datos de prueba (ver más abajo).
 - `.env` y `src/notifications/` estaban versionados. Se dejó de versionar `src/notifications/`; **`.env` no se ha tocado** (decisión
   del propietario). Sus valores sensibles coinciden con los de `.env.example` público (parecen de ejemplo), pero si algún día contiene
   secretos reales quedarán en el historial: usa `npm run kms -- migrate-env` y sácalo del repositorio.
@@ -826,7 +842,15 @@ del descifrado: se reparte entre procesos, no se acelera por proceso.
   Con 4 workers y 3 máquinas: 120 conexiones. Baja `DB_POOL_SIZE` o sube `max_connections`.
 - Detrás de un balanceador: `TRUST_PROXY`, sondas a `/health/ready`, drenaje (deregistration delay) ≥ `SHUTDOWN_DRAIN_MS`.
 - **Archivos**: `FILES_DIR` debe ser almacenamiento compartido entre máquinas (NFS/EFS) o todas deben ver el mismo disco.
-- El cuello pasa a ser **MariaDB**. El siguiente paso (no hecho): réplica de lectura para el panel y las consultas de análisis, y particionado de `security_events` si crece mucho.
+- El cuello pasa a ser **MariaDB**. Para aliviarla (opcional, ambos con prueba en `test_partitions.js`):
+  - **Réplica de lectura** (`DB_READ_HOST`): el panel y los análisis de eventos (`db.readQuery`, solo `SELECT`) van a la réplica; si no
+    responde, a la principal. Lo que decide la seguridad (bloqueos, límites, sesiones) va **siempre** a la principal: una réplica va con retraso.
+  - **`security_events` por meses** (`npm run events:partition -- enable`, reconstruye la tabla: ventana de mantenimiento si es grande): la
+    retención pasa de `DELETE … LIMIT 5000` a `DROP PARTITION` (instantáneo) y la tarea de limpieza del líder crea los meses por delante.
+- **Varias máquinas**: `FILES_STORAGE=s3` (§13) para que cualquier réplica sirva cualquier archivo, `TRUST_PROXY`, sondas a `/health/ready`.
+  Montaje de referencia en `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + SeaweedFS como S3) y `Dockerfile` (producción, usuario sin
+  privilegios, solo lectura). Lo prueba `test_compose.js` en el CI: reparto entre réplicas, **un solo líder entre todas**, un archivo subido
+  a una réplica lo sirve otra, el límite de login es común a todas y el stream en vivo atraviesa nginx sin búfer.
 
 Comprobado en `test_scale.js` (MariaDB real, procesos reales): contador del limitador exacto con 50 golpes simultáneos, una sola sentencia por golpe, caché de bloqueo (TTL, invalidación local), líder único y relevo
 al parar o al caerse la conexión, cluster con reparto entre procesos y un solo líder, métricas agregadas **sin multiplicar** los gauges que salen de la BD, relanzamiento de un worker (incluido el líder),
@@ -850,5 +874,25 @@ extremo** con el API real, la web real y Chromium: un usuario normal no entra; n
 y registra la violación; la sesión (token de 36 s) se renueva sola y rota el refresh token; MFA con TOTP y con código de recuperación; acciones reales (reconocer y resolver alertas, aprobar como segundo
 administrador, desbloquear una IP, cerrar sesiones con motivo, exportar CSV); y cerrar sesión revoca en el API. En el CI es el job `web`.
 
-Límites: sin passkeys ni SSO en la interfaz (se usan desde el API); datos por sondeo (10–30 s); no está probada con varios administradores a la vez ni con un navegador distinto de Chromium. Ponla detrás de TLS y,
-mejor, tras una VPN o SSO: es una herramienta de administración.
+**Ampliación (noviembre de 2026)**:
+
+- **Passkey como segundo factor** desde la interfaz: el BFF pide el reto al API con el reto MFA de la cookie `httpOnly` y entrega la firma;
+  el navegador nunca ve el `mfaToken`. `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGINS` del API deben incluir la interfaz.
+- **SSO (OpenID Connect y SAML) sin tokens en el navegador**: antes el API devolvía los tokens en el fragmento de la URL
+  (`SSO_POST_LOGIN_URL`), visibles para el JavaScript. Ahora, con `SSO_HANDOFF_URL`, el BFF genera un verificador (cookie `httpOnly`
+  `SameSite=Lax`, 10 min), el API registra `sha256(verificador)` (`?handoff=`), tras el proveedor guarda los tokens **cifrados** 60 s y
+  redirige con un **código de un solo uso**; el BFF lo canjea de servidor a servidor (`POST /api/sso/exchange`, migración 017). Un código
+  presentado con otro verificador se **quema** y deja `SSO_HANDOFF_STOLEN` (crítico). La página de vuelta navega sola a `/`: en una cadena de
+  redirecciones iniciada por otro sitio el navegador no enviaría la cookie `SameSite=Strict` recién creada.
+- **Novedades en vivo** (`GET /api/system/stream`, Server-Sent Events, solo admin): eventos ≥ medium, alertas nuevas y resumen de alertas,
+  con cursor por id (reanuda con `Last-Event-ID` sin perder ni repetir). La conexión **revalida token y rol cada 30 s** (`reauth` al cerrar
+  sesión o perder el rol), se cierra al caducar el JWT (el BFF renueva al reconectar), tiene límites por proceso y usuario (429
+  `STREAM_LIMIT`) y no retrasa el apagado. Solo viajan resúmenes, nunca `details`.
+- **Sistema**: tabla de TODOS los procesos del cluster (el principal pregunta a cada worker).
+- **Pruebas**: 57 unitarias y, de extremo a extremo, además de las anteriores: datos en vivo (y la conexión se cierra también en el API al
+  cerrar la pestaña), passkey con el autenticador virtual de Chromium, SSO completo y con usuario no admin, **dos administradores aprobando
+  la misma solicitud a la vez** (se ejecuta una vez), **accesibilidad con axe** (WCAG 2.1 A/AA, sin fallos graves) y los controles
+  básicos en **Firefox y WebKit**.
+
+Límites: passkey solo como segundo factor; SSO probado contra un proveedor simulado; sin navegadores móviles. Ponla detrás de TLS y, mejor,
+tras una VPN o SSO: es una herramienta de administración.

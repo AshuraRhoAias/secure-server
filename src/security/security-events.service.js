@@ -108,7 +108,7 @@ class SecurityEvents {
     // los filtros opcionales son `(? IS NULL OR columna = ?)`, sin construir SQL con texto.
     async list({ type, rule, severity, ip, userId, sinceHours = 24, beforeId, limit = 100 } = {}) {
         const n = (v) => (v === undefined || v === '' ? null : v);
-        const [rows] = await db.query(
+        const [rows] = await db.readQuery(
             `SELECT id, created_at, event_type, rule, severity, risk_score, action_taken, ip_address, user_id,
                     username_hash, method, path, status_code, user_agent, country, details
              FROM security_events
@@ -133,25 +133,28 @@ class SecurityEvents {
     // Resumen para ver de un vistazo qué pasó en las últimas `hours` horas
     async summary({ hours = 24 } = {}) {
         const h = Number(sqlInt(hours, { min: 1, max: 24 * 90 }));
-        const [byType] = await db.query(
+        const [byType] = await db.readQuery(
             `SELECT event_type, severity, COUNT(*) AS total FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY event_type, severity ORDER BY total DESC LIMIT 50`, [h]);
-        const [topIps] = await db.query(
+        const [topIps] = await db.readQuery(
             `SELECT ip_address, COUNT(*) AS total, MAX(risk_score) AS max_risk, MAX(country) AS country
              FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) AND ip_address IS NOT NULL GROUP BY ip_address ORDER BY total DESC LIMIT 10`, [h]);
-        const [topRules] = await db.query(
+        const [topRules] = await db.readQuery(
             `SELECT rule, COUNT(*) AS total FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) AND rule IS NOT NULL GROUP BY rule ORDER BY total DESC LIMIT 10`, [h]);
-        const [timeline] = await db.query(
+        const [timeline] = await db.readQuery(
             `SELECT DATE_FORMAT(created_at, '%Y-%m-%d %H:00') AS hour, COUNT(*) AS total
              FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) GROUP BY hour ORDER BY hour`, [h]);
-        const [[blocked]] = await db.query('SELECT COUNT(*) AS active FROM blocked_ips WHERE blocked_until > NOW()');
+        const [[blocked]] = await db.readQuery('SELECT COUNT(*) AS active FROM blocked_ips WHERE blocked_until > NOW()');
 
         return { windowHours: h, byType, topIps, topRules, timeline, activeBlockedIps: blocked.active };
     }
 
+    // Retención. Si la tabla está particionada por mes (src/maintenance/events-partitions.js), los meses enteramente caducados se
+    // quitan con DROP PARTITION (instantáneo) y se crean los meses por delante; el DELETE acotado solo limpia el mes que caduca a medias.
     async purge(retentionDays = Number(process.env.SECURITY_EVENTS_RETENTION_DAYS) || 90) {
         const days = Number(sqlInt(retentionDays, { min: 1, max: 3650 }));
+        const partitioning = await require('../maintenance/events-partitions').maintain({ retentionDays: days });
         const [result] = await db.query('DELETE FROM security_events WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000', [days]);
-        return result.affectedRows;
+        return partitioning.partitioned ? { deleted: result.affectedRows, ...partitioning } : result.affectedRows;
     }
 }
 

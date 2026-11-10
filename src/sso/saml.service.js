@@ -163,10 +163,11 @@ class SamlService {
     isConfigured() { return isConfigured(); }
 
     // Paso 1: la URL del IdP con nuestra AuthnRequest (su ID queda guardado para validar la respuesta)
-    async beginLogin() {
+    // relayState: valor aleatorio que el IdP devuelve tal cual en el POST al ACS (asa de la entrega a la interfaz web)
+    async beginLogin({ relayState = '' } = {}) {
         const c = config();
         assertSecureConfig(c);
-        const url = await buildSaml(c).getAuthorizeUrlAsync('', undefined, {});
+        const url = await buildSaml(c).getAuthorizeUrlAsync(relayState, undefined, {});
         return { url };
     }
 

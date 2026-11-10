@@ -53,12 +53,28 @@ Desactiva la telemetría de Next si quieres: `NEXT_TELEMETRY_DISABLED=1`.
 ```bash
 npm run typecheck
 npm test                  # vitest: cookies selladas, CSRF, lista cerrada, IP del cliente, BFF contra un API simulado, Prometheus
-npm run build && npm run test:e2e   # API real + web real + Chromium (necesita MariaDB; Playwright 1.56)
+npm run build && npm run test:e2e   # API real + web real + Chromium/Firefox/WebKit (MariaDB; Playwright 1.56 y @axe-core/playwright, con --no-save)
 ```
+
+## Inicio de sesión: passkey y SSO
+
+| Método | Cómo | Qué configurar en el API |
+|---|---|---|
+| Contraseña + TOTP / código de recuperación | Como antes | — |
+| **Passkey / llave de seguridad** (segundo factor) | Botón «Usar passkey» tras la contraseña si la cuenta tiene una. El reto MFA sigue en la cookie `httpOnly`; el BFF pide el reto al API y le entrega la firma | `WEBAUTHN_RP_ID` = dominio de esta interfaz, `WEBAUTHN_ORIGINS` con su origen |
+| **SSO** (OpenID Connect o SAML) | Botones en `/login` si el API los tiene activos. Verificador en cookie `httpOnly` `SameSite=Lax`; el API devuelve un **código de un solo uso** (60 s) que el BFF canjea de servidor a servidor: **ningún token pasa por la URL ni por el navegador** | `SSO_HANDOFF_URL=https://<esta interfaz>/session/sso/callback` (+ la configuración OIDC/SAML de `docs/SEGURIDAD.md` §10 y §17). El usuario sigue necesitando rol admin |
+
+## Datos en vivo
+
+Una conexión Server-Sent Events por pestaña (`/bff/stream` → `GET /api/system/stream`): el panel, las alertas y las aprobaciones se
+actualizan solas, los eventos avisan de «N nuevos» sin mover la tabla y las alertas high/critical aparecen como aviso. Indicador «En vivo»
+arriba. El API revalida la sesión y el rol cada 30 s y cierra al caducar el token; el navegador reconecta solo (con el BFF renovando la
+sesión) desde el último evento recibido. El sondeo queda como respaldo con intervalos largos. Detrás de un proxy: sin búfer para `/bff/stream`.
+
+`Sistema` muestra **todos** los procesos del cluster del API (el que atendió la petición pregunta al resto).
 
 ## Límites
 
-- Inicio de sesión con contraseña + TOTP/código de recuperación. **No** hay (todavía) inicio por passkey ni por SSO desde esta interfaz: se usan
-  desde el API.
-- Los datos se refrescan por sondeo (10–30 s), no por WebSocket. Para históricos y alertas de infraestructura, Prometheus/Grafana con `METRICS_TOKEN`.
-- Con varios procesos del API (cluster), `Sistema` muestra el estado del proceso que atendió la petición; `Métricas` sí son las agregadas.
+- La passkey es **segundo factor** (no hay inicio sin contraseña). SSO probado contra un proveedor simulado, no contra Entra ID u Okta reales.
+- Probada de extremo a extremo en Chromium, Firefox y WebKit de escritorio; no en navegadores móviles.
+- Para históricos y alertas de infraestructura, Prometheus/Grafana con `METRICS_TOKEN`.

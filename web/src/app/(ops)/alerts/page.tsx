@@ -5,6 +5,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toasts';
 import { Banner, Empty, JsonView, Loading, Segmented, SeverityBadge, StatusBadge } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
+import { useLiveRefresh } from '@/components/Live';
 import { apiCall } from '@/lib/client';
 import { dateTime, relativeTime } from '@/lib/format';
 import type { AlertItem, Severity } from '@/lib/types';
@@ -21,7 +22,8 @@ export default function AlertsPage() {
   const [busy, setBusy] = useState(false);
 
   const query = new URLSearchParams({ limit: '200', ...(status && { status }), ...(severity && { severity }) }).toString();
-  const { data, error, loading, reload } = useApi<{ alerts: AlertItem[] }>(`/api/system/alerts?${query}`, { refreshMs: 15_000 });
+  const { data, error, loading, reload } = useApi<{ alerts: AlertItem[] }>(`/api/system/alerts?${query}`, { refreshMs: 60_000 });
+  useLiveRefresh(['alert', 'alerts-summary'], reload);
 
   const act = useCallback(async (alert: AlertItem, action: 'ack' | 'resolve') => {
     setBusy(true);
@@ -53,7 +55,7 @@ export default function AlertsPage() {
       {loading && !data ? <Loading /> : null}
       {data && alerts.length === 0 ? <div className="card"><Empty>No hay alertas con este filtro.</Empty></div> : null}
       {alerts.length > 0 ? (
-        <div className="table-wrap"><table>
+        <div className="table-wrap" tabIndex={0}><table>
           <thead><tr><th>Severidad</th><th>Alerta</th><th>Sujeto</th><th className="num">Veces</th><th>Estado</th><th>Última vez</th><th>Acciones</th></tr></thead>
           <tbody>{alerts.map(a => (
             <tr key={a.id}>

@@ -30,6 +30,7 @@ class SecurityHousekeeping {
             await step('authData', () => require('../security/secure-auth.service').purgeOldData());
             await step('ssoStates', () => require('../sso/oidc.service').purgeExpired());
             await step('samlCache', () => require('../sso/saml.service').purgeExpired());
+            await step('ssoHandoffs', () => require('../sso/handoff.service').purgeExpired());
             await step('webauthnChallenges', () => require('../security/webauthn.service').purgeExpired());
             await step('tempUploads', () => require('../files/storage').purgeStaleTemp());
             return result;

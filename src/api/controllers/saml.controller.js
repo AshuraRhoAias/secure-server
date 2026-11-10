@@ -4,6 +4,8 @@ const events = require('../../security/security-events.service');
 const anomalyDetection = require('../../security/anomaly-detection.service');
 const audit = require('../../services/audit.service');
 const { normalizeIp } = require('../../security/ip');
+const handoff = require('../../sso/handoff.service');
+const crypto = require('crypto');
 
 class SamlController {
     constructor() {
@@ -32,12 +34,17 @@ class SamlController {
     }
 
     // Inicio: redirige al IdP (o devuelve la URL con ?format=json, para aplicaciones de una sola página)
+    // Con ?handoff=… (interfaz web) se genera un RelayState aleatorio que el IdP devuelve en el POST al ACS: asa de la entrega
+    // por código de un solo uso (src/sso/handoff.service.js). Sin handoff, como siempre (RelayState vacío).
     async login(req, res) {
         if (!saml.isConfigured()) return this.notConfigured(res);
         try {
-            const { url } = await saml.beginLogin();
+            const query = req.validated?.query || req.query;
+            const relayState = query.handoff ? crypto.randomBytes(32).toString('base64url') : '';
+            if (query.handoff) await handoff.begin({ provider: 'saml', beginHandle: relayState, challenge: query.handoff });
+            const { url } = await saml.beginLogin({ relayState });
             res.set('Cache-Control', 'no-store');
-            if (req.query.format === 'json') return res.json({ success: true, url });
+            if (query.format === 'json') return res.json({ success: true, url });
             res.redirect(302, url);
         } catch (error) {
             this.fail(res, error);
@@ -56,7 +63,13 @@ class SamlController {
             await events.record({ type: 'SSO_LOGIN', severity: 'info', ip, userId: result.userId, req, details: { provider: 'saml', provisioned: result.provisioned, role: result.role } });
 
             res.set('Cache-Control', 'no-store');
-            // Aplicación web: se redirige a una URL FIJA (de la configuración, nunca de la petición) con el token en el fragmento
+            // Interfaz web (BFF): código de un solo uso en SSO_HANDOFF_URL; los tokens no pasan por el navegador
+            const relayState = typeof req.body?.RelayState === 'string' && /^[A-Za-z0-9_-]{43}$/.test(req.body.RelayState) ? req.body.RelayState : null;
+            const handoffTarget = await handoff.complete({ beginHandle: relayState, result });
+            if (handoffTarget) return res.redirect(303, handoffTarget);
+
+            // Aplicación web (modo antiguo): URL FIJA (de la configuración, nunca de la petición) con el token en el fragmento.
+            // Preferible SSO_HANDOFF_URL: con el fragmento, el JavaScript de esa página ve los tokens.
             if (process.env.SAML_POST_LOGIN_URL) {
                 const target = new URL(process.env.SAML_POST_LOGIN_URL);
                 target.hash = new URLSearchParams({
