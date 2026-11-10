@@ -57,10 +57,13 @@ itDb('mantenimiento: crea los meses que faltan (idempotente) y la purga quita lo
     assert.deepStrictEqual((await parts.maintain({ now: future, retentionDays: 3650 })).created, [], 'idempotente');
 
     await insert('PART_EXPIRED', daysAgo(150));   // cae en p_hist
-    await insert('PART_KEEP', daysAgo(1));
-    const result = await events.purge(30);
+    await insert('PART_KEEP', daysAgo(0));
+    // p_hist guarda todo lo anterior al día 1 de este mes: solo se borra entera si TODO su contenido caducó, es decir, si el
+    // corte (hoy - retención) es posterior a ese día 1. Con 1 día de retención lo es salvo el propio día 1 (y entonces el
+    // DELETE acotado de la purga quita la fila caducada igualmente).
+    const result = await events.purge(1);
     assert.ok(result.partitioned);
-    assert.ok(result.dropped.includes('p_hist'), `dropped: ${result.dropped}`);
+    if (new Date().getUTCDate() !== 1) assert.ok(result.dropped.includes('p_hist'), `dropped: ${result.dropped}`);
     assert.strictEqual(await countType('PART_EXPIRED'), 0);
     assert.strictEqual(await countType('PART_KEEP'), 1);
     const names = (await parts.partitions()).map(p => p.name);

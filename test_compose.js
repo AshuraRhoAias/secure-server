@@ -109,23 +109,30 @@ itCompose('en vivo: el stream SSE atraviesa el balanceador y entrega un evento n
     const controller = new AbortController();
     const res = await fetch(`${BASE}/api/system/stream`, { headers: { Authorization: `Bearer ${admin.token}` }, signal: controller.signal });
     assert.strictEqual(res.status, 200);
+    // Lectura continua: con una carrera reader.read() contra un temporizador, la lectura que pierde la carrera se queda
+    // pendiente y el trozo que entrega después se pierde (podía ser justo el del evento)
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let text = '';
+    const pump = (async () => {
+        try {
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                text += decoder.decode(value, { stream: true });
+            }
+        } catch { /* abortado */ }
+    })();
     const read = async (pattern, ms = 15000) => {
         const end = Date.now() + ms;
-        while (!pattern.test(text) && Date.now() < end) {
-            const { value, done } = await Promise.race([reader.read(), sleep(1000).then(() => ({ value: null, done: false }))]);
-            if (done) break;
-            if (value) text += decoder.decode(value, { stream: true });
-        }
+        while (!pattern.test(text) && Date.now() < end) await sleep(100);
         return pattern.test(text);
     };
     try {
         assert.ok(await read(/event: hello/), 'hello');
         sql("INSERT INTO security_events (event_type, rule, severity, ip_address) VALUES ('COMPOSE_LIVE', 'COMPOSE', 'high', '203.0.113.50')");
         assert.ok(await read(/COMPOSE_LIVE/), 'el evento llega por el balanceador sin búfer');
-    } finally { controller.abort(); }
+    } finally { controller.abort(); await pump; }
 });
 
 itCompose('rendimiento orientativo a través del balanceador (no es una prueba de carga)', async () => {
