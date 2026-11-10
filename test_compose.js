@@ -1,4 +1,4 @@
-// Escalabilidad HORIZONTAL de verdad: varias réplicas del API (contenedores distintos) detrás de nginx, con MariaDB y MinIO (S3)
+// Escalabilidad HORIZONTAL de verdad: varias réplicas del API (contenedores distintos) detrás de nginx, con MariaDB y SeaweedFS (S3)
 // compartidos. Lo levanta deploy/docker-compose.yml; esta prueba solo habla con el balanceador (y con la BD por `docker compose exec`).
 //
 //   docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build
