@@ -55,7 +55,7 @@ export default function AlertsPage() {
       {loading && !data ? <Loading /> : null}
       {data && alerts.length === 0 ? <div className="card"><Empty>No hay alertas con este filtro.</Empty></div> : null}
       {alerts.length > 0 ? (
-        <div className="table-wrap"><table>
+        <div className="table-wrap" tabIndex={0}><table>
           <thead><tr><th>Severidad</th><th>Alerta</th><th>Sujeto</th><th className="num">Veces</th><th>Estado</th><th>Última vez</th><th>Acciones</th></tr></thead>
           <tbody>{alerts.map(a => (
             <tr key={a.id}>
