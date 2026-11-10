@@ -177,3 +177,10 @@ web/.next/
 
 # Secretos del despliegue con docker compose
 deploy/compose.env
+
+# graphify: se comparten graph.json, graph.html, GRAPH_REPORT.md y manifest.json; lo local (rutas del equipo, caché, coste) no
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/.graphify_*
+graphify-out/.cloud-cta-shown
+graphify-out/.rebuild.lock
