@@ -167,9 +167,9 @@ jobs:
       - name: Herramientas (las que falten se omiten y quedan en el informe)
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck yamllint jq
-          pipx install semgrep==1.95.0
-          # semgrep 1.95 importa pkg_resources (setuptools), que ya no viene en el entorno de pipx del runner
-          pipx inject semgrep "setuptools<81"
+          # 1.95 importaba pkg_resources (setuptools), que ya no está en el entorno de pipx del runner: versión actual
+          pipx install --force semgrep==1.181.1
+          semgrep --version
       - name: Perfil seguro (informe)
         run: ./pruebas.sh --safe-all --no-color --yes || true
         working-directory: PruebasLinux
