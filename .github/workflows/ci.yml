@@ -216,13 +216,16 @@ jobs:
           { docker version --format 'docker {{.Server.Version}}'; docker compose version; } 2>&1 | tee "$RUNNER_TEMP/compose-up.log"
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build 2>&1 | tee -a "$RUNNER_TEMP/compose-up.log"
       - name: Varias réplicas
-        run: node --test test_compose.js
+        run: |
+          set -o pipefail
+          node --test test_compose.js 2>&1 | tee "$RUNNER_TEMP/compose-test.log"
         env:
           COMPOSE_ENV_FILE: deploy/compose.env
       - name: Registros si algo falló
         if: failure()
         run: |
           [ -f "$RUNNER_TEMP/compose-up.log" ] && bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/compose-up.log" "compose up" 60
+          [ -f "$RUNNER_TEMP/compose-test.log" ] && grep -E -A25 "not ok" "$RUNNER_TEMP/compose-test.log" | grep -vE "^ *(type|duration_ms|failureType|location):" | head -120 | bash .github/scripts/annotate-log.sh - "compose pruebas" 120
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a || true
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
           for s in api mariadb s3 s3-init lb; do

@@ -16,7 +16,9 @@ async function createMockIdp({ clientId, clientSecret }) {
         issuer: null,
         behaviors: { issuerOverride: null, jwksOverride: null, tokenStatus: null },
         codes,
-        tokenRequests: []
+        tokenRequests: [],
+        // Pruebas con navegador: identidad con la que /authorize "autentica" y redirige al callback (null = no atiende /authorize)
+        browserIdentity: null
     };
 
     const server = http.createServer(async (req, res) => {
@@ -68,6 +70,16 @@ async function createMockIdp({ clientId, clientSecret }) {
             };
             for (const key of Object.keys(claims)) if (claims[key] === undefined) delete claims[key];
             return send(200, { access_token: 'at-' + crypto.randomUUID(), token_type: 'Bearer', id_token: await sign(claims, record.sign) });
+        }
+        if (url.pathname === '/authorize' && req.method === 'GET' && idp.browserIdentity) {
+            try {
+                const { callbackPath } = idp.authorize(`${idp.issuer}${req.url}`, idp.browserIdentity);
+                const target = new URL(callbackPath, new URL(url.searchParams.get('redirect_uri')).origin);
+                res.writeHead(302, { Location: target.toString(), 'Cache-Control': 'no-store' });
+                return res.end();
+            } catch (error) {
+                return send(400, { error: 'invalid_request', error_description: error.message });
+            }
         }
         send(404, { error: 'not_found' });
     });

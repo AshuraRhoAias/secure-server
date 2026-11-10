@@ -147,7 +147,7 @@ itE2e('passkey: segundo factor con la llave (autenticador virtual de Chromium); 
   await page.getByRole('heading', { name: 'Panel de seguridad' }).waitFor();
 
   const [[session]] = await pool.query('SELECT amr FROM user_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1', [users.pk.userId]);
-  assert.match(String(session.amr), /webauthn/);
+  assert.match(String(session.amr), /\bhwk\b/, 'método de la sesión: clave hardware (RFC 8176)');
   const exposure = await page.evaluate(() => document.cookie + JSON.stringify({ ...localStorage }) + document.documentElement.outerHTML);
   assert.ok(!/eyJ|rt_[0-9A-Za-z_-]{8}/.test(exposure), 'ningún token al alcance del JavaScript');
   assert.deepStrictEqual(await page.collectProblems(), []);
@@ -166,12 +166,10 @@ async function waitOrExplain(page, locator, urls) {
   }
 }
 
-// El navegador va al proveedor: aquí el proveedor simulado "autentica" y redirige al callback del API (como haría uno real)
-async function routeIdp(context, identity) {
-  await context.route(`${idp.issuer}/authorize**`, async (route) => {
-    const { callbackPath } = idp.authorize(route.request().url(), identity);
-    await route.fulfill({ status: 302, headers: { location: `${apiProc.base}${callbackPath}` } });
-  });
+// El navegador va al proveedor: el proveedor simulado "autentica" con esta identidad y redirige al callback del API (como uno
+// real). No se usa context.route: Playwright no intercepta las peticiones que llegan por una redirección (aquí, la de /session/sso/start).
+async function routeIdp(_context, identity) {
+  idp.browserIdentity = identity;
 }
 
 itE2e('SSO (OpenID Connect): el botón lleva al proveedor y vuelve con sesión; en ninguna URL ni en la página aparecen tokens', async () => {
