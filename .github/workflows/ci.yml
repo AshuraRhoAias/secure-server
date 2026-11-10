@@ -147,7 +147,7 @@ jobs:
         run: grep -E -A30 "not ok" "$RUNNER_TEMP/e2e.log" | grep -vE "^ *(type|duration_ms|failureType|location):" | head -150 | bash .github/scripts/annotate-log.sh - "web e2e" 150
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
-  # Escalabilidad horizontal REAL: 2 réplicas del API (contenedores) detrás de nginx, con MariaDB y MinIO (S3) compartidos.
+  # Escalabilidad horizontal REAL: 2 réplicas del API (contenedores) detrás de nginx, con MariaDB y SeaweedFS (S3) compartidos.
   # Construye la imagen de producción (Dockerfile) y comprueba reparto, un solo líder, archivos y límites compartidos y SSE.
   compose:
     runs-on: ubuntu-latest
@@ -160,8 +160,8 @@ jobs:
       - name: Secretos efímeros (aleatorios en cada ejecución)
         run: |
           {
-            for v in DB_ROOT_PASSWORD DB_PASSWORD BASE_SEED ENCRYPTION_SEED JWT_SEED MINIO_PASSWORD; do echo "$v=$(openssl rand -hex 24)"; done
-            echo "MINIO_USER=ci-minio"
+            for v in DB_ROOT_PASSWORD DB_PASSWORD BASE_SEED ENCRYPTION_SEED JWT_SEED S3_SECRET_KEY; do echo "$v=$(openssl rand -hex 24)"; done
+            echo "S3_ACCESS_KEY=ci-s3"
             echo "API_REPLICAS=2"
             echo "RATE_LIMIT_GLOBAL_PER_MIN=1000000"
           } > deploy/compose.env
@@ -180,7 +180,7 @@ jobs:
           [ -f "$RUNNER_TEMP/compose-up.log" ] && bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/compose-up.log" "compose up" 60
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a || true
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
-          for s in api mariadb minio-init lb; do
+          for s in api mariadb s3 s3-init lb; do
             docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 40 "$s" 2>&1 | bash .github/scripts/annotate-log.sh - "compose $s" 40
           done
       - name: Apagar

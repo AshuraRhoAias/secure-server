@@ -9,7 +9,7 @@
 #
 # Piezas:
 #   mariadb  estado de seguridad, sesiones, cerrojo de líder: lo comparten todas las réplicas
-#   minio    almacenamiento S3 de los archivos cifrados (FILES_STORAGE=s3): cualquier réplica sirve cualquier archivo
+#   s3       almacenamiento S3 (SeaweedFS) de los archivos cifrados (FILES_STORAGE=s3): cualquier réplica sirve cualquier archivo
 #   api      N réplicas (cada una con su cluster de WEB_CONCURRENCY procesos); UNA es líder de las tareas periódicas
 #   lb       nginx: reparto, X-Forwarded-For real, SSE sin búfer
 
@@ -32,12 +32,12 @@ x-api-env: &api-env
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
   FILES_STORAGE: s3
   S3_BUCKET: secure-files
-  S3_ENDPOINT: http://minio:9000
+  S3_ENDPOINT: http://s3:8333
   S3_ALLOW_HTTP: 'true'               # red interna; en producción, https
   S3_FORCE_PATH_STYLE: 'true'
   S3_REGION: us-east-1
-  AWS_ACCESS_KEY_ID: ${MINIO_USER:?define MINIO_USER}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD:?define MINIO_PASSWORD}
+  AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:?define S3_ACCESS_KEY}
+  AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?define S3_SECRET_KEY}
   HEALTH_EXPOSE_INSTANCE: 'true'
   RATE_LIMIT_GLOBAL_PER_MIN: ${RATE_LIMIT_GLOBAL_PER_MIN:-600}
 
@@ -58,38 +58,52 @@ services:
       timeout: 5s
       retries: 30
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data
+  # Almacenamiento S3 de referencia: SeaweedFS (las imágenes de MinIO dejaron de publicarse en Docker Hub en 2025).
+  # Las credenciales se escriben al arrancar en un archivo temporal del contenedor (no en la imagen ni en el repositorio).
+  s3:
+    image: chrislusf/seaweedfs:4.51
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        printf '{"identities":[{"name":"secure-server","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json
+        exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=64 -volume.max=0
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER:?define MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?define MINIO_PASSWORD}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?define S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?define S3_SECRET_KEY}
     volumes:
       - s3-data:/data
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/healthz || nc -z 127.0.0.1 8333 || exit 1']
       interval: 5s
       timeout: 5s
       retries: 30
+      start_period: 10s
 
-  # Crea el bucket (una vez) y termina
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+  # Crea el bucket (una vez, con reintentos mientras el S3 termina de arrancar) y termina
+  s3-init:
+    image: amazon/aws-cli:2.38.6
     depends_on:
-      minio: { condition: service_healthy }
+      s3: { condition: service_healthy }
     entrypoint: ['/bin/sh', '-c']
     command:
-      - mc alias set local http://minio:9000 "$$MINIO_USER" "$$MINIO_PASSWORD" && mc mb --ignore-existing local/secure-files && mc version enable local/secure-files
+      - |
+        for i in $$(seq 1 30); do
+          aws --endpoint-url http://s3:8333 s3api head-bucket --bucket secure-files 2>/dev/null && exit 0
+          aws --endpoint-url http://s3:8333 s3api create-bucket --bucket secure-files && exit 0
+          sleep 2
+        done
+        echo "no se pudo crear el bucket" >&2; exit 1
     environment:
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASSWORD: ${MINIO_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
 
   api:
     build: { context: .., dockerfile: Dockerfile }
     environment: *api-env
     depends_on:
       mariadb: { condition: service_healthy }
-      minio-init: { condition: service_completed_successfully }
+      s3-init: { condition: service_completed_successfully }
     deploy:
       replicas: ${API_REPLICAS:-2}
     read_only: true
