@@ -1,6 +1,12 @@
 'use client';
 
 // Cliente del navegador: SOLO habla con esta misma aplicación (/bff y /session). Nunca ve tokens.
+// Cerrando sesión a propósito: las peticiones en curso que reciban 401 no deben mandar a "/login?expired=1"
+// (se adelantarían a la navegación normal a /login)
+let leaving = false;
+export const beginLeave = (): void => { leaving = true; };
+export const isLeaving = (): boolean => leaving;
+
 export interface ApiResult<T> { ok: boolean; status: number; data: T | null; message: string; code: string | null; text: string | null }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -25,7 +31,7 @@ export async function apiCall<T = unknown>(method: 'GET' | 'POST' | 'DELETE', pa
     if (response.status === 409 && attempt === 0) { await sleep(400); continue; }
 
     if (response.status === 401 && !path.startsWith('/session/')) {
-      if (typeof window !== 'undefined') window.location.assign('/login?expired=1');
+      if (typeof window !== 'undefined' && !leaving) window.location.assign('/login?expired=1');
       return { ok: false, status: 401, data: null, message: 'La sesión terminó', code: 'NO_SESSION', text: null };
     }
 

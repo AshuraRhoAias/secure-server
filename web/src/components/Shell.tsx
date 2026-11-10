@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
-import { apiCall } from '@/lib/client';
+import { apiCall, beginLeave } from '@/lib/client';
 import { dateTime } from '@/lib/format';
 import type { Dashboard } from '@/lib/types';
 import { useApi } from '@/hooks/useApi';
@@ -74,7 +74,7 @@ function ShellFrame({ user, children }: { user: string; children: ReactNode }) {
   const open_alerts = dashboard ? Object.values(dashboard.alerts.open).reduce((a, b) => a + b, 0) : 0;
   const badges: Record<string, number> = { alerts: open_alerts, approvals: dashboard?.approvals.pending ?? 0 };
 
-  const logout = async () => { await apiCall('POST', '/session/logout', {}); window.location.assign('/login'); };
+  const logout = async () => { beginLeave(); await apiCall('POST', '/session/logout', {}); window.location.assign('/login'); };
 
   return (
     <>
