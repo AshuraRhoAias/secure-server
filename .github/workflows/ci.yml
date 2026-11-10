@@ -62,7 +62,12 @@ jobs:
       # Un archivo de prueba a la vez: comparten el mismo servidor MariaDB. Se miden con c8 (cobertura) y el umbral mínimo
       # (.c8rc.json → check-coverage) hace fallar el job si baja. Incluye el fuzzing con propiedades (test_fuzz.js).
       - name: Pruebas + cobertura (API, sesiones, RBAC, MFA/WebAuthn, SSO/SAML, KMS, archivos, operación, fuzzing)
-        run: npm run coverage
+        run: |
+          set -o pipefail
+          npm run coverage 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Resumen del fallo de las pruebas (anotación)
+        if: failure()
+        run: grep -E -B2 -A8 "not ok|AssertionError|Error:" "$RUNNER_TEMP/test.log" | head -120 | bash .github/scripts/annotate-log.sh - "pruebas API" 120
 
       - name: Resumen de cobertura
         if: always()
@@ -133,8 +138,13 @@ jobs:
             CREATE USER 'sec'@'%' IDENTIFIED BY 'sec_test_pw';
             GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
       - name: Extremo a extremo (API real + web real + navegador)
-        run: npm run test:e2e
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee "$RUNNER_TEMP/e2e.log"
         working-directory: web
+      - name: Resumen del fallo e2e (anotación)
+        if: failure()
+        run: bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/e2e.log" "web e2e" 80
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   production-install:
