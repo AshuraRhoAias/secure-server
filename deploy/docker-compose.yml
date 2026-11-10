@@ -46,7 +46,7 @@ x-api-env: &api-env
 
 services:
   mariadb:
-    image: mariadb:10.11
+    image: mariadb:13.0
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?define DB_ROOT_PASSWORD}
       MARIADB_DATABASE: secure_platform
