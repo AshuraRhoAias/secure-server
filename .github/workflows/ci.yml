@@ -228,6 +228,7 @@ jobs:
           [ -f "$RUNNER_TEMP/compose-test.log" ] && grep -E -A25 "not ok" "$RUNNER_TEMP/compose-test.log" | grep -vE "^ *(type|duration_ms|failureType|location):" | head -120 | bash .github/scripts/annotate-log.sh - "compose pruebas" 120
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a || true
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
+          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color api 2>&1 | grep -E "❌|⚠️|rror|ERR_|Exception" | tail -60 | bash .github/scripts/annotate-log.sh - "compose api errores" 60
           for s in api mariadb s3 s3-init lb; do
             docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 40 "$s" 2>&1 | bash .github/scripts/annotate-log.sh - "compose $s" 40
           done

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isLeaving } from '@/lib/client';
 import type { Severity } from '@/lib/types';
 
 // Novedades en vivo: UNA conexión Server-Sent Events por pestaña (/bff/stream) compartida por todas las páginas.
@@ -59,7 +60,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         if (source?.readyState === EventSource.CLOSED) {
           // Cerrado definitivo (respuesta no SSE: 401, 429…): ¿sigue la sesión?
           void fetch('/session/me', { credentials: 'same-origin', cache: 'no-store' }).then((r) => {
-            if (r.status === 401) { window.location.assign('/login?expired=1'); return; }
+            if (r.status === 401) { if (!isLeaving()) window.location.assign('/login?expired=1'); return; }
             setState('offline');
             window.clearTimeout(reopen);
             reopen = window.setTimeout(open, 15_000);
