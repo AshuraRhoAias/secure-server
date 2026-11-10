@@ -172,7 +172,15 @@ jobs:
           ./pruebas.sh --run 119 120 121 124 --no-color --yes | tee invariantes.txt
           if grep -F "[!]" invariantes.txt; then echo "::error::Una comprobación de invariantes ha fallado"; exit 1; fi
       - name: Semgrep con las reglas propias (las de severidad ERROR bloquean)
-        run: semgrep scan --metrics=off --error --severity ERROR --config PruebasLinux/rules/semgrep-node.yml src scripts
+        run: |
+          set -o pipefail
+          semgrep scan --metrics=off --error --severity ERROR --config PruebasLinux/rules/semgrep-node.yml src scripts 2>&1 | tee "$RUNNER_TEMP/semgrep.log"
+      - name: Resumen del fallo (anotación)
+        if: failure()
+        run: |
+          [ -f "$RUNNER_TEMP/semgrep.log" ] && bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/semgrep.log" "semgrep" 60
+          [ -f PruebasLinux/logs/latest.log ] && bash .github/scripts/annotate-log.sh PruebasLinux/logs/latest.log "pruebaslinux" 40
+          true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: pruebaslinux, path: PruebasLinux/reports/, retention-days: 14 }
