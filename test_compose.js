@@ -76,15 +76,20 @@ itCompose(`reparto: responden las ${REPLICAS} réplicas y hay UN solo líder ent
     }
     const instances = new Set([...seen.values()].map(b => b.instance));
     assert.strictEqual(instances.size, REPLICAS, `réplicas vistas: ${[...instances]}`);
-    // El liderazgo (cerrojo GET_LOCK en la BD compartida) puede moverse; se espera a que quede estable
-    let leaders = [];
-    for (let attempt = 0; attempt < 20; attempt++) {
-        leaders = [...seen.values()].filter(b => b.leader);
-        if (leaders.length === 1) break;
-        await sleep(500);
-        for (let i = 0; i < 40; i++) { const r = await call('GET', '/health/ready'); if (r.status === 200) seen.set(`${r.body.instance}/${r.body.pid}`, r.body); }
+    // El liderazgo es un cerrojo GET_LOCK en la BD COMPARTIDA: exclusivo por definición. Se comprueba (1) que alguien lo tiene
+    // (se espera hasta 60 s: la elección se reintenta cada pocos segundos tras arrancar) y (2) que nunca dicen ser líder dos
+    // procesos a la vez. No se exige VER al líder por HTTP: nginx reutiliza conexiones con cada réplica y el proceso que tiene
+    // el cerrojo puede no recibir ninguna de estas peticiones.
+    let holder = 'NULL';
+    for (let attempt = 0; attempt < 60 && holder === 'NULL'; attempt++) {
+        holder = sql("SELECT IS_USED_LOCK('secure-server:leader')");
+        if (holder === 'NULL') await sleep(1000);
     }
-    assert.strictEqual(leaders.length, 1, `líderes: ${leaders.map(l => `${l.instance}/${l.pid}`)}`);
+    assert.notStrictEqual(holder, 'NULL', 'ningún proceso tiene el cerrojo de líder');
+    const sample = new Map();   // muestra nueva: un líder anterior que ya soltó el cerrojo no debe contar
+    for (let i = 0; i < 80; i++) { const r = await call('GET', '/health/ready'); if (r.status === 200) sample.set(`${r.body.instance}/${r.body.pid}`, r.body); }
+    const leaders = [...sample.values()].filter(b => b.leader);
+    assert.ok(leaders.length <= 1, `más de un líder: ${leaders.map(l => `${l.instance}/${l.pid}`)}`);
 });
 
 itCompose('archivos: lo que sube una réplica lo sirve cualquiera (S3 compartido), entero y por rangos', async () => {
