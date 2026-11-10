@@ -168,6 +168,8 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck yamllint jq
           pipx install semgrep==1.95.0
+          # semgrep 1.95 importa pkg_resources (setuptools), que ya no viene en el entorno de pipx del runner
+          pipx inject semgrep "setuptools<81"
       - name: Perfil seguro (informe)
         run: ./pruebas.sh --safe-all --no-color --yes || true
         working-directory: PruebasLinux
