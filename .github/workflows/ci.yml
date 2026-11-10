@@ -144,7 +144,7 @@ jobs:
         working-directory: web
       - name: Resumen del fallo e2e (anotación)
         if: failure()
-        run: bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/e2e.log" "web e2e" 80
+        run: grep -E -A30 "not ok" "$RUNNER_TEMP/e2e.log" | grep -vE "^ *(type|duration_ms|failureType|location):" | head -150 | bash .github/scripts/annotate-log.sh - "web e2e" 150
 
   # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   # Entorno independiente de pruebas de seguridad (PruebasLinux): perfil seguro (repositorio y localhost) como informe, y las
