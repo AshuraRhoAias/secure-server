@@ -49,7 +49,7 @@ async function enable({ now = new Date() } = {}) {
         parts.push(`PARTITION ${nameFor(addMonths(first, i))} VALUES LESS THAN (TO_DAYS('${ymd(addMonths(first, i + 1))}'))`);
     }
     parts.push('PARTITION p_future VALUES LESS THAN MAXVALUE');
-    await db.query(`ALTER TABLE ${TABLE} DROP PRIMARY KEY, ADD PRIMARY KEY (id, created_at), PARTITION BY RANGE (TO_DAYS(created_at)) (${parts.join(', ')})`);
+    await db.query(`ALTER TABLE ${TABLE} DROP PRIMARY KEY, ADD PRIMARY KEY (id, created_at) PARTITION BY RANGE (TO_DAYS(created_at)) (${parts.join(', ')})`);
     return { changed: true, partitions: await partitions() };
 }
 
