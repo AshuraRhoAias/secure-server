@@ -17,13 +17,14 @@
 
 ## A. Resumen ejecutivo
 
-- **Última actualización:** 2026-11-09 (7.ª intervención, «cierre»). Punto de recuperación: tag `pre-cierre-2026-11` (= `b36a9a1`, el `main` tras el PR #8).
+- **Última actualización:** 2026-11-10 (7.ª intervención, «cierre»: CI de todas las fases en verde). Punto de recuperación: tag `pre-cierre-2026-11` (= `b36a9a1`, el `main` tras el PR #8).
 - **Trabajo de esta intervención:** ramas apiladas `cierre/0-base` → `cierre/1-seguridad` → `cierre/2-deps` → `cierre/3-web` → `cierre/4-escala`
-  → `cierre/5-pruebaslinux` → `cierre/6-docs` (una por fase, para revisarlas por separado). Entradas #21–#28.
+  → `cierre/5-pruebaslinux` → `cierre/6-docs` (una por fase, para revisarlas por separado). Entradas #21–#29.
 - **Entorno de verificación:** Windows 11 + Node 26 en local **sin MariaDB** (decisión del propietario: lo que necesita BD se verifica en
-  GitHub Actions con MariaDB 10.11 real). Las fases 0–2 están **verificadas en CI** (verde). Las fases 3–6 están verificadas en local en
-  todo lo que no necesita BD y **su CI está pendiente**: el `git push` de esas ramas se bloqueó porque la credencial de GitHub del equipo
-  caducó (el Git Credential Manager pide iniciar sesión de forma interactiva). Ver #28.
+  GitHub Actions con MariaDB 10.11 real). **Todas las fases están verificadas en CI** (jobs `test`, `web` con e2e en Chromium,
+  Firefox y WebKit + axe, `compose` con 2 réplicas + nginx + MariaDB + SeaweedFS, `pruebaslinux` y `production-install` en verde el
+  10-nov). Al ejecutarse por primera vez, el CI encontró **16 problemas**: 4 errores reales del código o de la interfaz, 3 de entorno y
+  9 de las propias pruebas; todos corregidos en la fase donde nacían (#29). Solo queda en rojo CodeQL, por el falso positivo conocido.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -45,8 +46,8 @@ fast-check 4); interfaz web completa (passkey, SSO sin tokens en el navegador, d
 archivos en S3; varias réplicas con Docker; réplica de lectura y particionado de eventos; `@prometheus-io/client`; 9 opciones nuevas en
 PruebasLinux con Semgrep propio; documentación al día con la tabla de endpoints generada y comprobada.
 
-**Riesgos pendientes** (detalle en §D): rotar la contraseña filtrada; `.env` versionado (decisión del propietario: datos de prueba); CI de
-las fases 3–6 sin ejecutar; pentest externo; multi-organización; S3 y proveedores de identidad reales sin probar.
+**Riesgos pendientes** (detalle en §D): rotar la contraseña filtrada; `.env` versionado (decisión del propietario: datos de prueba);
+descartar la alerta de CodeQL; pentest externo; multi-organización; S3 y proveedores de identidad reales sin probar.
 
 ---
 
@@ -184,7 +185,7 @@ las fases 3–6 sin ejecutar; pentest externo; multi-organización; S3 y proveed
   mejora.
 - **Siguiente mejora:** script `winget`/`choco` para el toolset en Windows. *(Prioridad baja.)*
 
-Las entregas siguientes siguen en la sección **K** (#8–#20) y **L** (#21–#28), con este mismo formato.
+Las entregas siguientes siguen en la sección **K** (#8–#20) y **L** (#21–#29), con este mismo formato.
 
 ---
 
@@ -197,24 +198,25 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Componente | Estado | F | S | Q | E | R | T | D | Media | Justificación breve |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
 | Criptografía y rotación | Evaluado (CI, oct) | 9 | 8 | 8 | 9 | 6 | 9 | 9 | **8,3** | v4 + HKDF, rotación probada con `kill -9`; RAM ≈7× la BD al rotar |
-| Autenticación (sesiones, MFA, SSO) | Evaluado (CI) + parcial (handoff: CI pendiente) | 9 | 9 | 8 | 8 | 8 | 9 | 9 | **8,6** | Refresh rotatorio, TOTP/WebAuthn/OIDC/SAML; solo contra simuladores |
+| Autenticación (sesiones, MFA, SSO) | Evaluado (CI) | 9 | 9 | 8 | 8 | 8 | 9 | 9 | **8,6** | Refresh rotatorio, TOTP/WebAuthn/OIDC/SAML; solo contra simuladores |
 | Autorización | Evaluado (CI) | 9 | 9 | 8 | 8 | 8 | 8 | 8 | **8,3** | Permisos por rol desde la BD, dos administradores; sin multi-organización |
 | API y validación | Evaluado (local + CI) | 9 | 8 | 8 | 9 | 8 | 9 | 9 | **8,6** | OpenAPI = código (prueba) y README = OpenAPI (prueba); fuzzing de todas las rutas |
-| Base de datos | Parcial (particiones/réplica: CI pendiente) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales nuevas |
-| Archivos (local y S3) | Evaluado (local) + parcial (API en S3: CI pendiente) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; audio/vídeo sin sanear |
+| Base de datos | Evaluado (CI; réplica de lectura solo con la principal) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales nuevas |
+| Archivos (local y S3) | Evaluado (CI: simulador y SeaweedFS) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; audio/vídeo sin sanear |
 | Gestión de errores | Evaluado | 8 | 8 | 8 | 8 | — | 8 | 7 | **7,8** | Sin trazas al cliente (fuzzing); fallos de S3/BD sin filas a medias |
 | Dependencias | Evaluado (CI, fases 0–2) | 9 | 9 | 8 | — | — | 8 | 8 | **8,4** | `npm audit` producción 0 (raíz y web); Dependabot incluye docker |
 | Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente) y `.env` versionado |
-| Observabilidad y operación | Evaluado (CI) + parcial (stream: CI pendiente) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
-| Rendimiento y escalabilidad | Parcial (compose: CI pendiente) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
+| Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
+| Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
 | Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~430 API + 57 web + e2e; local sin BD: se omiten las de BD |
-| Interfaz web | Parcial (unitarias y build en local; e2e nuevas: CI pendiente) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
-| Infraestructura / Docker | Parcial (compose validado; build y pruebas: CI pendiente) | 8 | 8 | 8 | 7 | 7 | 7 | 8 | **7,6** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
-| PruebasLinux | Evaluado (local) + parcial (CI pendiente) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
+| Interfaz web | Evaluado (CI: e2e en 3 navegadores + axe) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
+| Infraestructura / Docker | Evaluado (CI: imagen construida y 2 réplicas probadas) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
+| PruebasLinux | Evaluado (local y CI) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
 | Documentación | Evaluado | 9 | — | 8 | — | — | 8 | 9 | **8,5** | README 4979→560 líneas, histórico separado, tabla de endpoints con prueba |
 
-**Media de los 16 componentes ≈ 8,1/10** (antes 6,7 el 21-oct). Con el CI de las fases 3–6 en verde, «Parcial» pasaría a «Evaluado»
-sin cambiar las notas; un fallo allí las bajaría hasta que se corrija.
+**Media de los 16 componentes ≈ 8,1/10** (antes 6,7 el 21-oct). El CI de las fases 3–6 está en verde desde el 10-nov: «Parcial» pasa a
+«Evaluado». Las notas se mantienen porque los fallos que encontró el CI (#29) se corrigieron con pruebas que los cubren. Solo sube la T de
+Docker, que ya tiene pruebas ejecutadas.
 
 ---
 
@@ -223,10 +225,10 @@ sin cambiar las notas; un fallo allí las bajaría hasta que se corrija.
 | Prioridad | Hallazgo | Evidencia | Impacto | Solución | Estado |
 |---|---|---|---|---|---|
 | **Crítica** | Contraseña real de una BD MySQL remota en el repositorio público | `test.js` (host `sistemagym.xo.je`), en el historial desde `4b196d1` | Cualquiera puede leerla del historial de GitHub | Archivo eliminado (#22). **Cambiar la contraseña en el proveedor**; opcional: reescribir el historial | Abierto (rotación: propietario) |
-| Alta | CI de las fases 3–6 sin ejecutar | `git push` → «Cannot prompt because user interactivity has been disabled» | Lo que necesita MariaDB/navegadores no está verificado | Iniciar sesión en GitHub en este equipo y subir las ramas; corregir lo que falle | Bloqueado (credencial) |
+| Alta | CI de las fases 3–6 sin ejecutar | `git push` bloqueado: el Git Credential Manager tenía 3 cuentas de GitHub y preguntaba cuál usar | Lo que necesita MariaDB/navegadores/Docker no estaba verificado | Cuenta fijada en la configuración local del repositorio; ramas subidas en orden; 16 fallos corregidos (#29) | Cerrado (CI verde 10-nov) |
 | Alta | Sin pentest externo ni auditoría | `docs/PENTEST-AUTOEVALUACION.md` §4 | Las pruebas propias no sustituyen a un tercero | Encargar pentest con `docs/openapi.json` y el entorno reproducible | Abierto (organización) |
 | Alta (aceptada) | `.env` versionado | `git ls-files .env` | Si un día lleva secretos reales, quedan en el historial | Decisión del propietario: hoy son datos de prueba; antes de producción, `npm run kms -- migrate-env` y sacarlo | Aceptado |
-| Media | Alerta de CodeQL `js/user-controlled-bypass` en `mfa.service.js` | Check «Code scanning results» del PR #8 | Falso positivo analizado: el valor elige qué factor se verifica, no si se verifica | Endurecido (un solo factor, tipo texto) (#22); **descartarla en GitHub** como falso positivo | Mitigado |
+| Media | Alerta de CodeQL `js/user-controlled-bypass` en `mfa.service.js` (sigue en rojo en los PR #24 y #25) | Check «Code scanning results» del PR #8 | Falso positivo analizado: el valor elige qué factor se verifica, no si se verifica | Endurecido (un solo factor, tipo texto) (#22); **descartarla en GitHub** como falso positivo | Mitigado |
 | Media | Proveedores reales sin probar (Entra ID/Okta, AWS KMS/Vault, AWS S3/R2) | Pruebas contra simuladores | Diferencias de un proveedor real | Prueba en preproducción con cada proveedor usado | Abierto |
 | Media | Rotación de claves en memoria | 83 MB → 593 MB de RAM, 75 s cerrado | Inviable con BD de GB | Snapshot y re-cifrado por lotes en streaming | Propuesto |
 | Media | Multi-organización, HIBP, límite de sesiones simultáneas, versionado de API | `docs/CONTROLES.md` §2 | Controles ASVS no cubiertos | Diseño y desarrollo por separado | Propuesto |
@@ -262,10 +264,11 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 | 0 · `a5b9b05`, `f32972a` | — | `package-lock.json`, `src/crypto/kms-providers.js`, `test_kms.js` | — | `main` en rojo; proveedor KMS `file` inutilizable en Windows | CI verde; `test_kms` 16/16 en Windows |
 | 1 · `b1863b6` | `scripts/healthCheck.js` | `protection.middleware.js`, `index.js`, `mfa.service.js`, `.gitleaksignore`, `.env.example`, `docs/SEGURIDAD.md`, `package.json`, `test_api.js`, `test_mfa.js` | `test.js`, `fix-system.js`, 8 marcadores «score 100», `reports/…json`, `integrity/history.json` | Bypass en producción, CodeQL, gitleaks, restos engañosos, credencial filtrada, health-check falso | CI verde; `test:api` 15/15; lint 0 |
 | 2 · `d0daebb`…`bed6619` | — | 3 workflows, `package*.json`, `web/package*.json`, `test_fuzz.js` | — | 14 actualizaciones de Dependabot | CI verde; build con TypeScript 7; fuzz 16/16 |
-| 3 · `62dbe6b` | migración 017, `handoff.service.js`, `live-stream.js`, `cluster-status.js`, 6 rutas y 4 módulos de `web/`, `e2e/live-auth.test.cjs`, `sso-passkey-stream.test.ts` | controladores SSO/SAML/system, rutas, `index.js`, `cluster.js`, `schema.sql`, `openapi.json`, páginas web, `ci.yml`, 4 suites de pruebas | — | Interfaz web completa (#24) | Local: web 57/57 (mutaciones), build, `test:api`, lint; **CI pendiente** |
-| 4 · `2ad6e0b` | `s3-store.js`, `events-partitions.js`, `Dockerfile`, `.dockerignore`, `deploy/*`, `test_s3.js`, `test_files_s3.js`, `test_partitions.js`, `test_compose.js`, `mock-s3.js`, `scripts/eventsPartitions.js` | `storage.js`, `file-cipher.js`, `files-backup.js`, `database.js`, `metrics.js`, `cluster.js`, 2 servicios, `ci.yml`, `dependabot.yml`, `install.js`, `INSTALL.md` | dependencia `prom-client` | Escalabilidad (#25) | Local: `test_s3` 5/5, fuzz, `test_files` sin BD, agregación de métricas, compose validado; **CI pendiente** |
-| 5 · `10d4921` | `PruebasLinux/modules/16_ampliacion.sh`, `rules/semgrep-node.yml` | `ci.yml` | — | PruebasLinux (#26) | `bash -n`, `--list` 126, opciones 119/120/121/124 OK; **CI pendiente** |
+| 3 · `62dbe6b` | migración 017, `handoff.service.js`, `live-stream.js`, `cluster-status.js`, 6 rutas y 4 módulos de `web/`, `e2e/live-auth.test.cjs`, `sso-passkey-stream.test.ts` | controladores SSO/SAML/system, rutas, `index.js`, `cluster.js`, `schema.sql`, `openapi.json`, páginas web, `ci.yml`, 4 suites de pruebas | — | Interfaz web completa (#24) | Local: web 57/57 (mutaciones), build, `test:api`, lint; CI verde tras #29 |
+| 4 · `2ad6e0b` | `s3-store.js`, `events-partitions.js`, `Dockerfile`, `.dockerignore`, `deploy/*`, `test_s3.js`, `test_files_s3.js`, `test_partitions.js`, `test_compose.js`, `mock-s3.js`, `scripts/eventsPartitions.js` | `storage.js`, `file-cipher.js`, `files-backup.js`, `database.js`, `metrics.js`, `cluster.js`, 2 servicios, `ci.yml`, `dependabot.yml`, `install.js`, `INSTALL.md` | dependencia `prom-client` | Escalabilidad (#25) | Local: `test_s3` 5/5, fuzz, `test_files` sin BD, agregación de métricas, compose validado; CI verde tras #29 |
+| 5 · `10d4921` | `PruebasLinux/modules/16_ampliacion.sh`, `rules/semgrep-node.yml` | `ci.yml` | — | PruebasLinux (#26) | `bash -n`, `--list` 126, opciones 119/120/121/124 OK; CI verde tras #29 |
 | 6 · (este commit) | `docs/historico/GUIA-ORIGINAL.md`, `scripts/openapiTable.js` | `README.md`, `ReadmeLogsMejoras.md`, `docs/SEGURIDAD.md`, `web/README.md`, `PruebasLinux/ReadmeLogMejoras.md`, `.env.example`, `test_api.js`, `package.json` | 4300 líneas históricas del README (movidas) | Documentación fiel (#27) | `test:api` 16/16 (incluye README = OpenAPI) |
+| 3–6 · correcciones del CI (10-nov) | `.github/scripts/annotate-log.sh` | `ci.yml`, `Dockerfile`, `deploy/docker-compose.yml`, `compose.env.example`, `secure-communications.service.js`, `events-partitions.js`, `web/src/{lib/client.ts,components/{Live,Shell}.tsx,app/globals.css}` y 7 páginas, `mock-idp.js`, `test_ops`, `test_sessions`, `test_partitions`, `test_compose`, `live-auth.test.cjs`, docs | servicio MinIO | 16 fallos que encontró el primer CI (#29) | CI verde en las fases 3–6 |
 
 ---
 
@@ -273,13 +276,14 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 
 ### Completado (con evidencia)
 - ✅ `main` en verde y punto de recuperación (#21). ✅ Seguridad: bypass, MFA, gitleaks, restos y credencial retirada del árbol (#22).
-- ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24, CI pendiente). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25, CI pendiente).
-- ✅ PruebasLinux ampliado (#26, CI pendiente). ✅ Documentación fiel y con prueba de sincronía (#27).
+- ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25).
+- ✅ PruebasLinux ampliado (#26). ✅ Documentación fiel y con prueba de sincronía (#27). ✅ CI de todas las fases en verde (#28, #29).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 1. **Cambiar la contraseña filtrada** de la BD remota · crítica · el usuario de `test.js` ya no da acceso.
-2. **Subir las ramas `cierre/3-web` … `cierre/6-docs`** (requiere iniciar sesión en GitHub) y corregir lo que falle · alta · los jobs
-   `test`, `web`, `compose`, `pruebaslinux` y `production-install` en verde; entonces abrir un PR por fase.
+2. **Fusionar por fases**: `cierre/0-base` → … → `cierre/6-docs`, en orden (cada rama contiene a la anterior). Los PR #24 y #25
+   apuntan a `main` e incluyen las fases anteriores · alta · cada fase fusionada con su CI en verde; los PR de Dependabot #9–#23 se
+   cierran solos al fusionar la fase 2.
 3. **Descartar la alerta de CodeQL** como falso positivo y **activar Dependency graph** · baja · sin alertas abiertas ni jobs rojos de ruido.
 4. **Pruebas con proveedores reales** (IdP, KMS, S3) en preproducción · media · un login SSO real, una clave KMS real, un bucket real.
 5. **Pentest externo** · alta (organizativa) · informe y retest de hallazgos.
@@ -434,7 +438,7 @@ Las entregas 3–6 (secciones G–J) se registraron como tablas resumen. Aquí v
 - **Estado:** completado. **Archivos:** `src/security/permissions.js`, `admin-approvals.service.js`, `role.middleware.js`.
 - **Problema detectado:** solo `user`/`admin`; acciones destructivas de una sola persona.
 - **Acciones realizadas:** `user/auditor/operator/admin` con permisos explícitos; aprobación de un segundo admin, atómica y con caducidad.
-- **Pruebas ejecutadas:** `test_rbac` (13), e2e de aprobaciones; en #24, dos administradores aprobando a la vez (e2e, CI pendiente).
+- **Pruebas ejecutadas:** `test_rbac` (13), e2e de aprobaciones; en #24, dos administradores aprobando a la vez (e2e, CI verde 10-nov).
 - **Puntuación:** 9/10. **Problemas restantes:** multi-organización. **Siguiente mejora:** diseño de tenencia. *(Media.)*
 
 ### #14 — KMS para secretos y claves de archivo
@@ -449,7 +453,7 @@ Las entregas 3–6 (secciones G–J) se registraron como tablas resumen. Aquí v
 - **Estado:** completado (en vivo en #24; librería de métricas en #25). **Archivos:** `src/security/{alerts,dashboard,privacy}.service.js`, `src/observability/*`.
 - **Problema detectado:** sin alertas, panel ni métricas.
 - **Acciones realizadas:** alertas por umbral con webhook firmado, panel JSON, Prometheus, OTLP, exportación y borrado de datos personales, planes de incidentes y custodia.
-- **Pruebas ejecutadas:** `test_ops` (21 + 4 del stream y el cluster, estas en CI pendiente).
+- **Pruebas ejecutadas:** `test_ops` (21 + 4 del stream y el cluster, estas en CI verde desde el 10-nov).
 - **Puntuación:** 8/10. **Problemas restantes:** envío a SIEM. **Siguiente mejora:** exportador a SIEM. *(Baja.)*
 
 ### #16 — CI, cobertura y fuzzing
@@ -487,7 +491,7 @@ Las entregas 3–6 (secciones G–J) se registraron como tablas resumen. Aquí v
 
 ---
 
-## L. Intervención 2026-11-09: plan de cierre (#21–#28)
+## L. Intervención 2026-11-09: plan de cierre (#21–#29)
 
 Plan aprobado por el propietario con estas decisiones: `.env` se queda (datos de prueba); MariaDB no está instalada en el equipo (lo que
 necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz web con alcance completo; un PR por fase.
@@ -519,25 +523,25 @@ necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz we
 - **Puntuación:** 9/10. **Problemas restantes:** las ramas de Dependabot se cerrarán solas al fusionar. **Siguiente mejora:** —.
 
 ### #24 — Fase 3: interfaz web completa
-- **Estado:** parcial — implementado y verificado en local; **CI pendiente** (push bloqueado, #28).
+- **Estado:** completado — CI verde (10-nov) tras las correcciones de #29.
 - **Archivos y módulos revisados:** `web/`, `src/sso/*`, `src/api/controllers/{sso,saml,system}.controller.js`, `src/cluster.js`, `src/index.js`.
 - **Problema detectado:** sin passkey ni SSO en la interfaz; datos por sondeo; `Sistema` describía solo el proceso que atendía. Además, el SSO del API entregaba los tokens en el fragmento de la URL (visibles para el JavaScript), incompatible con el BFF.
 - **Acciones realizadas:** entrega SSO por código de un solo uso ligado al navegador (migración 017, `POST /api/sso/exchange`, robo → evento crítico); `GET /api/system/stream` (SSE con cursor, revalidación cada 30 s, límites, cierre ordenado); estado de todos los workers; en la web: passkey (segundo factor), SSO OIDC/SAML, en vivo (panel, alertas, aprobaciones, «N eventos nuevos», avisos), tabla del cluster y mejoras de accesibilidad.
 - **Pruebas ejecutadas:** web 57/57 (14 nuevas, con dos mutaciones que las hacen fallar); typecheck y build; `test:api` 15/15 con la OpenAPI al día; IPC del cluster con workers simulados. Escritas para el CI: `test_sso` +4, `test_saml` +1, `test_ops` +4, `test_scale` +1 aserción, e2e `live-auth.test.cjs` (en vivo, passkey, SSO, concurrencia, axe, Firefox y WebKit).
-- **Puntuación:** 8/10 provisional — se confirma o se corrige con el CI.
-- **Problemas restantes:** lo que diga el CI (sobre todo axe y WebKit, que nunca se han ejecutado contra esta interfaz). **Siguiente mejora:** §F 2. *(Alta.)*
+- **Puntuación:** 8/10 confirmada — el CI encontró dos fallos reales de la interfaz (contraste y carrera al cerrar sesión), ya corregidos y cubiertos por las e2e.
+- **Problemas restantes:** SSO solo contra un proveedor simulado; passkey solo como segundo factor. **Siguiente mejora:** §F 4. *(Media.)*
 
 ### #25 — Fase 4: escalabilidad
-- **Estado:** parcial — verificado en local; **CI pendiente** (#28).
+- **Estado:** completado — CI verde (10-nov) tras las correcciones de #29.
 - **Archivos y módulos revisados:** `src/files/*`, `src/config/database.js`, `src/security/{dashboard,security-events}.service.js`, `src/observability/metrics.js`, `src/cluster.js`.
 - **Problema detectado:** `FILES_DIR` local obligaba a un volumen compartido; sin prueba con varias réplicas; MariaDB como cuello; `security_events` purgada con DELETE; `prom-client` sustituido; Node 18/20 fuera de soporte.
 - **Acciones realizadas:** `FILES_STORAGE=s3` (una petición con Range por descarga; integridad igual); Dockerfile de producción y `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + SeaweedFS; MinIO se descartó porque sus imágenes dejaron de publicarse en Docker Hub) con job `compose`; `DB_READ_HOST` (solo análisis, con vuelta a la principal); particionado mensual opcional; `@prometheus-io/client` (agregación entre procesos comprobada igual que con prom-client); Node ≥ 22.
 - **Pruebas ejecutadas:** `test_s3` 5/5 en local (cifrado en el bucket, rangos con una petición, byte alterado/truncado/ausente, servidor que ignora Range, fallo de subida, configuración); fuzz 16/16 y `test_files` sin BD tras reescribir `decryptRange`; prueba anti-interpolación SQL; compose validado con `docker compose config`. Escritas para el CI: `test_files_s3`, `test_partitions`, `test_compose`.
-- **Puntuación:** 8/10 provisional.
-- **Problemas restantes:** CI; el compose usa TLS desactivado hacia la BD (red interna, documentado). **Siguiente mejora:** §F 2 y 6. *(Alta / media.)*
+- **Puntuación:** 8/10 confirmada — el CI encontró dos errores reales (el API no arrancaba en el contenedor y el `ALTER TABLE` de las particiones tenía un error de sintaxis), ya corregidos.
+- **Problemas restantes:** el compose usa TLS desactivado hacia la BD y `S3_SSE=none` (red interna; los archivos ya van cifrados), documentado. **Siguiente mejora:** §F 2 y 6. *(Alta / media.)*
 
 ### #26 — Fase 5: PruebasLinux
-- **Estado:** parcial — verificado en local; **CI pendiente** (#28).
+- **Estado:** completado — CI verde (10-nov; semgrep 1.181.1, ver #29).
 - **Archivos y módulos revisados:** `PruebasLinux/lib/core.sh`, `modules/*`, `.github/workflows/ci.yml`.
 - **Problema detectado:** sin semgrep; nada de lo nuevo (refresh, SSO, BFF, Docker) tenía comprobación; PruebasLinux no corría en CI.
 - **Acciones realizadas:** opciones 118–126 en un módulo que se carga el último (1–117 sin renumerar); reglas Semgrep propias; job `pruebaslinux` (informe + puerta).
@@ -551,13 +555,40 @@ necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz we
 - **Acciones realizadas:** README de 4979 a 560 líneas (guía de 2025 en `docs/historico/GUIA-ORIGINAL.md`); tabla de endpoints generada desde la OpenAPI con `npm run docs:endpoints` y **una prueba que falla si se desincroniza**; afirmaciones desfasadas corregidas; variables nuevas en `.env.example`; §13, §22, §23 y §24 de SEGURIDAD; esta bitácora con A–F al día y #8–#28 en formato.
 - **Pruebas ejecutadas:** `test:api` 16/16 (incluye README = OpenAPI = código).
 - **Puntuación:** 9/10 — la documentación de la API ya no puede quedarse atrás sin que falle una prueba; el resto depende de revisión.
-- **Problemas restantes:** las cifras de las fases 3–6 se actualizarán con el CI. **Siguiente mejora:** —.
+- **Problemas restantes:** ninguno (cifras de las fases 3–6 actualizadas con el CI en #29). **Siguiente mejora:** —.
 
 ### #28 — Fase 7: validación final
-- **Estado:** **bloqueado** en la parte que necesita CI.
+- **Estado:** completado (10-nov).
 - **Archivos y módulos revisados:** todo lo anterior.
-- **Problema detectado:** `git push` de `cierre/3-web` se quedó esperando; con interactividad desactivada: «Cannot prompt because user interactivity has been disabled» (la credencial de GitHub del Git Credential Manager caducó).
-- **Acciones realizadas:** verificación local de todo lo que no necesita MariaDB ni navegadores (ver #21–#27); commits listos en las ramas locales.
-- **Pruebas ejecutadas:** locales: lint 0, `test:api` 16/16, `test_s3` 5/5, fuzz 16/16, `test_kms` 16/16, web 57/57 + typecheck + build, PruebasLinux 126 opciones; CI verde de las fases 0–2.
-- **Puntuación:** — (no se puntúa una validación sin terminar).
-- **Problemas restantes:** subir `cierre/3-web` … `cierre/6-docs`, revisar el CI y corregir lo que falle. **Siguiente mejora:** §F 2. *(Alta.)*
+- **Problema detectado:** `git push` de `cierre/3-web` se quedaba esperando: el Git Credential Manager tiene 3 cuentas de GitHub guardadas y pedía elegir una en cada subida (sin interactividad: «Cannot prompt because user interactivity has been disabled»).
+- **Acciones realizadas:** verificación local de todo lo que no necesita MariaDB ni navegadores (ver #21–#27); cuenta del repositorio fijada en su configuración local (`credential.https://github.com.username`); ramas subidas **en orden** y cada corrección propagada por merge (sin reescribir la historia publicada); cadena `main → 0 → … → 6` comprobada.
+- **Pruebas ejecutadas:** locales: lint 0, `test:api` 16/16, `test_s3` 5/5, fuzz 16/16, `test_kms` 16/16, web 57/57 + typecheck + build, PruebasLinux 126 opciones; **CI verde de todas las fases** (`test`, `web`, `compose`, `pruebaslinux`, `production-install`).
+- **Puntuación:** 9/10 — todo verificado donde puede verificarse (CI con MariaDB, navegadores y Docker reales); falta lo que solo puede hacer el propietario (§F 1 y 3).
+- **Problemas restantes:** rotar la contraseña filtrada; descartar la alerta de CodeQL; fusionar por fases. **Siguiente mejora:** §F 1–3. *(Crítica / alta.)*
+
+### #29 — Correcciones que pidió el primer CI de las fases 3–6
+- **Estado:** completado (10-nov; CI verde en `cierre/3-web`, `cierre/4-escala`, `cierre/5-pruebaslinux` y `cierre/6-docs`).
+- **Archivos y módulos revisados:** registros de cada job. Los completos de GitHub exigen iniciar sesión, así que los pasos que fallan
+  publican sus líneas clave como **anotaciones**, que se leen con la API pública (`.github/scripts/annotate-log.sh`).
+- **Problema detectado** (16, por tipo):
+  - **Errores reales del código o la interfaz (4):** (1) el API **no arrancaba en el contenedor**: creaba `src/notifications` al cargar
+    y ahí el código es de solo lectura; (2) el `ALTER TABLE` del particionado tenía una **coma antes de `PARTITION BY`** (error de
+    sintaxis en MariaDB: nunca habría funcionado); (3) **accesibilidad**: etiquetas «ok» con contraste 4,46:1 (< 4,5) y tablas o bloques
+    desplazables sin foco de teclado; (4) **carrera al cerrar sesión**: un 401 de una petición en curso mandaba a `/login?expired=1`.
+  - **Entorno (3):** las imágenes de **MinIO dejaron de publicarse** en Docker Hub; SeaweedFS rechaza el cifrado del lado del servidor
+    sin configurar (`S3_SSE`); **semgrep 1.95** ya no arranca en el runner (`pkg_resources`).
+  - **Las propias pruebas (9):** `production-install` cargaba `prom-client`; `test_ops` usaba administradores cuyas sesiones cerraba
+    una prueba anterior (`revoke-all`); e2e de passkey (el alta responde 201 y el método de sesión es `hwk`, RFC 8176); e2e de SSO
+    (Playwright no intercepta peticiones que llegan por redirección); `test_sessions` intermitente (el token renovado también duraba
+    1,2 s); `test_partitions` esperaba borrar `p_hist` con datos aún dentro de la retención; `test_compose` perdía trozos del SSE
+    (lectura en carrera con un temporizador) y buscaba al líder por HTTP (el proceso con el cerrojo puede no recibir peticiones).
+- **Acciones realizadas:** `NOTIFICATIONS_DIR` (en Docker `/app/data/notifications`) y fallo no fatal; coma eliminada; color «ok»
+  `#146c3a` (5,75:1) y `tabIndex={0}` en tablas y bloques; `beginLeave()` antes de cerrar sesión; **SeaweedFS 4.51** + aws-cli 2.38.6
+  en el compose (`S3_ACCESS_KEY`/`S3_SECRET_KEY`, `S3_SSE=none` documentado); semgrep 1.181.1; el proveedor OIDC simulado atiende
+  `/authorize`; el líder se comprueba con `IS_USED_LOCK` en la BD; el resto, pruebas corregidas sin rebajar lo que comprueban.
+- **Pruebas ejecutadas:** CI completo en verde en las cuatro ramas (API con MariaDB 10.11; e2e en Chromium, Firefox y WebKit + axe;
+  imagen construida y 2 réplicas tras nginx con SeaweedFS; PruebasLinux con semgrep); web 57/57 y typecheck en local.
+- **Puntuación:** 9/10 — cada fallo se corrigió en la fase donde nacía y se propagó en orden. De los 16, 4 eran errores reales que solo
+  un entorno real podía mostrar.
+- **Problemas restantes:** CodeQL (falso positivo, descartar en GitHub); SSO, KMS y S3 solo contra simuladores o SeaweedFS.
+  **Siguiente mejora:** §F 3 y 4. *(Baja / media.)*
