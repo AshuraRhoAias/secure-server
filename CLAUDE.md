@@ -81,6 +81,38 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 - Playwright no intercepta peticiones que llegan por redirección (el IdP simulado atiende `/authorize`).
 - Las pruebas que miden duraciones o leen streams deben tolerar runners lentos (sin carreras con temporizadores).
 
+## Herramientas de contexto (obligatorio)
+
+### graphify: para ENTENDER el código
+Úsalo ANTES de leer o buscar archivos.
+- Arquitectura o "¿cómo funciona X?" → `graphify query "<pregunta>"`
+- Un símbolo concreto → `graphify explain "<Nombre>"`
+- Relación entre dos cosas → `graphify path "A" "B"`
+- Solo abre archivos después, y con rango de líneas (Read con offset/limit).
+- Si el grafo no tiene el símbolo o está desactualizado → `graphify update .` y repite.
+- Al terminar cambios que agreguen o borren archivos, funciones o imports → `graphify update .`
+
+### context-mode: para EJECUTAR y LEER salidas grandes
+Úsalo para cualquier comando o lectura que produzca más de ~50 líneas.
+- Tests (`npm test`, `npm run coverage`) → `ctx_execute` con intent "lista de pruebas fallidas con su error"
+- Logs (docker, PruebasLinux/logs, api.log) → `ctx_execute` filtrando errores
+- `git log`, `git diff` grandes, `npm audit`, `semgrep` → `ctx_execute` o `ctx_batch`
+- Documentación web → `ctx_index` + `ctx_search`
+- Varios comandos relacionados → un solo `ctx_batch` con las queries que necesitas
+- Después de una compactación → `ctx_resume` antes de continuar
+
+### Regla de decisión
+| Necesito… | Uso |
+|---|---|
+| Saber dónde está / cómo se conecta algo | graphify |
+| Ver el resultado de algo que ejecuté | context-mode |
+| Editar un archivo | Read con rango de líneas → Edit |
+
+### Prohibido
+- Grep/Glob masivo sobre `src/` sin consultar antes el grafo.
+- `cat` de archivos completos > 300 líneas.
+- Volcar salidas completas de tests o logs al contexto.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
