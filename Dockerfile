@@ -19,6 +19,7 @@ FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
     ENV_FILE=/app/config/empty.env \
     FILES_DIR=/app/storage \
+    NOTIFICATIONS_DIR=/app/data/notifications \
     PORT=3000
 WORKDIR /app
 RUN groupadd --system --gid 10001 app \

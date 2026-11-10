@@ -163,7 +163,14 @@ jobs:
           COMPOSE_ENV_FILE: deploy/compose.env
       - name: Registros si algo falló
         if: failure()
-        run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
+        run: |
+          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a
+          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
+          # Resumen como anotación: se puede leer sin iniciar sesión (API pública de check-runs)
+          for s in api mariadb minio-init lb; do
+            msg=$(docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 25 "$s" 2>&1 | tr -d '\015' | cut -c1-300 | awk '{ gsub(/%/, "%25"); printf "%s%%0A", $0 }')
+            echo "::error title=compose $s::$msg"
+          done
       - name: Apagar
         if: always()
         run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env down -v
@@ -184,7 +191,7 @@ jobs:
         run: |
           if NODE_ENV=production npm run dev; then echo "npm run dev no debería arrancar en producción"; exit 1; fi
       - name: Los módulos del servidor cargan sin dependencias de desarrollo
-        run: node -e "for (const m of ['express','helmet','mysql2','sharp','prom-client','@simplewebauthn/server','@node-saml/node-saml']) require(m); console.log('ok')"
+        run: node -e "for (const m of ['express','helmet','mysql2','sharp','@prometheus-io/client','@aws-sdk/client-s3','@simplewebauthn/server','@node-saml/node-saml']) require(m); console.log('ok')"
 
   # Pull requests: no se aceptan dependencias nuevas con vulnerabilidades altas ni licencias incompatibles
   # Requiere activar «Dependency graph» (y GitHub Advanced Security si el repositorio es privado) en Settings → Code security.
