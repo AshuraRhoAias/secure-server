@@ -168,6 +168,8 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck yamllint jq
           pipx install semgrep==1.95.0
+          # semgrep 1.95 importa pkg_resources (setuptools), que ya no viene en el entorno de pipx del runner
+          pipx inject semgrep "setuptools<81"
       - name: Perfil seguro (informe)
         run: ./pruebas.sh --safe-all --no-color --yes || true
         working-directory: PruebasLinux
@@ -209,7 +211,10 @@ jobs:
             echo "RATE_LIMIT_GLOBAL_PER_MIN=1000000"
           } > deploy/compose.env
       - name: Construir y levantar
-        run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build
+        run: |
+          set -o pipefail
+          { docker version --format 'docker {{.Server.Version}}'; docker compose version; } 2>&1 | tee "$RUNNER_TEMP/compose-up.log"
+          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env up -d --build 2>&1 | tee -a "$RUNNER_TEMP/compose-up.log"
       - name: Varias réplicas
         run: node --test test_compose.js
         env:
@@ -217,7 +222,8 @@ jobs:
       - name: Registros si algo falló
         if: failure()
         run: |
-          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a
+          [ -f "$RUNNER_TEMP/compose-up.log" ] && bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/compose-up.log" "compose up" 60
+          docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env ps -a || true
           docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --tail 150
           for s in api mariadb minio-init lb; do
             docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env logs --no-color --tail 40 "$s" 2>&1 | bash .github/scripts/annotate-log.sh - "compose $s" 40
