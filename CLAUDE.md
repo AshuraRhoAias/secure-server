@@ -32,17 +32,23 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 ## Decisiones del propietario (no cambiarlas sin preguntar)
 
 - **`.env` se queda versionado**: hoy lleva datos de prueba que el propietario cambiará. No sacarlo ni proponerlo como tarea.
-- **No hay MariaDB en el equipo local**: lo que necesita BD, navegadores o Docker se verifica en **GitHub Actions**. No levantar
-  contenedores ni descargar imágenes sin permiso (el equipo va justo de memoria).
+- **MariaDB local**: el propietario tiene **MariaDB 13.1.1** (servicio `MariaDB`, puerto 3306) con las bases de prueba de
+  `database/setup-local.sql` (usuario `sec`), así que `npm run test:all` funciona en local. El CI usa **MariaDB 10.11**: algo verde
+  en uno no prueba el otro. Nunca usar ni leer la contraseña de root (el script lo ejecuta el propietario). No levantar
+  contenedores ni descargar imágenes sin permiso (el equipo va justo de memoria). `.env` tiene `skip-worktree`: sus cambios locales
+  (credenciales) no deben subirse nunca.
+- Bases de datos: fase SQL (MariaDB/MySQL + PostgreSQL/Supabase) con adaptador de dialecto; MongoDB más adelante
+  (`docs/BASES-DE-DATOS.md`).
 - Archivos en S3 con driver propio (`src/files/s3-store.js`); interfaz web con alcance completo.
 
 ## Flujo de git (obligatorio)
 
-- Trabajo por fases en ramas apiladas `cierre/0-base` → … → `cierre/6-docs` → `cierre/7-graphify`; cada una contiene a la anterior.
-- **Subir cada rama justo después de cada commit**; nunca acumular commits solo en local.
-- Un fallo se corrige **en la fase donde nació** y se propaga hacia arriba con **merge** (commit → push → merge en la siguiente →
-  push…). **Nunca** rebase de ramas publicadas ni `push --force`.
-- Comprobar la cadena: `git merge-base --is-ancestor origin/<anterior> origin/<rama>` y que local = remoto.
+- **`main` siempre tiene todo**: cada rama de trabajo sale de `main` actualizada y, **tras cada commit**: push de la rama y
+  **también a `main`** por avance rápido (`git push origin HEAD:main`). Si `main` avanzó por su cuenta (PR fusionados, correcciones
+  automáticas de GitHub), primero `git fetch` + `git merge origin/main` en la rama, y después push de las dos.
+- Nunca acumular commits solo en local. **Nunca** rebase de ramas publicadas ni `push --force` (tampoco a `main`).
+- Comprobar tras cada subida: `git merge-base --is-ancestor origin/main HEAD` y que local = remoto en la rama y en `main`.
+- Historial: las fases `cierre/0-base` … `cierre/8-bd` ya están fusionadas en `main` (PR #26, #33–#35).
 - Credencial: el Git Credential Manager tiene varias cuentas; este repositorio fija `credential.https://github.com.username=AshuraRhoAias`
   en su config local. Con eso `GCM_INTERACTIVE=never git push` no abre ventanas. Si vuelve a pedir usuario, revisar esa clave.
 
