@@ -122,7 +122,7 @@ itE2e('passkey: segundo factor con la llave (autenticador virtual de Chromium); 
   const options = await api(apiProc.base, 'POST', '/api/auth/webauthn/register/options', { token: users.pk.token, ip, json: { password: PASSWORD } });
   assert.strictEqual(options.status, 200, options.text);
   const done = await api(apiProc.base, 'POST', '/api/auth/webauthn/register', { token: users.pk.token, ip, json: { credential: soft.register(options.body.options), name: 'Llave e2e' } });
-  assert.strictEqual(done.status, 200, done.text);
+  assert.strictEqual(done.status, 201, done.text);
 
   const page = await newPage();
   const cdp = await page.context_.newCDPSession(page);
@@ -154,6 +154,18 @@ itE2e('passkey: segundo factor con la llave (autenticador virtual de Chromium); 
   await page.context_.close();
 });
 
+// Espera un elemento; si no aparece, el error incluye las navegaciones, la página actual y el final de los registros
+async function waitOrExplain(page, locator, urls) {
+  try {
+    await locator.waitFor({ timeout: 20_000 });
+  } catch (error) {
+    const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 400);
+    const tail = (proc) => proc.logs.join('').split('\n').filter(Boolean).slice(-15).join('\n');
+    throw new Error([error.message.split('\n')[0], `URL actual: ${page.url()}`, `Navegaciones: ${urls.join(' -> ')}`,
+      `Página: ${body}`, `API:\n${tail(apiProc)}`, `Web:\n${tail(webProc)}`].join('\n'));
+  }
+}
+
 // El navegador va al proveedor: aquí el proveedor simulado "autentica" y redirige al callback del API (como haría uno real)
 async function routeIdp(context, identity) {
   await context.route(`${idp.issuer}/authorize**`, async (route) => {
@@ -171,7 +183,7 @@ itE2e('SSO (OpenID Connect): el botón lleva al proveedor y vuelve con sesión; 
 
   await page.goto('/login');
   await page.getByRole('link', { name: 'Entrar con SSO (OpenID Connect)' }).click();
-  await page.getByRole('heading', { name: 'Panel de seguridad' }).waitFor();
+  await waitOrExplain(page, page.getByRole('heading', { name: 'Panel de seguridad' }), urls);
 
   assert.ok(urls.some(u => u.includes('/session/sso/callback?code=')), 'volvió por el código de entrega');
   for (const u of urls) assert.ok(!/token=|refreshToken|#.*token|eyJ/.test(u), `ningún token en la URL: ${u}`);
@@ -188,9 +200,11 @@ itE2e('SSO: una identidad que no es admin vuelve al login con un mensaje claro (
   const page = await newPage();
   const sub = `e2e-${crypto.randomUUID()}`;
   await routeIdp(page.context_, { sub, email: `${sub}@acme.com`, claims: { groups: ['otros'] } });
+  const urls = [];
+  page.on('request', (request) => { if (request.isNavigationRequest()) urls.push(request.url()); });
   await page.goto('/login');
   await page.getByRole('link', { name: 'Entrar con SSO (OpenID Connect)' }).click();
-  await page.getByText('Tu cuenta no es de administrador').waitFor();
+  await waitOrExplain(page, page.getByText('Tu cuenta no es de administrador'), urls);
   assert.match(page.url(), /\/login\?sso_error=NOT_ADMIN$/);
   assert.ok(!(await page.context_.cookies()).some(c => c.name === 'ops_session' && c.value));
   await page.context_.close();

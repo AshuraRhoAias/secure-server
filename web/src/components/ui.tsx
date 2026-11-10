@@ -45,7 +45,7 @@ export const Banner = ({ tone, children }: { tone?: 'error' | 'ok' | 'warn'; chi
 export const Empty = ({ children }: { children: ReactNode }) => <div className="empty">{children}</div>;
 
 export function JsonView({ value }: { value: unknown }) {
-  return <pre className="json">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="json" tabIndex={0}>{JSON.stringify(value, null, 2)}</pre>;
 }
 
 export function Segmented<T extends string | number>({ value, onChange, options, label }: { value: T; onChange: (value: T) => void; options: { value: T; label: string }[]; label: string }) {

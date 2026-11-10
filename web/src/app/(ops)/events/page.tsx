@@ -98,7 +98,7 @@ export default function EventsPage() {
       {loading && rows.length === 0 ? <Loading /> : null}
       {!loading && rows.length === 0 && !error ? <div className="card"><Empty>Ningún evento con estos filtros.</Empty></div> : null}
       {rows.length > 0 ? (
-        <div className="table-wrap"><table>
+        <div className="table-wrap" tabIndex={0}><table>
           <thead><tr><th>Fecha</th><th>Severidad</th><th>Tipo / regla</th><th>IP</th><th>Usuario</th><th>Petición</th><th className="num">Riesgo</th></tr></thead>
           <tbody>{rows.map(row => (
             <FragmentRow key={row.id} row={row} open={open === row.id} toggle={() => setOpen(open === row.id ? null : row.id)} />

@@ -87,7 +87,7 @@ export default function MetricsPage() {
       {error ? <Banner tone="error">{error}</Banner> : null}
       {!text && !error ? <Loading /> : null}
 
-      {text && raw ? <pre className="json">{text}</pre> : null}
+      {text && raw ? <pre className="json" tabIndex={0}>{text}</pre> : null}
       {text && !raw ? (
         <>
           <div className="grid kpis">
