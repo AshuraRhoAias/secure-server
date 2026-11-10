@@ -616,7 +616,12 @@ async function openStream(user, { headers = {}, query = '' } = {}) {
     return { res, events: received, until, ended: () => ended, close: async () => { controller.abort(); await pump; } };
 }
 
+// Las pruebas en vivo crean sus propios administradores: una prueba anterior (revoke-all) cierra TODAS las sesiones,
+// también las de admin y adminB.
+let liveAdmin, liveAdminB;
+const liveAdmins = async () => { if (!liveAdmin) { liveAdmin = await roleUser('admin'); liveAdminB = await roleUser('admin'); } };
 itDb('stream: solo admin con sesión; entrega eventos >= medium y alertas nuevas al momento, con resumen', async () => {
+    await liveAdmins();
     assert.strictEqual((await api(app.base, 'GET', '/api/system/stream', { ip: testIp() })).status, 401);
     const plain = await roleUser('user');
     assert.strictEqual((await call(plain, 'GET', '/api/system/stream')).status, 403);
@@ -624,7 +629,7 @@ itDb('stream: solo admin con sesión; entrega eventos >= medium y alertas nuevas
     assert.strictEqual((await call(auditor, 'GET', '/api/system/stream')).status, 403, 'dashboard:read es solo de admin');
 
     await withEnv({ STREAM_POLL_MS: '250' }, async () => {
-        const stream = await openStream(admin);
+        const stream = await openStream(liveAdmin);
         try {
             assert.strictEqual(stream.res.status, 200);
             assert.match(stream.res.headers.get('content-type'), /^text\/event-stream/);
@@ -652,8 +657,9 @@ itDb('stream: solo admin con sesión; entrega eventos >= medium y alertas nuevas
 });
 
 itDb('stream: al reconectar con Last-Event-ID sigue desde ahí (sin perder ni repetir)', async () => {
+    await liveAdmins();
     await withEnv({ STREAM_POLL_MS: '250' }, async () => {
-        const first = await openStream(admin);
+        const first = await openStream(liveAdmin);
         assert.ok(await first.until(e => e.find(x => x.event === 'hello')));
         const ip = testIp();
         await events().record({ type: 'LIVE_RESUME_A', severity: 'medium', ip });
@@ -662,7 +668,7 @@ itDb('stream: al reconectar con Last-Event-ID sigue desde ahí (sin perder ni re
         assert.ok(a);
 
         await events().record({ type: 'LIVE_RESUME_B', severity: 'medium', ip });   // ocurre mientras estaba desconectado
-        const second = await openStream(admin, { headers: { 'Last-Event-ID': a.id } });
+        const second = await openStream(liveAdmin, { headers: { 'Last-Event-ID': a.id } });
         try {
             assert.ok(await second.until(e => e.find(x => x.data?.type === 'LIVE_RESUME_B')), 'recibe lo que pasó mientras no estaba');
             assert.ok(!second.events.some(x => x.data?.type === 'LIVE_RESUME_A'), 'no repite lo ya entregado');
@@ -671,6 +677,7 @@ itDb('stream: al reconectar con Last-Event-ID sigue desde ahí (sin perder ni re
 });
 
 itDb('stream: cerrar la sesión o quitar el rol corta la conexión (reauth); límite de conexiones por usuario → 429', async () => {
+    await liveAdmins();
     await withEnv({ STREAM_POLL_MS: '250', STREAM_AUTH_RECHECK_MS: '1000' }, async () => {
         const victim = await roleUser('admin');
         const stream = await openStream(victim);
@@ -689,10 +696,10 @@ itDb('stream: cerrar la sesión o quitar el rol corta la conexión (reauth); lí
     });
 
     await withEnv({ STREAM_MAX_PER_USER: '1', STREAM_POLL_MS: '250' }, async () => {
-        const one = await openStream(adminB);
+        const one = await openStream(liveAdminB);
         try {
             assert.ok(await one.until(e => e.find(x => x.event === 'hello')));
-            const two = await call(adminB, 'GET', '/api/system/stream');
+            const two = await call(liveAdminB, 'GET', '/api/system/stream');
             assert.strictEqual(two.status, 429);
             assert.strictEqual(two.body.code, 'STREAM_LIMIT');
         } finally { await one.close(); }
@@ -700,7 +707,8 @@ itDb('stream: cerrar la sesión o quitar el rol corta la conexión (reauth); lí
 });
 
 itDb('status: incluye el bloque cluster (sin cluster: un solo proceso, este)', async () => {
-    const res = await call(admin, 'GET', '/api/system/status');
+    await liveAdmins();
+    const res = await call(liveAdmin, 'GET', '/api/system/status');
     assert.strictEqual(res.status, 200);
     const cluster = res.body.status.cluster;
     assert.strictEqual(cluster.mode, 'single');
