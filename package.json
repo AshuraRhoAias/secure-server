@@ -112,7 +112,7 @@
     "eslint": "^10.14.0",
     "eslint-plugin-security": "^4.2.1",
     "fast-check": "^4.10.2",
-    "globals": "^17.13.0",
+    "globals": "^17.14.0",
     "nodemon": "^3.1.10",
     "xml-crypto": "^6.4.0"
   }
