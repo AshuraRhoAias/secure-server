@@ -480,7 +480,7 @@ Ver la bitácora de auditoría del proyecto completo en
   descargan reglas del registro de semgrep).
 - **Verificado en local** (Windows + Git Bash, sin semgrep/trivy/hadolint): `bash -n`, `--list` (126 opciones, 1-117 con su número de
   siempre) y `--run 119 120 121 124` en verde contra el código real. 118 y 125 se omiten sin la herramienta (lo dice el informe).
-- **CI** (job `pruebaslinux` de `.github/workflows/ci.yml`): instala shellcheck, yamllint, jq y semgrep 1.95.0; ejecuta el perfil seguro como
+- **CI** (job `pruebaslinux` de `.github/workflows/ci.yml`): instala shellcheck, yamllint, jq y semgrep 1.181.1; ejecuta el perfil seguro como
   **informe** (artefacto `pruebaslinux`) y como **puerta** las invariantes 119/120/121/124 y Semgrep con severidad ERROR.
 - **Sigue pendiente**: `trivy` (opciones 88-89) y `hadolint` (125) no se instalan en el CI (habría que fijar y verificar sus binarios);
   se omiten y quedan como omitidas en el informe, sin declararse verificadas.
