@@ -26,7 +26,7 @@ function render(spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/openapi.
     for (const [tag, list] of groups) {
         for (const { method, route, op } of list) {
             const access = Array.isArray(op.security) && op.security.length === 0 ? 'público' : 'JWT';
-            const summary = String(op.summary || '').replace(/\|/g, '\\|');
+            const summary = String(op.summary || '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
             lines.push(`| ${tag} | ${method} | \`${route}\` | ${access} | ${summary} |`);
         }
     }
