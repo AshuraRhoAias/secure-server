@@ -10,12 +10,12 @@
 # - Arranca con el cluster (un worker por núcleo, WEB_CONCURRENCY) y una sonda de salud real (/health/ready).
 # - Fija la imagen base por digest en producción (Dependabot la mantiene: .github/dependabot.yml, ecosistema docker).
 
-FROM node:22-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 ENV NODE_ENV=production \
     ENV_FILE=/app/config/empty.env \
     FILES_DIR=/app/storage \
