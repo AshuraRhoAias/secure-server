@@ -285,7 +285,7 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 |---|---|---|---|---|---|
 | #30 · `1c7666a`, `b558261`, `67051e9` | `database/setup-local.sql`, `docs/BASES-DE-DATOS.md` | `test_files.js`, `test_files_backup.js`, `test_rotation.js`, `test_scale.js`, `CLAUDE.md` | — | MariaDB 13.1 local; 8 fallos solo de Windows | Archivos afectados 168/170 + cluster 3/3 |
 | #31 · `a559875`, `2cf2bd1` | `instalar.{cmd,sh,command}`, `instalador/*` | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`, `test_av.js`, `.gitattributes`, `.gitignore` | — | Instalador con menú y ClamAV por sistema | Instalación real en Windows; `test_av` 23/23 |
-| #32 · (este commit) | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; lint 0 |
+| #32 · (este commit) | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; suite local 601/602 (1 omitida); lint 0 |
 
 ---
 
@@ -668,7 +668,10 @@ Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a s
   `rate-limiter.service.js` (mismo resultado en MySQL). `DB_CLIENT` en `.env.example`; rutas corregidas en la documentación.
 - **Pruebas ejecutadas:** `test_db.js` (nuevo, en `test:all` y por tanto en el CI): elección del motor, motores desconocidos
   rechazados, «un único punto de entrada», sin `SUM(condición)`, y el contrato contra MariaDB real (`[filas]`, `insertId`,
-  `affectedRows` del canje de un solo uso, COMMIT/ROLLBACK, conexión retenida con `destroy`): **11/11**. Suite completa: PENDIENTE.
+  `affectedRows` del canje de un solo uso, COMMIT/ROLLBACK, conexión retenida con `destroy`): **11/11**. **Suite completa en
+  local** (Windows, MariaDB 13.1, ClamAV 1.5.4, 26 min): **602 pruebas, 601 bien, 0 fallos, 1 omitida** (`SIGHUP`, que Windows no
+  tiene). Una primera ejecución dio 2 fallos falsos en `test_fuzz.js` porque se lanzó `test_db.js` a la vez y `prepareDatabase()`
+  recrea la base: las pruebas con BD se ejecutan en serie. **CI no comprobado** desde aquí (la API pública de GitHub no respondió).
 - **Puntuación:** 8/10 — sin cambio de comportamiento y con red de seguridad; PostgreSQL aún no existe, así que no se afirma.
 - **Problemas restantes:** pasos 2–4 (helpers de intervalos/upsert/cerrojos, esquema de PostgreSQL con prueba de paridad, driver `pg`
   y job del CI). **Siguiente mejora:** paso 2. *(Media.)*
