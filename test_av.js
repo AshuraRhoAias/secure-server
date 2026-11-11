@@ -393,4 +393,11 @@ itReal('con clamd real apagado, required falla cerrado', async () => {
     assert.strictEqual((await upload(PNG(1000), 'x.png')).status, 503);
 });
 
-test.after(() => { if (real) { real.child.kill(); fs.rmSync(real.dir, { recursive: true, force: true }); } });
+test.after(async () => {
+    if (!real) return;
+    // Esperar a que clamd salga: en Windows sus archivos siguen abiertos (EPERM al borrar) hasta que el proceso termina
+    const exited = real.child.exitCode !== null ? Promise.resolve() : new Promise(r => real.child.once('exit', r));
+    real.child.kill();
+    await Promise.race([exited, new Promise(r => setTimeout(r, 5000))]);
+    fs.rmSync(real.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+});
