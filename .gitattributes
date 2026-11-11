@@ -1,1 +1,5 @@
 graphify-out/graph.json merge=graphify
+# Instaladores: los scripts de Bash con LF (si no, fallan en Linux/macOS/WSL); los .cmd con CRLF
+*.sh text eol=lf
+*.command text eol=lf
+*.cmd text eol=crlf

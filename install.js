@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /*
- * install.js — Instalador multiplataforma de secure-server (Linux y Windows).
+ * install.js — Paso de Node del instalador de secure-server (Windows, Linux y macOS): npm ci, .env y permisos.
  *
- * Al ejecutarlo pregunta en qué sistema se quiere instalar (Linux o Windows),
- * e instala todo lo necesario mostrando una barra de progreso.
+ * Lo llaman instalador/{windows.ps1,linux.sh,macos.sh}, que antes instalan Node, MariaDB y ClamAV.
+ * Punto de entrada para personas: instalar.cmd (Windows), instalar.command (macOS) o bash instalar.sh (menú).
  *
  * No añade dependencias: usa sólo módulos nativos de Node (>=22; 18 y 20 ya no tienen soporte).
  *
@@ -11,6 +11,7 @@
  *   node install.js                 # modo interactivo (pregunta el SO)
  *   node install.js --os linux      # sin preguntar
  *   node install.js --os windows
+ *   node install.js --os macos
  *   node install.js --yes           # acepta pasos opcionales (toolset de seguridad)
  *   node install.js --no-tools      # omite el toolset de seguridad de PruebasLinux
  *   node install.js --help
@@ -54,9 +55,11 @@ function parseArgs(argv) {
 function usage() {
   log(`Instalador de secure-server
 
-  node install.js                 Modo interactivo (pregunta Linux/Windows)
+  node install.js                 Modo interactivo (pregunta Windows/Linux/macOS)
   node install.js --os linux      Instala para Linux sin preguntar
   node install.js --os windows    Instala para Windows sin preguntar
+  node install.js --os macos      Instala para macOS sin preguntar
+  (Node, MariaDB y ClamAV: instalar.cmd / bash instalar.sh)
   node install.js --yes           Acepta pasos opcionales (toolset de seguridad)
   node install.js --no-tools      Omite el toolset de PruebasLinux
   node install.js --help          Esta ayuda`);
@@ -71,26 +74,27 @@ function ask(question) {
 }
 
 async function chooseOS(preset) {
-  const valid = { linux: 'linux', windows: 'windows', win: 'windows', '1': 'linux', '2': 'windows' };
+  const valid = { windows: 'windows', win: 'windows', linux: 'linux', macos: 'macos', mac: 'macos', darwin: 'macos', '1': 'windows', '2': 'linux', '3': 'macos' };
   if (preset) {
     if (valid[preset]) return valid[preset];
-    errline(`SO no válido: "${preset}". Usa "linux" o "windows".`);
+    errline(`SO no válido: "${preset}". Usa "windows", "linux" o "macos".`);
     process.exit(2);
   }
-  const detected = process.platform === 'win32' ? 'windows' : (process.platform === 'linux' ? 'linux' : process.platform);
+  const detected = { win32: 'windows', linux: 'linux', darwin: 'macos' }[process.platform] || process.platform;
   if (!isTTY) {
     warn(`Sin terminal interactiva; uso el SO detectado: ${detected}.`);
-    return detected === 'windows' ? 'windows' : 'linux';
+    return valid[detected] || 'linux';
   }
   log('');
   log(`${C.b}¿En qué sistema quieres instalar secure-server?${C.r}`);
-  log(`  ${C.b}1)${C.r} Linux   ${C.dim}(apt + pip para el toolset)${C.r}`);
-  log(`  ${C.b}2)${C.r} Windows ${C.dim}(npm; toolset vía winget/choco, opcional)${C.r}`);
+  log(`  ${C.b}1)${C.r} Windows ${C.dim}(npm; toolset vía winget/choco, opcional)${C.r}`);
+  log(`  ${C.b}2)${C.r} Linux   ${C.dim}(apt + pip para el toolset)${C.r}`);
+  log(`  ${C.b}3)${C.r} macOS   ${C.dim}(npm; toolset vía Homebrew, opcional)${C.r}`);
   log(`${C.dim}  (SO detectado: ${detected})${C.r}`);
   while (true) {
-    const ans = (await ask('Elige 1 (Linux) o 2 (Windows): ')).toLowerCase();
+    const ans = (await ask('Elige 1 (Windows), 2 (Linux) o 3 (macOS): ')).toLowerCase();
     if (valid[ans]) return valid[ans];
-    errline('Entrada no válida. Escribe 1, 2, linux o windows.');
+    errline('Entrada no válida. Escribe 1, 2, 3, windows, linux o macos.');
   }
 }
 
@@ -196,8 +200,8 @@ async function main() {
       if (fs.existsSync(env)) return '.env ya existe (no se sobrescribe)';
       if (fs.existsSync(example)) {
         fs.copyFileSync(example, env);
-        if (target === 'linux') { try { fs.chmodSync(env, 0o600); } catch (_) {} }
-        return '.env creado desde .env.example' + (target === 'linux' ? ' (permisos 600)' : '');
+        if (target !== 'windows') { try { fs.chmodSync(env, 0o600); } catch (_) {} }
+        return '.env creado desde .env.example' + (target !== 'windows' ? ' (permisos 600)' : '');
       }
       return 'No hay .env.example; crea el .env manualmente (ver README)';
     }
@@ -206,7 +210,7 @@ async function main() {
   steps.push({
     name: 'Ajustar permisos',
     run: async () => {
-      if (target !== 'linux') return 'omitido en Windows';
+      if (target === 'windows') return 'omitido en Windows (NTFS usa ACL, no bits de modo)';
       const env = path.join(ROOT, '.env');
       if (fs.existsSync(env)) { try { fs.chmodSync(env, 0o600); return 'chmod 600 .env'; } catch (_) { return 'no se pudo ajustar (continúa)'; } }
       return 'sin .env que ajustar';
@@ -235,6 +239,11 @@ async function main() {
           const pip = have('pip3') ? await run('pip3', ['install', '--break-system-packages', '--quiet', 'pip-audit', 'detect-secrets', 'yamllint', 'bandit']) : { code: 1 };
           const okApt = r2.code === 0;
           return `apt: ${okApt ? 'ok' : 'revisar'} · pip: ${pip.code === 0 ? 'ok' : 'omitido/revisar'}`;
+        }
+        if (target === 'macos') {
+          if (!have('brew')) return 'Instala Homebrew y luego: brew install nmap sslscan nikto (ver PruebasLinux/ReadmeLogMejoras.md)';
+          const r = await run('brew', ['install', 'nmap', 'sslscan', 'nikto', 'shellcheck', 'sqlite']);
+          return `brew: ${r.code === 0 ? 'ok' : 'revisar'}`;
         }
         // Windows
         if (have('winget')) return 'En Windows: ejecuta `winget install Nmap.Nmap` y las demás (ver PruebasLinux/ReadmeLogMejoras.md)';
@@ -287,10 +296,10 @@ async function main() {
   log('');
   info('Siguientes pasos:');
   log('  1. Revisa y completa el archivo .env (credenciales, semillas).');
-  if (target === 'linux') log('  2. Crea la BD:  mysql -u <user> -p <db> < database/schema.sql');
-  else log('  2. Crea la BD en MySQL e importa database/schema.sql');
+  if (target === 'windows') log('  2. Crea la BD en MariaDB/MySQL e importa database/schema.sql');
+  else log('  2. Crea la BD:  mysql -u <user> -p <db> < database/schema.sql');
   log('  3. Arranca:  npm start');
-  log('  4. Pruebas de seguridad:  cd PruebasLinux && ./pruebas.sh   (en Windows: usa WSL/Git Bash)');
+  log('  4. Pruebas de seguridad:  cd PruebasLinux && ./pruebas.sh   (en Windows: WSL/Git Bash)');
   return failed.length === 0 ? 0 : 0; // los avisos no son error de salida
 }
 

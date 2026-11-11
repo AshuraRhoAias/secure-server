@@ -298,7 +298,16 @@ itDb('rescan-files: encuentra malware que se coló antes de activar el antivirus
 
 // ============================================================================ con clamd REAL (si está instalado)
 
-const clamdBinary = spawnSync('which', ['clamd'], { encoding: 'utf8' }).stdout.trim();
+// Windows: clamd.exe del instalador oficial (instalador/windows.ps1) o del PATH; Linux/macOS: del PATH
+const WIN = process.platform === 'win32';
+const clamdBinary = WIN
+    ? [spawnSync('where', ['clamd'], { encoding: 'utf8' }).stdout.split(/\r?\n/)[0].trim(), 'C:\\Program Files\\ClamAV\\clamd.exe']
+        .find(p => p && fs.existsSync(p)) || ''
+    : spawnSync('which', ['clamd'], { encoding: 'utf8' }).stdout.trim();
+const freePort = () => new Promise((resolve, reject) => {
+    const srv = require('net').createServer().listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+    srv.on('error', reject);
+});
 let real = null;
 
 async function startRealClamd() {
@@ -309,25 +318,30 @@ async function startRealClamd() {
     fs.writeFileSync(path.join(db, 'eicar.hdb'), '44d88612fea8a8f36de82e1278abb02f:68:Eicar-Test-Signature\n');
     fs.writeFileSync(path.join(db, 'eicar-body.ndb'), `Eicar.Embedded:0:*:${Buffer.from('EICAR-STANDARD-ANTIVIRUS-TEST-FILE!').toString('hex')}\n`);
 
-    const socket = path.join(dir, 'clamd.sock');
-    const asRoot = process.getuid() === 0;
+    // Windows: clamd no tiene socket Unix → TCP solo en 127.0.0.1 con un puerto libre
+    const socket = WIN ? null : path.join(dir, 'clamd.sock');
+    const port = WIN ? await freePort() : null;
+    const asRoot = !WIN && process.getuid() === 0;
     const conf = path.join(dir, 'clamd.conf');
     fs.writeFileSync(conf, [
-        `DatabaseDirectory ${db}`, `LocalSocket ${socket}`, `LogFile ${dir}/clamd.log`, 'Foreground yes', 'StreamMaxLength 25M',
+        `DatabaseDirectory ${db}`, ...(WIN ? [`TCPSocket ${port}`, 'TCPAddr 127.0.0.1'] : [`LocalSocket ${socket}`]),
+        `LogFile ${path.join(dir, 'clamd.log')}`, 'Foreground yes', 'StreamMaxLength 25M',
         'MaxThreads 4', ...(asRoot ? ['User clamav'] : [])
     ].join('\n') + '\n');
     if (asRoot) spawnSync('chown', ['-R', 'clamav:clamav', dir]);
-    fs.chmodSync(dir, 0o755);
+    if (!WIN) fs.chmodSync(dir, 0o755);
 
     const child = spawn(clamdBinary, ['-c', conf], { stdio: 'ignore' });
+    const target = WIN ? { host: '127.0.0.1', port } : { path: socket };
+    const env = WIN ? { CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(port) } : { CLAMAV_SOCKET: socket };
     for (let i = 0; i < 120; i++) {
-        if (fs.existsSync(socket)) {
+        if (WIN || fs.existsSync(socket)) {
             const ok = await new Promise((resolve) => {
-                const s = require('net').connect(socket, () => s.write('zPING\0'));
+                const s = require('net').connect(target, () => s.write('zPING\0'));
                 s.on('data', (d) => { resolve(String(d).startsWith('PONG')); s.destroy(); });
                 s.on('error', () => resolve(false));
             });
-            if (ok) return { socket, child, dir };
+            if (ok) return { env, child, dir };
         }
         await new Promise(r => setTimeout(r, 500));
     }
@@ -339,12 +353,12 @@ test('clamd REAL: arranca con firmas locales', async (t) => {
     if (!dbAvailable || !clamdBinary) return t.skip('clamd no instalado');
     real = await startRealClamd();
     if (!real) return t.skip('clamd no pudo arrancar en este entorno');
-    assert.ok(real.socket);
+    assert.ok(real.env);
 });
 
 const itReal = (name, fn) => test(`clamd REAL: ${name}`, async (t) => {
     if (!real) return t.skip('sin clamd real');
-    scanEnv({ FILE_SCAN: 'required', CLAMAV_SOCKET: real.socket });
+    scanEnv({ FILE_SCAN: 'required', ...real.env });
     await fn();
 });
 
@@ -374,7 +388,8 @@ itReal('EICAR escondido en un archivo grande y a caballo entre bloques → 422 (
 });
 
 itReal('con clamd real apagado, required falla cerrado', async () => {
-    process.env.CLAMAV_SOCKET = path.join(os.tmpdir(), 'no-existe.sock');
+    if (WIN) process.env.CLAMAV_PORT = '1'; // nadie escucha ahí
+    else process.env.CLAMAV_SOCKET = path.join(os.tmpdir(), 'no-existe.sock');
     assert.strictEqual((await upload(PNG(1000), 'x.png')).status, 503);
 });
 
