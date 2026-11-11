@@ -209,7 +209,9 @@ function startCluster(extraEnv = {}) {
             env: {
                 ...process.env, ENV_FILE: envFile, PORT: String(port), WEB_CONCURRENCY: '2', ALERTS_DISABLED: 'true',
                 LEADER_RETRY_SECONDS: '0.3', LEADER_PING_SECONDS: '0.3', PROTECTION_CACHE_MS: '0', SHUTDOWN_TIMEOUT_MS: '3000',
-                METRICS_TOKEN: 'metricas-de-prueba-0123456789abcdef0123456789', ...extraEnv
+                METRICS_TOKEN: 'metricas-de-prueba-0123456789abcdef0123456789',
+                // Windows: con SCHED_NONE el sistema entrega todas las conexiones al mismo worker; por turnos se ve el reparto
+                ...(process.platform === 'win32' && { CLUSTER_SCHEDULING: 'rr' }), ...extraEnv
             },
             stdio: ['ignore', 'pipe', 'pipe']
         });
@@ -267,7 +269,15 @@ itDb('cluster: reparte entre procesos, un solo líder, métricas agregadas sin m
         assert.strictEqual(info.workers.filter(w => w.leader).length, 1, 'un solo líder');
         assert.ok(info.workers.every(w => w.open === true && w.shuttingDown === false && w.rssMb > 0));
 
-        // Cierre ordenado: SIGTERM al supervisor → sale con 0, sin procesos huérfanos y el cerrojo de líder liberado
+        // Cierre ordenado: SIGTERM al supervisor → sale con 0, sin procesos huérfanos y el cerrojo de líder liberado.
+        // En Windows SIGTERM es una terminación forzosa (TerminateProcess): no hay cierre ordenado que comprobar (se prueba en
+        // Linux/CI); se cierran los workers a mano para no dejar procesos huérfanos.
+        if (process.platform === 'win32') {
+            for (const pid of seen.keys()) { try { process.kill(pid); } catch { /* ya terminó */ } }
+            cluster.child.kill();
+            await cluster.exited;
+            return;
+        }
         const started = Date.now();
         cluster.child.kill('SIGTERM');
         const { code } = await cluster.exited;
@@ -298,7 +308,8 @@ itDb('cluster: un worker que muere se relanza y el líder pasa a otro si era él
     } finally { cluster.child.kill('SIGKILL'); }
 });
 
-itDb('cluster: reinicio en caliente (SIGHUP) cambia TODOS los procesos sin rechazar peticiones', async () => {
+itDb('cluster: reinicio en caliente (SIGHUP) cambia TODOS los procesos sin rechazar peticiones', async (t) => {
+    if (process.platform === 'win32') return t.skip('Windows no tiene SIGHUP: enviarla termina el proceso (se prueba en Linux/CI)');
     const cluster = await startCluster();
     try {
         await until(async () => (await pidsSeen(cluster.base, 20)).size >= 2, { timeout: 60000, every: 300, message: 'dos workers' });

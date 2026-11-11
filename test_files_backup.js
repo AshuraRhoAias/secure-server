@@ -42,6 +42,8 @@ test.after(async () => {
     fs.rmSync(backupDir, { recursive: true, force: true });
 });
 
+// En Windows los bits de modo no representan las ACL de NTFS (siempre 0666): los permisos se comprueban en POSIX
+const POSIX = process.platform !== 'win32';
 const itDb = (name, fn) => test(name, async (t) => {
     if (!dbAvailable) return t.skip('sin base de datos');
     await fn(t);
@@ -94,7 +96,7 @@ itDb('copia incremental: la primera copia todo, la segunda solo lo nuevo, y todo
     }
     const index = fs.readFileSync(path.join(backupDir, 'index.json'), 'utf8');
     assert.ok(!/a\.png|b\.png|c\.txt|d\.png/.test(index), 'el índice no contiene nombres reales');
-    assert.strictEqual(fs.statSync(path.join(backupDir, 'index.json')).mode & 0o777, 0o600);
+    if (POSIX) assert.strictEqual(fs.statSync(path.join(backupDir, 'index.json')).mode & 0o777, 0o600);
 
     const verified = await backup.verify({ db });
     assert.deepStrictEqual([verified.corrupt, verified.missingInBackup, verified.notBackedUp], [[], [], []]);

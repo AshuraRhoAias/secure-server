@@ -274,6 +274,8 @@ test.after(async () => {
     fs.rmSync(filesDir, { recursive: true, force: true });
 });
 
+// En Windows los bits de modo no representan las ACL de NTFS (siempre 0666): los permisos se comprueban en POSIX
+const POSIX = process.platform !== 'win32';
 const itDb = (name, fn) => test(name, async (t) => {
     if (!dbAvailable) return t.skip('sin base de datos');
     await fn(t);
@@ -342,7 +344,7 @@ itDb('en disco SOLO hay texto cifrado: ni el contenido ni el nombre en claro; pe
         const raw = fs.readFileSync(file);
         assert.ok(!raw.includes(marker), 'contenido en claro en disco');
         assert.ok(!raw.includes('%PDF-'), 'firma del archivo en claro');
-        assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
+        if (POSIX) assert.strictEqual(fs.statSync(file).mode & 0o777, 0o600);
     }
     const [[row]] = await db.query('SELECT filename_encrypted, key_encrypted, storage_name FROM user_files WHERE id = ?', [up.body.file.id]);
     assert.ok(row.filename_encrypted.startsWith('v4:') && !row.filename_encrypted.includes('documento-privado'));
@@ -743,13 +745,16 @@ itDb('rotación de clave maestra: se re-envuelven las claves de archivo y los ar
 
 itDb('si el disco no es escribible la subida falla con un 500 genérico y el servidor SIGUE VIVO', async () => {
     const saved = process.env.FILES_DIR;
-    process.env.FILES_DIR = '/dev/null/imposible'; // mkdir falla (ENOTDIR)
+    // Un ARCHIVO usado como carpeta: mkdir falla (ENOTDIR / EEXIST) en Linux y en Windows (allí '/dev/null/…' sí se puede crear)
+    const blocker = path.join(os.tmpdir(), `no-es-carpeta-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(blocker, 'x');
+    process.env.FILES_DIR = path.join(blocker, 'imposible');
     try {
         const ip = testIp();
         const res = await upload(alice, ip, SAMPLES.png.data, 'a.png');
         assert.strictEqual(res.status, 500);
-        assert.ok(!res.text.includes('/dev/null') && !/ENOTDIR|mkdir/i.test(res.text), 'no se filtran detalles internos');
-    } finally { process.env.FILES_DIR = saved; }
+        assert.ok(!res.text.includes('no-es-carpeta') && !/ENOTDIR|EEXIST|mkdir/i.test(res.text), 'no se filtran detalles internos');
+    } finally { process.env.FILES_DIR = saved; fs.rmSync(blocker, { force: true }); }
     assert.strictEqual((await api(app.base, 'GET', '/health', { ip: testIp() })).status, 200, 'el proceso sigue atendiendo');
     assert.strictEqual((await upload(alice, testIp(), SAMPLES.png.data, 'b.png')).status, 201, 'y se recupera al volver el disco');
 });

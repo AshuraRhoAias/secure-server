@@ -273,6 +273,8 @@ test.after(async () => {
     if (db?.pool) await db.pool.end();
 });
 
+// En Windows los bits de modo no representan las ACL de NTFS (siempre 0666): los permisos se comprueban en POSIX
+const POSIX = process.platform !== 'win32';
 const itDb = (name, fn) => test(name, async (t) => {
     if (!dbAvailable) return t.skip('sin base de datos');
     await fn(t);
@@ -487,7 +489,7 @@ itDb('rotación: re-cifra todo con la clave nueva, sin perder ni alterar datos',
     assert.match(envText, /PORT=3000/);
     assert.ok(!envText.includes('KEY_EPOCH=T0-inicial'));
     assert.ok(!fs.existsSync(`${w.paths.envFile}.pending`));
-    assert.strictEqual(fs.statSync(w.paths.envFile).mode & 0o777, 0o600);
+    if (POSIX) assert.strictEqual(fs.statSync(w.paths.envFile).mode & 0o777, 0o600);
 });
 
 itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archivos re-envuelven su clave sin tocar sus bytes', async () => {
@@ -1064,7 +1066,7 @@ itDb('--no-write-env: no toca el .env, se queda cerrado y `finish` solo reabre c
     assert.strictEqual(result.stillLocked, true);
     assert.ok(w.service.maintenance.isLocked());
     assert.ok(fs.existsSync(result.manualEnvFile));
-    assert.strictEqual(fs.statSync(result.manualEnvFile).mode & 0o777, 0o600);
+    if (POSIX) assert.strictEqual(fs.statSync(result.manualEnvFile).mode & 0o777, 0o600);
 
     // Con las variables viejas, finish se niega
     await assert.rejects(() => w.service.finish({ env: w.env() }), /no coinciden/);
