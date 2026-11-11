@@ -38,7 +38,11 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   contenedores ni descargar imágenes sin permiso (el equipo va justo de memoria). `.env` tiene `skip-worktree`: sus cambios locales
   (credenciales) no deben subirse nunca.
 - Bases de datos: fase SQL (MariaDB/MySQL + PostgreSQL/Supabase) con adaptador de dialecto; MongoDB más adelante
-  (`docs/BASES-DE-DATOS.md`).
+  (`docs/BASES-DE-DATOS.md`, sección «Estado»). El motor se elige con `DB_CLIENT` en `src/config/db-drivers/` (el ÚNICO sitio que
+  importa `mysql2`/`pg`; `test_db.js` lo comprueba). Todo driver cumple el contrato documentado allí. SQL nuevo, portable:
+  `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, nunca `SUM(condición)`. No afirmar soporte de PostgreSQL sin su job del CI en verde.
+- ClamAV local (1.5.4, servicio `ClamD` en arranque **manual**: `Start-Service ClamD`); instaladores con menú en `instalar.*` e
+  `instalador/` (`INSTALL.md`). Linux y macOS sin ejecutar todavía.
 - Archivos en S3 con driver propio (`src/files/s3-store.js`); interfaz web con alcance completo.
 
 ## Flujo de git (obligatorio)
@@ -63,7 +67,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 
 ## Invariantes de seguridad (no deshacer)
 
-- SQL siempre con parámetros `?`; lo que no admite parámetro, con `sqlInt` / `sqlPlaceholders` / `sqlFragment` (`src/security/sql.js`).
+- SQL siempre con parámetros `?`; lo que no admite parámetro, con `sqlInt` / `sqlPlaceholders` / `sqlFragment` (`src/config/sql.js`).
 - `jwt.verify` siempre con `{ algorithms: ['HS256'] }`. MFA: exactamente **un** factor por petición.
 - `DISABLE_IP_BLOCKING` nunca actúa con `NODE_ENV=production` (el servidor no arranca).
 - Los tokens nunca llegan al navegador: cookies `httpOnly` del BFF; el SSO entrega un **código de un solo uso**, no tokens en la URL.

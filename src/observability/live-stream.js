@@ -129,8 +129,10 @@ class LiveStream {
                 );
                 // Resumen de alertas: cambia también al reconocer/resolver o al sumar eventos a una alerta ya abierta
                 const [[digest]] = await db.query(
-                    `SELECT SUM(status = 'open') AS open, SUM(status = 'acknowledged') AS acknowledged,
-                            SUM(status <> 'resolved' AND severity = 'critical') AS critical,
+                    // SUM(CASE …): portable (en PostgreSQL SUM(condición) falla: la condición es boolean, no número)
+                    `SELECT SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
+                            SUM(CASE WHEN status = 'acknowledged' THEN 1 ELSE 0 END) AS acknowledged,
+                            SUM(CASE WHEN status <> 'resolved' AND severity = 'critical' THEN 1 ELSE 0 END) AS critical,
                             MAX(GREATEST(last_seen, COALESCE(acknowledged_at, last_seen), COALESCE(resolved_at, last_seen))) AS changed
                      FROM security_alerts`
                 );

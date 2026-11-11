@@ -63,7 +63,7 @@ class RateLimiter {
     async stats() {
         const recent = Math.floor(Date.now() / 1000) - 120;
         const [[row]] = await db.query(
-            'SELECT COUNT(*) AS tracked, SUM(window_start >= ?) AS active FROM rate_limit_counters', [recent]);
+            'SELECT COUNT(*) AS tracked, SUM(CASE WHEN window_start >= ? THEN 1 ELSE 0 END) AS active FROM rate_limit_counters', [recent]);
         return { trackedRateLimitEntries: Number(row.tracked) || 0, activeRateLimitWindows: Number(row.active) || 0 };
     }
 }

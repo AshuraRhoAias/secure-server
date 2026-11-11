@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-09 (ver §A y §L)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-11 (ver §A, §L y §M)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -25,6 +25,11 @@
   Firefox y WebKit + axe, `compose` con 2 réplicas + nginx + MariaDB + SeaweedFS, `pruebaslinux` y `production-install` en verde el
   10-nov). Al ejecutarse por primera vez, el CI encontró **16 problemas**: 4 errores reales del código o de la interfaz, 3 de entorno y
   9 de las propias pruebas; todos corregidos en la fase donde nacían (#29). Solo queda en rojo CodeQL, por el falso positivo conocido.
+- **Actualización 2026-11-11 (§M, #30–#32):** las fases están fusionadas en `main` (PR #26, #33–#35). El propietario tiene ya
+  **MariaDB 13.1 y ClamAV 1.5.4 en local**, así que la suite completa corre también en Windows (pruebas adaptadas sin rebajar Linux).
+  **Instalador con menú** para Windows, Linux y macOS que instala Node, MariaDB, ClamAV y npm (probado de punta a punta en Windows).
+  **Adaptador de base de datos**, paso 1: motor elegido con `DB_CLIENT` y contrato probado contra la base real; PostgreSQL/Supabase en
+  camino (no se afirma hasta tener su job del CI).
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -185,7 +190,7 @@ descartar la alerta de CodeQL; pentest externo; multi-organización; S3 y provee
   mejora.
 - **Siguiente mejora:** script `winget`/`choco` para el toolset en Windows. *(Prioridad baja.)*
 
-Las entregas siguientes siguen en la sección **K** (#8–#20) y **L** (#21–#29), con este mismo formato.
+Las entregas siguientes siguen en las secciones **K** (#8–#20), **L** (#21–#29) y **M** (#30–#32), con este mismo formato.
 
 ---
 
@@ -201,14 +206,14 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Autenticación (sesiones, MFA, SSO) | Evaluado (CI) | 9 | 9 | 8 | 8 | 8 | 9 | 9 | **8,6** | Refresh rotatorio, TOTP/WebAuthn/OIDC/SAML; solo contra simuladores |
 | Autorización | Evaluado (CI) | 9 | 9 | 8 | 8 | 8 | 8 | 8 | **8,3** | Permisos por rol desde la BD, dos administradores; sin multi-organización |
 | API y validación | Evaluado (local + CI) | 9 | 8 | 8 | 9 | 8 | 9 | 9 | **8,6** | OpenAPI = código (prueba) y README = OpenAPI (prueba); fuzzing de todas las rutas |
-| Base de datos | Evaluado (CI; réplica de lectura solo con la principal) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales nuevas |
-| Archivos (local y S3) | Evaluado (CI: simulador y SeaweedFS) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; audio/vídeo sin sanear |
+| Base de datos | Evaluado (CI; réplica de lectura solo con la principal) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales; adaptador con contrato probado (#32), aún solo MySQL/MariaDB |
+| Archivos (local y S3) | Evaluado (CI: simulador y SeaweedFS) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; antivirus con ClamAV real también en Windows (#31); audio/vídeo sin sanear |
 | Gestión de errores | Evaluado | 8 | 8 | 8 | 8 | — | 8 | 7 | **7,8** | Sin trazas al cliente (fuzzing); fallos de S3/BD sin filas a medias |
 | Dependencias | Evaluado (CI, fases 0–2) | 9 | 9 | 8 | — | — | 8 | 8 | **8,4** | `npm audit` producción 0 (raíz y web); Dependabot incluye docker |
 | Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente) y `.env` versionado |
 | Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
 | Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
-| Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~430 API + 57 web + e2e; local sin BD: se omiten las de BD |
+| Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~590 API + 57 web + e2e; en local (Windows) ya con MariaDB 13.1 y ClamAV (#30, #31) |
 | Interfaz web | Evaluado (CI: e2e en 3 navegadores + axe) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
 | Infraestructura / Docker | Evaluado (CI: imagen construida y 2 réplicas probadas) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
 | PruebasLinux | Evaluado (local y CI) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
@@ -232,6 +237,8 @@ Docker, que ya tiene pruebas ejecutadas.
 | Media | Proveedores reales sin probar (Entra ID/Okta, AWS KMS/Vault, AWS S3/R2) | Pruebas contra simuladores | Diferencias de un proveedor real | Prueba en preproducción con cada proveedor usado | Abierto |
 | Media | Rotación de claves en memoria | 83 MB → 593 MB de RAM, 75 s cerrado | Inviable con BD de GB | Snapshot y re-cifrado por lotes en streaming | Propuesto |
 | Media | Multi-organización, HIBP, límite de sesiones simultáneas, versionado de API | `docs/CONTROLES.md` §2 | Controles ASVS no cubiertos | Diseño y desarrollo por separado | Propuesto |
+| Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
+| Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
 | Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
 | Baja | Saneado solo de imágenes y PDF | `docs/SEGURIDAD.md` §22 | Metadatos en audio/vídeo/texto | Recodificar o despojar metadatos | Propuesto |
@@ -272,18 +279,29 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 
 ---
 
+### Intervención 8 (10–11-nov, ramas `cierre/8-bd` e `instalador`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #30 · `1c7666a`, `b558261`, `67051e9` | `database/setup-local.sql`, `docs/BASES-DE-DATOS.md` | `test_files.js`, `test_files_backup.js`, `test_rotation.js`, `test_scale.js`, `CLAUDE.md` | — | MariaDB 13.1 local; 8 fallos solo de Windows | Archivos afectados 168/170 + cluster 3/3 |
+| #31 · `a559875`, `2cf2bd1` | `instalar.{cmd,sh,command}`, `instalador/*` | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`, `test_av.js`, `.gitattributes`, `.gitignore` | — | Instalador con menú y ClamAV por sistema | Instalación real en Windows; `test_av` 23/23 |
+| #32 · (este commit) | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; lint 0 |
+
+---
+
 ## F. Plan de mejora continua
 
 ### Completado (con evidencia)
 - ✅ `main` en verde y punto de recuperación (#21). ✅ Seguridad: bypass, MFA, gitleaks, restos y credencial retirada del árbol (#22).
 - ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25).
 - ✅ PruebasLinux ampliado (#26). ✅ Documentación fiel y con prueba de sincronía (#27). ✅ CI de todas las fases en verde (#28, #29).
+- ✅ Fases fusionadas en `main` (PR #26, #33–#35). ✅ Suite completa en local con MariaDB 13.1 (#30). ✅ Instalador con menú y ClamAV,
+  probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 1. **Cambiar la contraseña filtrada** de la BD remota · crítica · el usuario de `test.js` ya no da acceso.
-2. **Fusionar por fases**: `cierre/0-base` → … → `cierre/6-docs`, en orden (cada rama contiene a la anterior). Los PR #24 y #25
-   apuntan a `main` e incluyen las fases anteriores · alta · cada fase fusionada con su CI en verde; los PR de Dependabot #9–#23 se
-   cierran solos al fusionar la fase 2.
+2. **PostgreSQL/Supabase** (pasos 2–4 de `docs/BASES-DE-DATOS.md`) · media · `test:all` en verde con `DB_CLIENT=postgres` en un job
+   del CI, además del de MariaDB. MongoDB después (capa de repositorios).
 3. **Descartar la alerta de CodeQL** como falso positivo y **activar Dependency graph** · baja · sin alertas abiertas ni jobs rojos de ruido.
 4. **Pruebas con proveedores reales** (IdP, KMS, S3) en preproducción · media · un login SSO real, una clave KMS real, un bucket real.
 5. **Pentest externo** · alta (organizativa) · informe y retest de hallazgos.
@@ -291,6 +309,7 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 7. **trivy y hadolint en CI** con binarios verificados · baja · opciones 88, 89 y 125 ejecutadas.
 8. **ASVS pendientes**: HIBP, límite de sesiones, versionado de API, multi-organización · media.
 9. `.env` fuera del repositorio cuando deje de ser de pruebas · alta antes de producción.
+10. **Instaladores de Linux y macOS ejecutados** en equipos reales o en el CI · media · `linux.sh --si` termina con EICAR detectado.
 
 ---
 
@@ -592,3 +611,64 @@ necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz we
   un entorno real podía mostrar.
 - **Problemas restantes:** CodeQL (falso positivo, descartar en GitHub); SSO, KMS y S3 solo contra simuladores o SeaweedFS.
   **Siguiente mejora:** §F 3 y 4. *(Baja / media.)*
+
+## M. Intervención 2026-11-10/11: MariaDB local, instalador con ClamAV y adaptador de base de datos (#30–#32)
+
+Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a su rama **y** a `main` por avance rápido.
+
+### #30 — MariaDB 13.1 local y pruebas compatibles con Windows
+- **Estado:** completado (10-nov).
+- **Archivos y módulos revisados:** `database/setup-local.sql` (nuevo), `test_files.js`, `test_files_backup.js`, `test_rotation.js`,
+  `test_scale.js`, `CLAUDE.md`.
+- **Problema detectado:** el propietario instaló **MariaDB 13.1.1** en Windows; la suite completa dio **578 bien y 8 fallos**, todos
+  por suponer Linux: permisos `0600` (NTFS no tiene bits de modo: siempre `0666`), una ruta «imposible» (`/dev/null/…`) que en Windows
+  sí se crea, el reparto del cluster (con `SCHED_NONE` Windows entrega todas las conexiones a un worker) y `SIGHUP`/`SIGTERM`
+  (no existen o terminan el proceso a la fuerza).
+- **Acciones realizadas:** bases y usuario de pruebas iguales que en el CI con `setup-local.sql` (lo ejecuta el propietario con su
+  cuenta de administrador; el proyecto no usa la contraseña de root); permisos comprobados solo en POSIX; «disco no escribible» con
+  un archivo usado como carpeta (falla en los dos sistemas); `CLUSTER_SCHEDULING=rr` en Windows; `SIGHUP` y cierre ordenado se
+  siguen probando en Linux/CI. Nada se rebaja en Linux.
+- **Pruebas ejecutadas:** local (Windows + MariaDB 13.1): los 4 archivos afectados 168/170 (2 omitidas con motivo) y el cluster 3/3 + 1
+  omitida; suite completa al cierre de #32 (ver ahí).
+- **Puntuación:** 8/10 — la suite completa ya corre en local; el CI sigue en MariaDB 10.11 (verde en uno no prueba el otro).
+- **Problemas restantes:** ninguno propio. **Siguiente mejora:** #31 (ClamAV para las 5 pruebas que lo necesitan).
+
+### #31 — Instalador con menú para Windows, Linux y macOS (Node, MariaDB, ClamAV y npm)
+- **Estado:** completado en Windows (11-nov); Linux y macOS escritos pero **sin ejecutar** (no hay esos equipos en este entorno).
+- **Archivos y módulos revisados:** `instalar.cmd`, `instalar.sh`, `instalar.command`, `instalador/{menu.ps1,windows.ps1,linux.sh,
+  macos.sh,comun.sh,verificar-clamav.js}`, `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`, `test_av.js`, `.gitattributes`.
+- **Problema detectado:** el instalador de #7 suponía Node ya instalado, no cubría macOS ni instalaba MariaDB ni ClamAV; 5 pruebas
+  del antivirus se omitían en local; las pruebas con clamd real solo sabían usar un socket Unix (Windows no lo tiene).
+- **Acciones realizadas:** **programa base** que abre una terminal con el menú 1 Windows / 2 Linux / 3 macOS (`instalar.cmd`,
+  `instalar.command` con doble clic, `instalar.sh`) y un instalador por sistema (winget con elevación UAC · apt/dnf/pacman con sudo
+  solo para paquetes · Homebrew sin sudo), idempotentes y con registro en `instalador/registros/`. **ClamAV configurado por sistema**:
+  clamd solo en `127.0.0.1:3310` (+ socket Unix en Linux/macOS), `StreamMaxLength 25M` (= `CLAMAV_MAX_BYTES`); servicios ClamD y
+  FreshClam (Windows, arranque a elegir por la memoria), systemd con `ListenStream` en Debian/Ubuntu, agentes de launchd en macOS.
+  `verificar-clamav.js` comprueba PING, versión y EICAR por INSTREAM, el mismo camino que el servidor. `test_av.js` arranca su clamd
+  real también en Windows (TCP en `127.0.0.1` y puerto libre) y espera a que salga antes de borrar su carpeta (EPERM en Windows).
+  `.gitattributes`: `*.sh`/`*.command` con LF y `*.cmd` con CRLF.
+- **Pruebas ejecutadas:** sintaxis (`bash -n`, analizador de PowerShell, `node --check`), lint 0; **instalación real en Windows**:
+  ClamAV 1.5.4 + firmas, servicios en marcha, verificación con EICAR detectado, npm y `web/`; tras reiniciar, `Start-Service ClamD` y
+  verificación de nuevo correcta; `test_av.js` **23/23 sin omitidas** (dos ejecuciones).
+- **Puntuación:** 8/10 — Windows probado de punta a punta; Linux y macOS sin ejecutar (sin `shellcheck` en este equipo).
+- **Problemas restantes:** ejecutar `instalador/linux.sh` (Debian/Ubuntu y Fedora) y `instalador/macos.sh` en equipos reales.
+  **Siguiente mejora:** un job del CI que ejecute `linux.sh --si --sin-mariadb` en Ubuntu. *(Media.)*
+
+### #32 — Adaptador de base de datos (paso 1: driver MySQL) y primer SQL portable
+- **Estado:** paso 1 completado (11-nov); pasos 2–4 en curso (`docs/BASES-DE-DATOS.md`, «Estado»).
+- **Archivos y módulos revisados:** `src/config/database.js`, `src/config/sql.js`, `src/tasks/leader.js`,
+  `src/maintenance/rotation.service.js` (usan una conexión retenida), las ≈ 230 consultas (inventario de `docs/BASES-DE-DATOS.md` §2).
+- **Problema detectado:** el acceso estaba centralizado, pero `database.js` importaba `mysql2` directamente y el SQL es dialecto
+  MySQL; tres consultas usaban `SUM(condición)`, que **falla** en PostgreSQL. La documentación apuntaba a `src/security/sql.js`, que
+  no existe (es `src/config/sql.js`).
+- **Acciones realizadas:** `src/config/db-drivers/` elige el motor con `DB_CLIENT` (mysql/mariadb por defecto; postgres/supabase da
+  un error claro hasta tener su CI) y documenta el **contrato** que debe cumplir todo driver (el subconjunto de `mysql2` que usa el
+  proyecto, también para la conexión retenida del líder: `destroy`, `on('error')`); `db-drivers/mysql.js` es el único archivo de `src/`
+  y `scripts/` que importa el cliente. `SUM(CASE WHEN … THEN 1 ELSE 0 END)` en `live-stream.js`, `anomaly-detection.service.js` y
+  `rate-limiter.service.js` (mismo resultado en MySQL). `DB_CLIENT` en `.env.example`; rutas corregidas en la documentación.
+- **Pruebas ejecutadas:** `test_db.js` (nuevo, en `test:all` y por tanto en el CI): elección del motor, motores desconocidos
+  rechazados, «un único punto de entrada», sin `SUM(condición)`, y el contrato contra MariaDB real (`[filas]`, `insertId`,
+  `affectedRows` del canje de un solo uso, COMMIT/ROLLBACK, conexión retenida con `destroy`): **11/11**. Suite completa: PENDIENTE.
+- **Puntuación:** 8/10 — sin cambio de comportamiento y con red de seguridad; PostgreSQL aún no existe, así que no se afirma.
+- **Problemas restantes:** pasos 2–4 (helpers de intervalos/upsert/cerrojos, esquema de PostgreSQL con prueba de paridad, driver `pg`
+  y job del CI). **Siguiente mejora:** paso 2. *(Media.)*

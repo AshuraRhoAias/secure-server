@@ -9,7 +9,7 @@ capa de repositorios (ver §5).
 - **Un único punto de entrada**: `src/config/database.js`, el único archivo que importa `mysql2`. Expone `query`, `readQuery`
   (réplica de lectura opcional), `withConnection`, `transaction`, `close`, `testConnection` y `secureQuery`.
 - **39 archivos** lo usan con **≈ 230 consultas SQL escritas a mano**, todas parametrizadas (`?`; lo que no admite parámetro pasa
-  por `sqlInt` / `sqlPlaceholders` / `sqlFragment` de `src/security/sql.js`).
+  por `sqlInt` / `sqlPlaceholders` / `sqlFragment` de `src/config/sql.js`).
 - Los llamantes esperan la forma de `mysql2`: `const [rows] = await db.query(...)` y, en escrituras, `result.affectedRows` y
   `result.insertId`.
 - Archivos con más consultas: `secure-auth.service.js` (27), `alerts.service.js` (21), `rotation.service.js` (19),
@@ -43,7 +43,7 @@ Conclusión: la arquitectura ya está centralizada (bien), pero el **SQL es dial
 1. **Adaptador en `src/config/database.js`**: `DB_CLIENT=mysql` (por defecto; MariaDB y MySQL) o `postgres` (PostgreSQL y
    Supabase). Ambos devuelven la **misma forma** que hoy (`[rows]`, y en escrituras `{ affectedRows, insertId }`), así los ≈ 230
    llamantes no cambian de golpe.
-2. **Helpers de dialecto en `src/security/sql.js`** para lo que no se puede traducir de forma segura: intervalos de fecha, upsert,
+2. **Helpers de dialecto en `src/config/sql.js`** para lo que no se puede traducir de forma segura: intervalos de fecha, upsert,
    insert-ignore, cerrojos con nombre. Se sustituyen las construcciones de la tabla de §2 por esos helpers, módulo a módulo.
 3. **Esquema por dialecto**: `database/schema.sql` (MySQL) y `database/postgres/schema.sql`, con una prueba que compare tablas y
    columnas de los dos para que no diverjan.
@@ -52,6 +52,20 @@ Conclusión: la arquitectura ya está centralizada (bien), pero el **SQL es dial
    afirma soporte de PostgreSQL.**
 
 Orden: primero el adaptador **solo con MySQL** y todo en verde (local y CI); después PostgreSQL, módulo a módulo.
+
+### Estado (11-nov-2026)
+
+| Paso | Estado |
+|---|---|
+| 1. Adaptador con el driver MySQL | **Hecho.** `src/config/db-drivers/index.js` (elige el motor con `DB_CLIENT` y documenta el **contrato**) y `db-drivers/mysql.js` (único archivo de `src/` y `scripts/` que importa `mysql2`). `database.js` ya no conoce el driver. `DB_CLIENT=postgres` da un error claro hasta que el paso 4 esté en verde. `test_db.js`: elección del motor, «un único punto de entrada» y el contrato contra la base real (`[filas]`, `insertId`, `affectedRows` de los canjes de un solo uso, transacciones, conexión retenida con `destroy`), que es lo mismo que tendrá que pasar el driver de PostgreSQL. |
+| 2. SQL portable sin cambiar resultados en MySQL (`SUM(CASE …)`, `COALESCE`, helpers de intervalos/upsert/cerrojos) | Pendiente |
+| 3. Esquema `database/postgres/schema.sql` + prueba de paridad | Pendiente |
+| 4. Driver `postgres` (`pg`, traducción de `?`, `RETURNING id`, `rowCount`) + job del CI con PostgreSQL | Pendiente |
+
+**Contrato del driver** (detalle en `src/config/db-drivers/index.js`): es el subconjunto de `mysql2/promise` que usa el proyecto,
+para que los ≈ 230 llamantes no cambien: `pool.getConnection()` / `pool.end()`; `conn.execute|query(sql, params)` → `[filas]` o
+`[{ affectedRows, insertId }]`; `beginTransaction` / `commit` / `rollback` / `release` / `destroy` / `on('error')`. Las consultas siguen
+con `?`; un driver que use `$1…` los traduce él.
 
 ## 4. MariaDB local (Windows)
 

@@ -1,5 +1,5 @@
 const fs = require('fs');
-const mysql = require('mysql2/promise');
+const { loadDriver } = require('./db-drivers');
 const credentialBuilder = require('./credential-builder');
 const metrics = require('../observability/metrics');
 const tracing = require('../observability/tracing');
@@ -37,6 +37,8 @@ const intFromEnv = (name, fallback) => {
 class DatabaseConfig {
     constructor() {
         this.pool = null;
+        // Motor según DB_CLIENT (MariaDB/MySQL por defecto). Todo el acceso pasa por el contrato de ./db-drivers
+        this.driver = loadDriver();
         this.initializePool();
     }
 
@@ -70,8 +72,8 @@ class DatabaseConfig {
         try {
             credentialBuilder.validateCredentials();
             const nodeEnv = this.getEnvVariable('NODE_ENV');
-            this.pool = mysql.createPool(this.poolOptions(buildSslConfig(nodeEnv)));
-            console.log('🗄️ Pool de conexiones MySQL inicializado de forma segura');
+            this.pool = this.driver.createPool(this.poolOptions(buildSslConfig(nodeEnv)));
+            console.log(`🗄️ Pool de conexiones (${this.driver.name}) inicializado de forma segura`);
 
             // Réplica de LECTURA opcional (DB_READ_HOST=host[:puerto], mismas credenciales y base de datos). Solo la usan las
             // consultas de análisis del panel (readQuery): lo que decide la seguridad (bloqueos, límites, sesiones) va SIEMPRE
@@ -80,7 +82,7 @@ class DatabaseConfig {
                 const options = this.poolOptions(buildSslConfig(nodeEnv));
                 const uri = new URL(options.uri);
                 uri.host = process.env.DB_READ_HOST;
-                this.readPool = mysql.createPool({ ...options, uri: uri.toString(), connectionLimit: intFromEnv('DB_READ_POOL_SIZE', options.connectionLimit) });
+                this.readPool = this.driver.createPool({ ...options, uri: uri.toString(), connectionLimit: intFromEnv('DB_READ_POOL_SIZE', options.connectionLimit) });
                 console.log('🗄️ Réplica de lectura configurada para las consultas de análisis');
             }
         } catch (error) {
@@ -144,7 +146,7 @@ class DatabaseConfig {
         const operation = metrics.sqlOperation(sql);
         const end = metrics.dbDuration.startTimer({ operation });
         try {
-            return await tracing.withSpan('db.query', { 'db.system': 'mysql', 'db.operation': operation }, run);
+            return await tracing.withSpan('db.query', { 'db.system': this.driver.name, 'db.operation': operation }, run);
         } catch (error) {
             metrics.dbErrors.inc({ operation });
             throw error;
@@ -201,7 +203,7 @@ class DatabaseConfig {
             console.log('✅ Conexión a base de datos exitosa');
             return true;
         } catch (error) {
-            if (error.code === 'HANDSHAKE_NO_SSL_SUPPORT') {
+            if (this.driver.isTlsUnsupported(error)) {
                 // Antes se degradaba en silencio a una conexión sin cifrar. Ahora hay que decidirlo explícitamente.
                 console.error('❌ El servidor de base de datos no admite TLS. Habilítalo, o fija DB_SSL=off de forma explícita si aceptas el riesgo.');
                 return false;

@@ -108,7 +108,7 @@ class AnomalyDetection {
     async getStats() {
         const [[blocked]] = await db.query('SELECT COUNT(*) AS active FROM blocked_ips WHERE blocked_until > NOW()');
         const [[events24h]] = await db.query(
-            "SELECT COUNT(*) AS total, SUM(severity IN ('high','critical')) AS serious FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN severity IN ('high','critical') THEN 1 ELSE 0 END) AS serious FROM security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
         return {
             storage: 'mysql',
             blockedIPs: Number(blocked.active) || 0,
