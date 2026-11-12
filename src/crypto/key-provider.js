@@ -68,8 +68,11 @@ function deriveStableKeySet({ baseSeed, encryptionSeed, jwtSeed, epoch }) {
 }
 
 // Réplica exacta de las fórmulas que usaban secure-env.js y credential-builder.js
+// BASE_SEED es obligatoria también aquí: sin ella las claves salían de una cadena conocida ('default_seed_change_this'), y los scripts
+// (rotateKeys, emergencyRecovery) no pasan por la validación de src/index.js. `jwtSeed || 'jwt_default'` se mantiene: es la fórmula
+// antigua y la necesitan los datos existentes.
 function deriveLegacyKeySet({ baseSeed, jwtSeed, date }) {
-    const base = baseSeed || 'default_seed_change_this';
+    const base = requireValue('BASE_SEED', baseSeed);
     const encryption = scrypt(`${base}_enc_${date}`, 'dynamic_salt', 32);
     return {
         mode: 'legacy',
@@ -78,7 +81,7 @@ function deriveLegacyKeySet({ baseSeed, jwtSeed, date }) {
         session: scrypt(`${base}_sess_${date}`, 'dynamic_salt', 32),
         email: scrypt(`${base}_email_${date}`, 'dynamic_salt', 32),
         jwt: scrypt(`${base}_jwt_${date}`, 'dynamic_salt', 32),
-        jwtSigning: scrypt(`${baseSeed || 'default'}_${jwtSeed || 'jwt_default'}_${date}`, 'jwt_salt', 64),
+        jwtSigning: scrypt(`${base}_${jwtSeed || 'jwt_default'}_${date}`, 'jwt_salt', 64),
         fingerprint: fingerprint(encryption)
     };
 }

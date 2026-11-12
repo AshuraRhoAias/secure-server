@@ -66,8 +66,11 @@ class SecureEnvironment {
         return changed || before !== this.fingerprint;
     }
 
+    // Sin secreto no hay clave: se lanza (antes devolvía una clave FIJA derivada de 'fallback_<tipo>', pública en el código)
     getSecret(type) {
-        return this.secrets[type] || require('crypto').scryptSync(`fallback_${type}`, 'dynamic_salt', 32).toString('hex');
+        const secret = this.secrets?.[type];
+        if (!secret) throw new Error(`Secreto interno no disponible: ${type}`);
+        return secret;
     }
 
     getKeyInfo() {

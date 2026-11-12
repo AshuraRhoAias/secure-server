@@ -7,6 +7,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 
+// Sin .env, pero las claves internas necesitan semilla: sin ella secure-env falla (antes derivaba de un valor conocido)
+process.env.BASE_SEED ||= 'semilla-de-pruebas-del-api';
+
 // ---------- Dobles de prueba ----------
 function stub(relPath, exports) {
     const resolved = require.resolve(path.join(__dirname, relPath));

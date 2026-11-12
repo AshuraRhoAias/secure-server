@@ -215,47 +215,6 @@ class DatabaseConfig {
             if (connection) connection.release();
         }
     }
-
-    async secureQuery(sql, params = [], userId = null) {
-        const startTime = Date.now();
-
-        try {
-            const result = await this.query(sql, params);
-
-            await this.logDatabaseAccess({
-                type: 'QUERY_SUCCESS',
-                userId,
-                duration: Date.now() - startTime,
-                affectedRows: result.affectedRows || result.length
-            });
-
-            return result;
-        } catch (error) {
-            await this.logDatabaseAccess({
-                type: 'QUERY_FAILED',
-                userId,
-                duration: Date.now() - startTime,
-                error: error.code || 'ERROR'
-            });
-
-            throw error;
-        }
-    }
-
-    async logDatabaseAccess(details) {
-        try {
-            const tripleEncryptor = require('../crypto/tripleEncryptor');
-            const encryptedDetails = tripleEncryptor.encrypt(JSON.stringify(details));
-
-            await this.query(
-                `INSERT INTO security_logs (event_type, encrypted_details, ip_address, severity)
-                 VALUES (?, ?, 'DATABASE', 'low')`,
-                [details.type, encryptedDetails]
-            );
-        } catch (error) {
-            console.error('❌ Error logging database access:', error.message);
-        }
-    }
 }
 
 module.exports = new DatabaseConfig();

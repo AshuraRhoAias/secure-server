@@ -65,6 +65,26 @@ test('modo legacy replica exactamente las fórmulas anteriores (compatibilidad c
     assert.strictEqual(k.encryption, crypto.scryptSync(`semilla_enc_${date}`, 'dynamic_salt', 32).toString('hex'));
     assert.strictEqual(k.jwt, crypto.scryptSync(`semilla_jwt_${date}`, 'dynamic_salt', 32).toString('hex'));
     assert.strictEqual(k.jwtSigning, crypto.scryptSync(`semilla_jwt_${date}`, 'jwt_salt', 64).toString('hex'));
+    // Sin JWT_SEED sigue la fórmula antigua ('jwt_default'): los datos existentes dependen de ella
+    const sinJwt = keyProvider.deriveLegacyKeySet({ baseSeed: 'semilla', date });
+    assert.strictEqual(sinJwt.jwtSigning, crypto.scryptSync(`semilla_jwt_default_${date}`, 'jwt_salt', 64).toString('hex'));
+});
+
+test('sin semilla no hay claves: nunca se derivan de un valor conocido (revisión 12-nov)', () => {
+    // Antes: modo legacy sin BASE_SEED → 'default_seed_change_this' (los scripts no pasan por la validación de index.js)
+    for (const env of [{}, { JWT_SEED: 'j' }, { BASE_SEED: '' }]) {
+        assert.throws(() => keyProvider.deriveFromEnv(env, { today: '2026-10-20' }), /BASE_SEED/);
+    }
+    // Antes: getSecret() de un secreto ausente devolvía scrypt('fallback_<tipo>'), una clave pública
+    const secureEnv = require('./src/config/secure-env');
+    const saved = secureEnv.secrets;
+    try {
+        secureEnv.secrets = { ...saved, email: undefined };
+        assert.throws(() => secureEnv.getSecret('email'), /Secreto interno no disponible: email/);
+        assert.strictEqual(secureEnv.getSecret('encryption'), saved.encryption);
+    } finally {
+        secureEnv.secrets = saved;
+    }
 });
 
 test('cambiar cualquiera de las variables de claves cambia la clave de cifrado', () => {

@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-11 (ver §A, §L y §M)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-12 (ver §A, §L y §M)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -30,6 +30,9 @@
   **Instalador con menú** para Windows, Linux y macOS que instala Node, MariaDB, ClamAV y npm (probado de punta a punta en Windows).
   **Adaptador de base de datos**, paso 1: motor elegido con `DB_CLIENT` y contrato probado contra la base real; PostgreSQL/Supabase en
   camino (no se afirma hasta tener su job del CI).
+- **Revisión del código 2026-11-12 (#33, `docs/REVISION-CODIGO-2026-11.md`):** 0 vulnerabilidades, cobertura 77 % líneas / 84 % ramas.
+  Cerradas dos trampas de claves (clave pública de reserva y semilla por defecto) y quitado código muerto peligroso. **Riesgo abierto:**
+  el `.env` local funciona en producción con claves `legacy` (cambian cada día): falta `KEY_EPOCH` (decide el propietario).
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -210,7 +213,7 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Archivos (local y S3) | Evaluado (CI: simulador y SeaweedFS) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; antivirus con ClamAV real también en Windows (#31); audio/vídeo sin sanear |
 | Gestión de errores | Evaluado | 8 | 8 | 8 | 8 | — | 8 | 7 | **7,8** | Sin trazas al cliente (fuzzing); fallos de S3/BD sin filas a medias |
 | Dependencias | Evaluado (CI, fases 0–2) | 9 | 9 | 8 | — | — | 8 | 8 | **8,4** | `npm audit` producción 0 (raíz y web); Dependabot incluye docker |
-| Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente) y `.env` versionado |
+| Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente), `.env` versionado y, en local, claves `legacy` sin `KEY_EPOCH` (#33) |
 | Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
 | Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
 | Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~590 API + 57 web + e2e; en local (Windows) ya con MariaDB 13.1 y ClamAV (#30, #31) |
@@ -237,6 +240,7 @@ Docker, que ya tiene pruebas ejecutadas.
 | Media | Proveedores reales sin probar (Entra ID/Okta, AWS KMS/Vault, AWS S3/R2) | Pruebas contra simuladores | Diferencias de un proveedor real | Prueba en preproducción con cada proveedor usado | Abierto |
 | Media | Rotación de claves en memoria | 83 MB → 593 MB de RAM, 75 s cerrado | Inviable con BD de GB | Snapshot y re-cifrado por lotes en streaming | Propuesto |
 | Media | Multi-organización, HIBP, límite de sesiones simultáneas, versionado de API | `docs/CONTROLES.md` §2 | Controles ASVS no cubiertos | Diseño y desarrollo por separado | Propuesto |
+| **Alta** | `.env` local con `NODE_ENV=production` y sin `KEY_EPOCH`: claves `legacy` que cambian cada día | `src/crypto/key-provider.js:14-17`; `.env` (#33) | Lo cifrado un día no se descifra al siguiente (notas, MFA, nombres) | Definir `KEY_EPOCH` (migrar datos `legacy` con `rotateKeys --legacy-scan-days`); propuesto: no arrancar en producción con `legacy` | Abierto (propietario) |
 | Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
 | Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
@@ -285,7 +289,8 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 |---|---|---|---|---|---|
 | #30 · `1c7666a`, `b558261`, `67051e9` | `database/setup-local.sql`, `docs/BASES-DE-DATOS.md` | `test_files.js`, `test_files_backup.js`, `test_rotation.js`, `test_scale.js`, `CLAUDE.md` | — | MariaDB 13.1 local; 8 fallos solo de Windows | Archivos afectados 168/170 + cluster 3/3 |
 | #31 · `a559875`, `2cf2bd1` | `instalar.{cmd,sh,command}`, `instalador/*` | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`, `test_av.js`, `.gitattributes`, `.gitignore` | — | Instalador con menú y ClamAV por sistema | Instalación real en Windows; `test_av` 23/23 |
-| #32 · (este commit) | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; suite local 601/602 (1 omitida); lint 0 |
+| #32 · `d9a7fe9`, `c6f5ec9` | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; suite local 601/602 (1 omitida); lint 0 |
+| #33 · (este commit) | `docs/REVISION-CODIGO-2026-11.md` | `secure-env.js`, `key-provider.js`, `auth.controller.js`, `database.js`, `test_rotation.js`, `test_api.js`, docs | 4 métodos de mantenimiento muertos, `secureQuery`/`logDatabaseAccess` | Revisión: claves sin valores conocidos y código muerto fuera | Pruebas nuevas; cobertura 77 %; ver #33 |
 
 ---
 
@@ -296,9 +301,11 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 - ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25).
 - ✅ PruebasLinux ampliado (#26). ✅ Documentación fiel y con prueba de sincronía (#27). ✅ CI de todas las fases en verde (#28, #29).
 - ✅ Fases fusionadas en `main` (PR #26, #33–#35). ✅ Suite completa en local con MariaDB 13.1 (#30). ✅ Instalador con menú y ClamAV,
-  probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32).
+  probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32). ✅ Revisión del código y trampas de claves cerradas (#33).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
+0. **Claves estables en el `.env` local** (`KEY_EPOCH`) y, si se aprueba, no arrancar en producción con claves `legacy` · alta · el servidor
+   arranca en modo `stable` y lo cifrado ayer se descifra hoy.
 1. **Cambiar la contraseña filtrada** de la BD remota · crítica · el usuario de `test.js` ya no da acceso.
 2. **PostgreSQL/Supabase** (pasos 2–4 de `docs/BASES-DE-DATOS.md`) · media · `test:all` en verde con `DB_CLIENT=postgres` en un job
    del CI, además del de MariaDB. MongoDB después (capa de repositorios).
@@ -612,7 +619,7 @@ necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz we
 - **Problemas restantes:** CodeQL (falso positivo, descartar en GitHub); SSO, KMS y S3 solo contra simuladores o SeaweedFS.
   **Siguiente mejora:** §F 3 y 4. *(Baja / media.)*
 
-## M. Intervención 2026-11-10/11: MariaDB local, instalador con ClamAV y adaptador de base de datos (#30–#32)
+## M. Intervención 2026-11-10/12: MariaDB local, instalador con ClamAV, adaptador de base de datos y revisión (#30–#33)
 
 Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a su rama **y** a `main` por avance rápido.
 
@@ -675,3 +682,24 @@ Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a s
 - **Puntuación:** 8/10 — sin cambio de comportamiento y con red de seguridad; PostgreSQL aún no existe, así que no se afirma.
 - **Problemas restantes:** pasos 2–4 (helpers de intervalos/upsert/cerrojos, esquema de PostgreSQL con prueba de paridad, driver `pg`
   y job del CI). **Siguiente mejora:** paso 2. *(Media.)*
+
+### #33 — Revisión del código: claves sin valores conocidos, código muerto fuera y propuestas priorizadas
+- **Estado:** completado (12-nov); propuestas pendientes de decisión del propietario. Informe: `docs/REVISION-CODIGO-2026-11.md`.
+- **Archivos y módulos revisados:** `src/` (92 archivos), `scripts/` (14), `web/src/` (52, patrones de seguridad), `.env` (solo las líneas
+  `NODE_ENV` y `KEY_EPOCH`), dependencias (`npm audit`, `npm outdated`) y cobertura por archivo.
+- **Problema detectado:** (1) el `.env` local tiene `NODE_ENV=production` sin `KEY_EPOCH`: claves `legacy`, que **cambian cada día**
+  (lo cifrado hoy no se descifra mañana) y el servidor arranca así; (2) `getSecret()` devolvía una clave fija y pública si faltaba un
+  secreto; (3) en modo `legacy` sin `BASE_SEED` las claves salían de `default_seed_change_this`, alcanzable desde `rotateKeys` y
+  `emergencyRecovery`; (4) ≈ 320 líneas de código muerto (limpieza que borraba usuarios y registraba hashes y cifrados, re-cifrado
+  masivo fuera de la herramienta de rotación, `secureQuery` que contaba mal). Más 10 propuestas de rendimiento, mantenibilidad y pruebas.
+- **Acciones realizadas:** `getSecret()` lanza si falta el secreto; `BASE_SEED` obligatoria también en `legacy` (la fórmula antigua sin
+  `JWT_SEED` se mantiene para los datos existentes); código muerto eliminado de `auth.controller.js` y `database.js`. La corrección (3)
+  destapó que `test_api.js` cargaba las claves sin semilla: ahora define la suya. **No aplicado** (necesita decisión): negar el arranque
+  en producción con claves `legacy` (pararía el servidor local actual) y las propuestas de §2 del informe.
+- **Pruebas ejecutadas:** pruebas nuevas «sin semilla no hay claves» y la fórmula antigua sin `JWT_SEED` (`test_rotation.js`);
+  `test_api` 16/16, `test_icmp` 24/24, `test_s3` 5/5, `test_system` 100 %; cobertura 77,2 % líneas / 84,1 % ramas / 90,6 % funciones;
+  lint 0; `npm audit` 0 en raíz y `web/`; **suite completa en serie: 603 pruebas, 602 bien, 0 fallos, 1 omitida** (`SIGHUP`).
+- **Puntuación:** 8/10 — las trampas de claves cerradas con prueba; el riesgo mayor (claves diarias en el `.env` local) depende del
+  propietario.
+- **Problemas restantes:** definir `KEY_EPOCH` (y migrar datos `legacy` si los hay); propuestas 5–14 del informe; CI sin comprobar
+  desde aquí. **Siguiente mejora:** decidir §3.1 del informe. *(Alta.)*
