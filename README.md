@@ -506,9 +506,9 @@ El servidor (si está corriendo) se reabre solo: cada 5 s comprueba el lock y co
 
 **El backup guarda las columnas cifradas ya descifradas** (el archivo completo sí va comprimido y cifrado). Si dentro hubiera texto cifrado con la clave antigua, cada backup necesitaría esa clave para siempre, y "re-cifrarlo con la clave nueva" solo cambiaría la capa de fuera. Así, una sola clave abre cualquier backup.
 
-### La cadena mensual de backups
+### La cadena de backups
 
-El backup de cada mes se cifra con la clave que acaba de dejar de ser la vigente ("copia de esas claves"), y **al mes siguiente se re-cifra con la nueva**. Para poder hacerlo, la clave anterior se guarda en `backups/keyring.json`, **envuelta con la clave actual**:
+El backup de cada rotación (semanal por defecto; la tabla usa meses como ejemplo) se cifra con la clave que acaba de dejar de ser la vigente ("copia de esas claves"), y **al mes siguiente se re-cifra con la nueva**. Para poder hacerlo, la clave anterior se guarda en `backups/keyring.json`, **envuelta con la clave actual**:
 
 | Tras la rotación de… | Backup de ene | Backup de feb | Backup de mar | Keyring (guarda…) |
 |----------------------|---------------|---------------|---------------|-------------------|
@@ -530,9 +530,13 @@ npm run rotate-keys -- verify backups/<archivo>.sbk
 npm run rotate-keys -- restore backups/<archivo>.sbk --confirm RESTORE [--tables users,user_notes]
 ```
 
-Opciones de `rotate`: `--no-write-env`, `--backup-key old|new`, `--drain N`, `--legacy-scan-days N`, `--keep-backups N` (por defecto se conservan **todos**; los backups crecen cada mes), `--firewall-ttl N`, `--no-notify`, `--env-file ruta`. La cabecera de `scripts/rotateKeys.js` las documenta.
+Opciones de `rotate`: `--no-write-env`, `--backup-key old|new`, `--drain N`, `--legacy-scan-days N`, `--keep-backups N` (en el CLI por defecto se conservan **todos**), `--firewall-ttl N`, `--no-notify`, `--env-file ruta`. La cabecera de `scripts/rotateKeys.js` las documenta.
 
-**Rotación mensual automática:** con `AUTO_ROTATION_ENABLED=true` el servidor rota el día 1 de cada mes a las 02:00 (México) dentro de su propio proceso (se pone en mantenimiento, rota, recarga las claves en memoria y se reabre; `BACKUP_RETENTION=N` limita los backups). Requiere un `.env` escribible y **una sola instancia** con esa variable activa. Alternativa más conservadora: déjala en `false` y programa `npm run rotate-keys -- rotate --confirm` con cron/systemd.
+**Rotación automática (semanal):** con `AUTO_ROTATION_ENABLED=true` el servidor descifra y vuelve a cifrar **todos** los datos con claves nuevas **cada domingo a las 02:00 (México)** dentro de su propio proceso (`KEY_ROTATION_CRON`, cron de 5 campos, y `KEY_ROTATION_TZ` lo cambian). Conserva **8 backups** (≈ 2 meses; `BACKUP_RETENTION=N`, 0 = todos). Se niega a programarla con una expresión cron inválida o con claves `legacy` (sin `KEY_EPOCH`). Requiere un `.env` escribible y **una sola instancia** con esa variable activa. Alternativa más conservadora: déjala en `false` y programa `npm run rotate-keys -- rotate --confirm` con cron/systemd.
+
+**Mientras rota no entra ni sale nada:** las peticiones nuevas reciben `503 MAINTENANCE` (salvo `/health`, que dice "el proceso vive" para que un orquestador no reinicie el contenedor a mitad; `/health/ready` sí da 503); los streams en vivo se cierran al momento y cualquier otra conexión abierta (descargas o subidas largas) se corta a los 4 s (`MAINTENANCE_CUT_MS`), antes de que termine la espera de 10 s de la rotación. Hacia fuera: ni webhooks de alertas, ni evaluación de alertas, ni limpieza, ni correos; la única excepción es el aviso de que la rotación **falló** (texto fijo, sin detalles internos), porque si no nadie sabría que el servidor sigue cerrado. Las demás alertas se guardan en `NOTIFICATIONS_DIR` y no se reenvían. Con la rotación por CLI en Linux, `--lockdown-firewall` cierra además la red salvo `MAINTENANCE_ADMIN_IPS`.
+
+**Qué supone rotar cada semana:** se cierran **todas las sesiones** (cambia la semilla de los JWT: todo el mundo vuelve a iniciar sesión), el servidor está cerrado lo que dure la rotación (75 s para una BD de 83 MB, ver abajo) y los **bytes de los archivos no se re-cifran**: solo se re-envuelve la clave de cada archivo.
 
 **Claves en el panel del hosting (sin `.env` escribible):** usa `--no-write-env`. La rotación re-cifra los datos pero no toca el `.env`: deja las variables nuevas en `data/rotation/new-env-*.txt` (permisos 600) y **el servidor sigue cerrado**. Aplica `ENCRYPTION_SEED`, `JWT_SEED` y `KEY_EPOCH` en el panel, reinicia, ejecuta `npm run rotate-keys -- finish` (comprueba que coinciden con la BD antes de reabrir) y borra ese archivo.
 
@@ -545,7 +549,9 @@ Opciones de `rotate`: `--no-write-env`, `--backup-key old|new`, `--drain N`, `--
 | Antes del `COMMIT` (dato ilegible, disco lleno, error de BD…) | La BD **no cambió** | Rollback, se borran los temporales, se quita el lock y el servidor se reabre con las claves anteriores. El backup ya creado se conserva |
 | `COMMIT` ambiguo (se pierde la respuesta) | Puede que la BD sí confirmara | **No** se deshace a ciegas: se pregunta a la BD por la huella; si confirmó, se trata como confirmado |
 | Después del `COMMIT` | La BD ya usa las claves nuevas | Sigue **cerrado**; `npm run rotate-keys -- recover` termina de colocar los archivos y reabre |
-| El proceso muere | Lock y journal quedan en `data/rotation/` | Sigue cerrado (el lock **no caduca solo**); `recover` decide según la huella de la BD si termina o deshace |
+| El proceso muere | Lock y journal quedan en `data/rotation/` | Sigue cerrado (el lock **no caduca solo**); `recover` decide según la huella de la BD si termina o deshace. Al arrancar, el servidor envía el aviso de rotación fallida si el proceso que la hacía ya no existe |
+| El proceso se queda parado (equipo suspendido) | La BD corta sus conexiones: deshace la transacción y suelta el cerrojo | Al despertar la rotación falla y se deshace sin cambiar nada; antes de confirmar comprueba que **sigue teniendo** el cerrojo de la BD (si lo perdió, otras máquinas podrían haberse reabierto) |
+| `recover` sin poder preguntar a la BD | No se sabe si confirmó | **No decide**: no borra las semillas nuevas (`.env.pending`) ni reabre; repetir cuando la BD responda |
 
 Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de una migración corrompería datos.
 
@@ -561,16 +567,17 @@ Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de u
 
 **Probado** (`npm run test:rotation`: 48 pruebas; se omiten si no hay BD, y entonces las suites salen "verdes" con pruebas omitidas: comprueba que `skipped` sea 0):
 - Contra **MariaDB 10.11 y MySQL 8.0.46 reales** (las tres suites: 82/82 en cada motor, 0 omitidas): rotaciones encadenadas, backups por mes, fallos antes/durante/después del commit, `COMMIT` ambiguo, `recover`, migración legacy, restauración, guardián y CLI. Los tests se verificaron con mutaciones deliberadas.
-- **`kill -9` en 44 instantes aleatorios** de la rotación (incluido justo tras el commit y durante la liberación del lock): en todos, tras `recover`, los datos íntegros y legibles, huella coherente, lock liberado y sin temporales sueltos.
+- **`kill -9` en 44 instantes aleatorios** de la rotación (prueba manual de oct-2026; incluido justo tras el commit y durante la liberación del lock): en todos, tras `recover`, los datos íntegros y legibles, huella coherente, lock liberado y sin temporales sueltos.
+- **En la suite automática** (`test_rotation.js`, proceso hijo real): muerte con la transacción abierta, justo tras el `COMMIT` de la BD (con el journal aún en `PREPARED`) y a mitad de colocar los archivos; rotación parada a la que la BD corta las conexiones; pérdida del cerrojo antes de confirmar; `recover` sin BD. Y el bloqueo de entradas y salidas durante el mantenimiento.
 - **Escrituras concurrentes**: con el servidor real y 8 escritores durante la rotación (≈63 000 peticiones), 0 escrituras confirmadas perdidas o corruptas y 0 respuestas 5xx.
-- **El job mensual real** (`executeMonthlyRotation`) y el servidor real (login, notas, endpoints de administrador).
+- **El job programado real** (`executeScheduledRotation`, semanal por defecto) y el servidor real (login, notas, endpoints de administrador).
 
 **Rendimiento medido** (no estimado): una BD de **83 MB** (30 000 filas, 70 000 valores cifrados) tardó **75 s** en rotar, con el servidor cerrado todo ese tiempo, y el proceso llegó a **593 MB de RAM** (≈7 veces el tamaño de la BD, porque el snapshot y su compresión van en memoria). Extrapolando de forma lineal, 1 GB de datos serían ≈15 min de cierre y ≈7 GB de RAM: **este diseño sirve para bases de datos de decenas o pocos cientos de MB**, no para bases grandes. Con carga concurrente el tiempo se multiplica (58 s en lugar de 5 s en una BD pequeña).
 
 **No probado:**
 - Bases de datos grandes (>100 MB), y varias máquinas reales compartiendo la BD (solo se probó el mecanismo con el lock de la BD, no un despliegue multi-host).
 - Que el firewall de mantenimiento bloquee tráfico externo real (se verificó que las reglas se aplican, son idempotentes y se retiran en un entorno de red aislado).
-- La ejecución automática del día 1 con el reloj real (sí se ejecutó el job y se comprobó que el planificador se registra con la próxima fecha).
+- La ejecución automática con el reloj real (domingo 02:00): se prueba el job y el planificador, no la espera hasta el domingo. La fecha de la próxima ejecución no se calcula: `node-cron` 4.2 la da mal para expresiones semanales.
 - El flujo `--no-write-env` con un panel de hosting real (se probó con las variables aplicadas a mano en el test).
 
 **Cosas a tener en cuenta:**
@@ -613,7 +620,7 @@ npm run test:icmp && npm run icmp-firewall   # defensa ICMP (firewall en modo en
 ## 🔐 Características de seguridad
 
 ✅ **Cifrado autenticado AES-256-GCM** (`v4`, clave por HKDF) en campos; **cifrado por archivo y por bloques** con clave propia; KMS opcional  
-✅ **Rotación de claves con migración de datos**, backups mensuales comprimidos y cifrados, recuperación ante fallos  
+✅ **Rotación de claves con migración de datos**, backups (semanales) comprimidos y cifrados, recuperación ante fallos  
 ✅ **Estado de seguridad en MySQL** (bloqueos, límites, intentos, eventos): sobrevive a reinicios y lo comparten todas las réplicas  
 ✅ **Sesiones cortas** (JWT 15 min) con refresh rotatorio, detección de reutilización y «cerrar todas»  
 ✅ **MFA**: TOTP, passkeys (WebAuthn) y códigos de recuperación; **SSO** OpenID Connect y SAML 2.0  

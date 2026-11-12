@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const cron = require('node-cron');
 const keyRotator = require('../crypto/keyRotator');
 const secureAuthService = require('../security/secure-auth.service');
@@ -6,9 +7,12 @@ const secureCommunications = require('../services/secure-communications.service'
 class ScheduleKeyRotation {
     constructor() {
         this.isRotationEnabled = process.env.AUTO_ROTATION_ENABLED === 'true';
+        // Rotación programada: SEMANAL por defecto (domingo 2:00). Descifra y vuelve a cifrar TODO con claves nuevas, con el
+        // servidor en mantenimiento (sin entradas ni salidas) mientras dura. Formato cron de 5 campos.
+        this.rotationCron = process.env.KEY_ROTATION_CRON || '0 2 * * 0';
+        this.timezone = process.env.KEY_ROTATION_TZ || 'America/Mexico_City';
         this.isRunning = false;
         this.rotationHistory = [];
-        this.nextRotationTime = null;
 
         this.jobs = [];
     }
@@ -31,13 +35,17 @@ class ScheduleKeyRotation {
     initializeSchedules() {
         console.log('⏰ Inicializando planificador de rotación de claves...');
 
-        // Rotación mensual de claves - día 1 de cada mes a las 2:00 AM
-        this.jobs.push(cron.schedule('0 2 1 * *', async () => {
-            await this.executeMonthlyRotation();
-        }, {
-            scheduled: true,
-            timezone: "America/Mexico_City"
-        }));
+        // Rotación de claves (por defecto semanal). Se niega a planificarla si no puede funcionar: mejor un aviso al arrancar
+        // que una rotación que falla cada semana dejando el servidor en mantenimiento.
+        const refusal = this.rotationRefusal();
+        if (refusal) {
+            console.error(`⛔ Rotación programada NO activada: ${refusal}`);
+        } else {
+            this.jobs.push(cron.schedule(this.rotationCron, async () => {
+                await this.executeScheduledRotation();
+            }, { scheduled: true, timezone: this.timezone }));
+            console.log(`🔄 Rotación de claves programada: "${this.rotationCron}" (${this.timezone})`);
+        }
 
         // Limpieza de sesiones expiradas - todos los días a las 3:00 AM
         this.jobs.push(cron.schedule('0 3 * * *', async () => {
@@ -55,11 +63,20 @@ class ScheduleKeyRotation {
             timezone: "America/Mexico_City"
         }));
 
-        this.calculateNextRotation();
         console.log('✅ Planificador inicializado');
     }
 
-    async executeMonthlyRotation() {
+    // Por qué no se puede planificar la rotación (o null si se puede)
+    rotationRefusal() {
+        if (!cron.validate(this.rotationCron)) return `KEY_ROTATION_CRON no es una expresión cron válida: "${this.rotationCron}"`;
+        const mode = require('../config/secure-env').getKeyInfo().mode;
+        if (mode !== 'stable') {
+            return 'las claves están en modo legacy (sin KEY_EPOCH): cambian cada día y la rotación se negaría. Define KEY_EPOCH (y migra con scripts/rotateKeys.js --legacy-scan-days si ya hay datos)';
+        }
+        return null;
+    }
+
+    async executeScheduledRotation() {
         if (this.isRunning) {
             console.log('⚠️ Rotación ya en progreso, saltando ejecución');
             return;
@@ -70,7 +87,7 @@ class ScheduleKeyRotation {
             const rotationId = this.generateRotationId();
             const startTime = Date.now();
 
-            console.log(`🔄 Iniciando rotación mensual ${rotationId}...`);
+            console.log(`🔄 Iniciando rotación programada ${rotationId}...`);
 
             // Ejecutar rotación de claves
             const rotationResult = await keyRotator.rotateKeys();
@@ -86,17 +103,15 @@ class ScheduleKeyRotation {
                 details: rotationResult
             });
 
-            console.log(`✅ Rotación mensual ${rotationId} completada en ${duration}ms`);
+            console.log(`✅ Rotación programada ${rotationId} completada en ${duration}ms`);
 
             // Enviar notificación de éxito
             await this.sendRotationSuccessNotification(rotationId, duration, rotationResult);
 
-            this.calculateNextRotation();
-
         } catch (error) {
             const rotationId = this.generateRotationId();
 
-            console.error(`❌ Error en rotación mensual ${rotationId}:`, error);
+            console.error(`❌ Error en rotación programada ${rotationId}:`, error);
 
             // Registrar rotación fallida
             this.rotationHistory.push({
@@ -106,11 +121,14 @@ class ScheduleKeyRotation {
                 error: error.message
             });
 
-            // Enviar alerta crítica de fallo
+            // Alerta crítica de fallo: es lo ÚNICO que sale mientras el servidor está en mantenimiento (ver
+            // secure-communications). Texto fijo: el detalle del error se queda en los registros del servidor, no en un correo.
             await secureCommunications.sendSecureAlert({
                 type: 'KEY_ROTATION_FAILED',
                 severity: 'critical',
-                details: `Rotación mensual ${rotationId} falló: ${error.message}`,
+                details: `La rotación programada ${rotationId} falló en la fase ${error.rotationPhase || 'desconocida'}. ` +
+                    'Los datos no se han perdido: si la base de datos no llegó a confirmar, se reabrió con las claves anteriores; si llegó, ' +
+                    'el servidor sigue en mantenimiento hasta ejecutar "npm run rotate-keys -- recover". Detalle en los registros del servidor.',
                 action: 'Se requiere intervención manual inmediata',
                 timestamp: new Date().toISOString()
             }, 'critical');
@@ -128,7 +146,7 @@ class ScheduleKeyRotation {
                 details: `Rotación ${rotationId} completada exitosamente`,
                 duration: duration,
                 timestamp: new Date().toISOString(),
-                nextRotation: this.getNextRotationDate()
+                schedule: this.scheduleDescription()
             }, 'normal');
 
             console.log(`📧 Notificación de rotación exitosa enviada para ${rotationId}`);
@@ -150,7 +168,7 @@ class ScheduleKeyRotation {
             const db = require('../config/database');
 
             // Limpiar sesiones expiradas
-            const result = await db.query(
+            const [result] = await db.query(
                 'DELETE FROM user_sessions WHERE expires_at < NOW()'
             );
 
@@ -159,7 +177,7 @@ class ScheduleKeyRotation {
             }
 
             // Limpiar IPs bloqueadas expiradas
-            const ipResult = await db.query(
+            const [ipResult] = await db.query(
                 'DELETE FROM blocked_ips WHERE blocked_until < NOW()'
             );
 
@@ -195,7 +213,7 @@ class ScheduleKeyRotation {
             await secureCommunications.sendSecureAlert({
                 type: 'INTEGRITY_CHECK_FAILED',
                 severity: 'high',
-                details: `Verificación de integridad falló: ${error.message}`,
+                details: 'La verificación de integridad programada falló (detalle en los registros del servidor)',
                 timestamp: new Date().toISOString()
             }, 'high');
         }
@@ -205,19 +223,15 @@ class ScheduleKeyRotation {
         const date = new Date();
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
-        const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const random = crypto.randomBytes(3).toString('hex').toUpperCase();
 
         return `ROT-${year}${month}-${random}`;
     }
 
-    calculateNextRotation() {
-        const now = new Date();
-        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 2, 0, 0);
-        this.nextRotationTime = nextMonth;
-    }
-
-    getNextRotationDate() {
-        return this.nextRotationTime ? this.nextRotationTime.toISOString() : null;
+    // Programación legible ("0 2 * * 0" en America/Mexico_City). No se calcula la fecha de la próxima ejecución: node-cron 4.2
+    // la da mal para expresiones semanales (devuelve 2034).
+    scheduleDescription() {
+        return `${this.rotationCron} (${this.timezone})`;
     }
 
     // Método para ejecutar rotación manual
@@ -259,7 +273,7 @@ class ScheduleKeyRotation {
         return {
             isEnabled: this.isRotationEnabled,
             isRunning: this.isRunning,
-            nextRotation: this.getNextRotationDate(),
+            schedule: this.scheduleDescription(),
             rotationHistory: this.rotationHistory.slice(-10),
             totalRotations: this.rotationHistory.length
         };

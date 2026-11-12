@@ -1248,3 +1248,256 @@ test('maintenance-firewall.sh: dry-run, y se niega a aplicar sin IPs de administ
     const invalid = spawnSync('bash', [script, '--dry-run'], { env: { PATH: process.env.PATH, MAINTENANCE_ADMIN_IPS: '1.2.3.4; reboot' }, encoding: 'utf8' });
     assert.notStrictEqual(invalid.status, 0);
 });
+
+// ----------------------------------------------------------------------- caídas y pausas REALES (proceso hijo)
+// Un proceso aparte ejecuta la rotación de verdad y se corta en seco (SIGKILL: ni catch, ni finally) o se queda parado en el
+// punto exacto (test_helpers/rotation-child.js). Comprueba que en ningún caso se pierden datos ni las semillas nuevas.
+
+function runRotationChild(w, extra) {
+    const resultFile = path.join(w.dir, `resultado-${Date.now()}.json`);
+    return new Promise((resolve) => {
+        const child = require('child_process').spawn(process.execPath, [path.join(__dirname, 'test_helpers/rotation-child.js')], {
+            env: { ...process.env, ROTATION_DATA_DIR: w.paths.dataDir, BACKUP_DIR: w.paths.backupDir, ENV_FILE: w.paths.envFile, ROT_RESULT: resultFile, ...extra },
+            stdio: 'ignore'
+        });
+        // Sin archivo de resultado = el proceso murió antes de terminar (no llegó ni a su catch)
+        child.on('exit', (code, signal) => resolve({ code, signal, result: fs.existsSync(resultFile) ? JSON.parse(fs.readFileSync(resultFile, 'utf8')) : null }));
+    });
+}
+// Tras matar al hijo, la BD tarda un instante en ver el socket cerrado y soltar su cerrojo y su transacción
+async function untilRotationLockFree() {
+    for (let i = 0; i < 200; i++) {
+        const [[row]] = await db.query("SELECT IS_USED_LOCK('secure_server_rotation') AS holder");
+        if (row.holder === null) return;
+        await new Promise(r => setTimeout(r, 50));
+    }
+    throw new Error('la BD no liberó el cerrojo de la rotación');
+}
+
+itDb('caída REAL con la transacción abierta (todo re-cifrado, nada confirmado): BD intacta, sigue cerrado y recover deshace', async () => {
+    const w = await freshWorld();
+    const before = await checksum();
+    const envBefore = fs.readFileSync(w.paths.envFile, 'utf8');
+
+    const child = await runRotationChild(w, { ROT_KILL_AT: 'REENCRYPTED' });
+    assert.strictEqual(child.result, null, 'el proceso murió sin terminar');
+    await untilRotationLockFree();
+
+    assert.strictEqual(await checksum(), before, 'la BD deshizo la transacción del proceso muerto');
+    assert.ok(w.service.maintenance.isLocked(), 'falla cerrado: el servidor sigue en mantenimiento');
+    assert.strictEqual(w.service.readJournal().phase, 'PREPARED');
+
+    const outcome = await w.service.recover({ env: w.env() });
+    assert.strictEqual(outcome.action, 'rolled-back');
+    assert.ok(!w.service.maintenance.isLocked());
+    assert.strictEqual(fs.readFileSync(w.paths.envFile, 'utf8'), envBefore);
+    assert.ok(!fs.existsSync(`${w.paths.envFile}.pending`));
+    assertPlainData(await readAll(currentKey()));
+});
+
+itDb('caída REAL justo después del COMMIT de la BD (el journal aún dice PREPARED): recover lo ve en la BD y TERMINA, sin perder las semillas', async () => {
+    const w = await freshWorld();
+    const child = await runRotationChild(w, { ROT_KILL_AT: 'DB_COMMITTED' });
+    assert.strictEqual(child.result, null);
+    await untilRotationLockFree();
+
+    assert.strictEqual(w.service.readJournal().phase, 'PREPARED', 'el journal no llegó a COMMITTED');
+    assert.ok(fs.existsSync(`${w.paths.envFile}.pending`), 'las semillas nuevas siguen en .env.pending');
+    assert.ok(w.service.maintenance.isLocked());
+
+    const outcome = await w.service.recover({ env: w.env() });
+    assert.strictEqual(outcome.action, 'finalized');
+    assert.ok(!w.service.maintenance.isLocked());
+    assertPlainData(await readAll(newKeyFromFile(w.paths.envFile).encryption));
+});
+
+itDb('caída REAL a mitad de colocar los archivos (keyring sí, .env no): recover repite y termina', async () => {
+    const w = await freshWorld();
+    const child = await runRotationChild(w, { ROT_KILL_AT_STEP: 'keyring' });
+    assert.strictEqual(child.result, null);
+    await untilRotationLockFree();
+
+    assert.strictEqual(w.service.readJournal().phase, 'COMMITTED');
+    assert.ok(fs.existsSync(`${w.paths.envFile}.pending`));
+
+    assert.strictEqual((await w.service.recover({ env: w.env() })).action, 'finalized');
+    assert.ok(!fs.existsSync(`${w.paths.envFile}.pending`));
+    assertPlainData(await readAll(newKeyFromFile(w.paths.envFile).encryption));
+});
+
+const connectionIdForKill = (n) => { if (!Number.isSafeInteger(n) || n <= 0) throw new Error('id de conexión inválido'); return String(n); };
+async function pausedRotation(w, killWhich) {
+    const marker = path.join(w.dir, 'parado.json');
+    const go = path.join(w.dir, 'sigue');
+    const running = runRotationChild(w, { ROT_PAUSE_AT: 'REENCRYPTED', ROT_MARKER: marker, ROT_GO: go });
+    for (let i = 0; i < 400 && !fs.existsSync(marker); i++) await new Promise(r => setTimeout(r, 50));
+    const ids = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    for (const which of killWhich) await db.query(`KILL ${connectionIdForKill(ids[which])}`);
+    fs.writeFileSync(go, '1'); // el proceso "despierta"
+    return running;
+}
+
+itDb('la BD corta las conexiones de una rotación PARADA (p. ej. el equipo se suspende): se deshace, BD intacta y se reabre con las claves de antes', async () => {
+    const w = await freshWorld();
+    const before = await checksum();
+    const envBefore = fs.readFileSync(w.paths.envFile, 'utf8');
+
+    const child = await pausedRotation(w, ['conn', 'lockConn']);
+    assert.strictEqual(child.result?.ok, false, 'la rotación falla al despertar');
+    await untilRotationLockFree();
+
+    assert.strictEqual(await checksum(), before);
+    assert.strictEqual(w.service.readJournal().phase, 'ABORTED');
+    assert.ok(!w.service.maintenance.isLocked(), 'la BD no cambió: se reabre');
+    assert.strictEqual(fs.readFileSync(w.paths.envFile, 'utf8'), envBefore);
+    assertPlainData(await readAll(currentKey()));
+});
+
+itDb('si solo se pierde el cerrojo de la BD (las otras máquinas podrían reabrirse), la rotación NO confirma', async () => {
+    const w = await freshWorld();
+    const before = await checksum();
+
+    const child = await pausedRotation(w, ['lockConn']);
+    assert.strictEqual(child.result?.ok, false);
+    assert.match(child.result.message, /perdió el bloqueo de la base de datos/);
+    await untilRotationLockFree();
+
+    assert.strictEqual(await checksum(), before);
+    assert.strictEqual(w.service.readJournal().phase, 'ABORTED');
+    assertPlainData(await readAll(currentKey()));
+});
+
+itDb('recover NO decide sin poder preguntar a la BD: no borra las semillas nuevas ni reabre', async () => {
+    const w = await freshWorld();
+    fs.mkdirSync(w.paths.dataDir, { recursive: true });
+    fs.writeFileSync(w.paths.lockFile, JSON.stringify({ operation: 'key-rotation', pid: deadPid(), host: os.hostname(), startedAt: new Date().toISOString(), phase: 'PREPARED' }));
+    const pending = `${w.paths.envFile}.pending`;
+    fs.writeFileSync(pending, 'ENCRYPTION_SEED=las-nuevas');
+    w.service.writeJournal({ id: 'rot-sin-bd', phase: 'PREPARED', oldEpoch: 'a', newEpoch: 'b', oldFingerprint: 'x', newFingerprint: 'y', rewraps: [], keyring: {}, env: { tmp: pending, final: w.paths.envFile } });
+
+    const sinBd = new RotationService({ db: { getConnection: async () => { throw Object.assign(new Error('BD caída'), { code: 'ECONNREFUSED' }); } }, encryptor, paths: w.paths, logger: quietLog, sleepFn: async () => {} });
+    await assert.rejects(() => sinBd.recover({ env: w.env() }), /No se puede comprobar en la base de datos/);
+
+    assert.ok(fs.existsSync(pending), 'las semillas nuevas no se borran');
+    assert.ok(sinBd.maintenance.isLocked(), 'sigue cerrado');
+    assert.strictEqual(sinBd.readJournal().phase, 'PREPARED');
+});
+
+// ----------------------------------------------------------------------- mantenimiento = sin entradas ni salidas
+
+itDb('mantenimiento = sin entradas ni salidas: corta streams y conexiones abiertas; 503 salvo /health; ni webhooks, ni alertas, ni limpieza', async () => {
+    const w = await freshWorld();
+    const http = require('http');
+    const express = require('express');
+    const { guard } = require('./src/maintenance'); // el guardián que consultan los servicios
+    const { cutOffOnMaintenance } = require('./src/maintenance/cutoff');
+    const alerts = require('./src/security/alerts.service');
+    const housekeeping = require('./src/tasks/securityHousekeeping');
+    const comms = require('./src/services/secure-communications.service');
+
+    const saved = { maintenance: guard.maintenance, state: guard.state, dir: comms.notificationsDir, url: process.env.ALERT_WEBHOOK_URL };
+    guard.maintenance = w.service.maintenance;
+    comms.notificationsDir = path.join(w.dir, 'notificaciones');
+    fs.mkdirSync(comms.notificationsDir, { recursive: true });
+
+    let webhookHits = 0;
+    const webhook = http.createServer((req, res) => { webhookHits++; res.end('ok'); });
+    await new Promise(r => webhook.listen(0, '127.0.0.1', r));
+    process.env.ALERT_WEBHOOK_URL = `http://127.0.0.1:${webhook.address().port}/alertas`;
+
+    const app = express();
+    app.use(guard.middleware());
+    app.get('/health', (req, res) => res.json({ status: 'vive' }));
+    app.get('/api/datos', (req, res) => res.json({ ok: true }));
+    app.get('/descarga-lenta', (req, res) => { res.write('primer trozo'); }); // nunca termina
+    const server = http.createServer(app);
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    const streamCloses = [];
+    const off = cutOffOnMaintenance({ guard, getServer: () => server, liveStream: { closeAll: (code) => streamCloses.push(code) }, cutMs: 100, log: quietLog });
+    try {
+        await guard.tick();
+        assert.ok(guard.isOpen());
+        assert.strictEqual((await fetch(`${base}/api/datos`)).status, 200);
+
+        // Una descarga en curso cuando empieza el mantenimiento
+        const cut = new Promise((resolve) => {
+            http.get(`${base}/descarga-lenta`, (res) => { res.on('data', () => {}); res.on('close', resolve); res.on('error', resolve); }).on('error', resolve);
+        });
+        await new Promise(r => setTimeout(r, 50));
+
+        w.service.maintenance.acquire({ operation: 'key-rotation', reason: 'prueba sin entradas ni salidas' });
+        await guard.tick();
+
+        // ENTRADAS
+        assert.deepStrictEqual(streamCloses, ['MAINTENANCE'], 'los streams en vivo se cierran al momento');
+        await cut; // la descarga colgada se corta (tras cutMs)
+        const blocked = await fetch(`${base}/api/datos`);
+        assert.strictEqual(blocked.status, 503);
+        assert.strictEqual((await blocked.json()).code, 'MAINTENANCE');
+        assert.strictEqual((await fetch(`${base}/health`)).status, 200, '/health (el proceso vive) sigue respondiendo');
+
+        // SALIDAS
+        assert.deepStrictEqual(await alerts.notify({ severity: 'critical', title: 'x', id: 1 }), { skipped: 'maintenance' });
+        assert.deepStrictEqual(await alerts.evaluate(), { skipped: 'maintenance' });
+        assert.deepStrictEqual(await housekeeping.runOnce(), { skipped: 'maintenance' });
+        const retained = await comms.sendSecureAlert({ type: 'SECURITY_INCIDENT', severity: 'high', details: 'x', timestamp: new Date().toISOString() }, 'high');
+        assert.strictEqual(retained.deferred, true, 'las alertas normales se retienen');
+        assert.strictEqual(webhookHits, 0, 'nada sale hacia fuera');
+
+        // Al reabrir, todo vuelve
+        w.service.maintenance.release();
+        await guard.tick();
+        assert.ok(guard.isOpen());
+        assert.strictEqual((await fetch(`${base}/api/datos`)).status, 200);
+        assert.strictEqual((await alerts.notify({ severity: 'critical', title: 'x', id: 1 })).sent, true);
+        assert.strictEqual(webhookHits, 1);
+    } finally {
+        off();
+        w.service.maintenance.release();
+        guard.maintenance = saved.maintenance;
+        guard.state = saved.state;
+        comms.notificationsDir = saved.dir;
+        if (saved.url === undefined) delete process.env.ALERT_WEBHOOK_URL; else process.env.ALERT_WEBHOOK_URL = saved.url;
+        server.closeAllConnections();
+        await new Promise(r => server.close(r));
+        await new Promise(r => webhook.close(r));
+    }
+});
+
+test('rotación programada: semanal por defecto; se niega con cron inválido o claves legacy; la alerta de fallo no lleva el error interno', async () => {
+    const instance = require('./src/tasks/scheduleKeyRotation');
+    const Scheduler = instance.constructor;
+    const secureEnvModule = require('./src/config/secure-env');
+    const keyRotatorModule = require('./src/crypto/keyRotator');
+    const comms = require('./src/services/secure-communications.service');
+    const saved = { cron: process.env.KEY_ROTATION_CRON, info: secureEnvModule.getKeyInfo, rotate: keyRotatorModule.rotateKeys, send: comms.sendSecureAlert };
+    try {
+        delete process.env.KEY_ROTATION_CRON;
+        const weekly = new Scheduler();
+        assert.strictEqual(weekly.rotationCron, '0 2 * * 0', 'domingo a las 2:00');
+        secureEnvModule.getKeyInfo = () => ({ mode: 'stable' });
+        assert.strictEqual(weekly.rotationRefusal(), null);
+        secureEnvModule.getKeyInfo = () => ({ mode: 'legacy' });
+        assert.match(weekly.rotationRefusal(), /legacy/);
+
+        process.env.KEY_ROTATION_CRON = 'cada domingo';
+        secureEnvModule.getKeyInfo = () => ({ mode: 'stable' });
+        assert.match(new Scheduler().rotationRefusal(), /no es una expresión cron válida/);
+
+        const sent = [];
+        comms.sendSecureAlert = async (alert) => { sent.push(alert); return { success: true }; };
+        keyRotatorModule.rotateKeys = async () => { throw Object.assign(new Error('detalle-interno-que-no-debe-salir'), { rotationPhase: 'REENCRYPT' }); };
+        await weekly.executeScheduledRotation();
+        assert.strictEqual(sent.length, 1);
+        assert.strictEqual(sent[0].type, 'KEY_ROTATION_FAILED');
+        assert.ok(!sent[0].details.includes('detalle-interno-que-no-debe-salir'), 'el error interno no va en la alerta');
+        assert.match(sent[0].details, /fase REENCRYPT/);
+    } finally {
+        if (saved.cron === undefined) delete process.env.KEY_ROTATION_CRON; else process.env.KEY_ROTATION_CRON = saved.cron;
+        secureEnvModule.getKeyInfo = saved.info;
+        keyRotatorModule.rotateKeys = saved.rotate;
+        comms.sendSecureAlert = saved.send;
+    }
+});

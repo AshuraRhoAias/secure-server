@@ -23,7 +23,7 @@ tipados con mensajes pensados para el cliente), 6 «TODO» (es la palabra españ
 
 | # | Gravedad | Hallazgo | Dónde | Evidencia | Estado |
 |---|---|---|---|---|---|
-| 1 | **Alta** (configuración) | El `.env` local tiene `NODE_ENV=production` y **no tiene `KEY_EPOCH`**: el servidor usa el modo de claves `legacy`, en el que la clave de cifrado **cambia cada día UTC**. Lo cifrado un día (notas, nombres de usuario, secretos de MFA) no se descifra al siguiente. El servidor arranca así en producción con solo un aviso. | `src/crypto/key-provider.js:14-17,71-84`; `.env` | Lectura del código (el propio comentario lo dice) y del `.env` (solo las líneas `NODE_ENV` y `KEY_EPOCH`) | **Propuesto** (ver §3.1): decide el propietario |
+| 1 | **Alta** (configuración) | El `.env` local tiene `NODE_ENV=production` y **no tiene `KEY_EPOCH`**: el servidor usa el modo de claves `legacy`, en el que la clave de cifrado **cambia cada día UTC**. Lo cifrado un día (notas, nombres de usuario, secretos de MFA) no se descifra al siguiente. El servidor arranca así en producción con solo un aviso. | `src/crypto/key-provider.js:14-17,71-84`; `.env` | Lectura del código (el propio comentario lo dice) y del `.env` (solo las líneas `NODE_ENV` y `KEY_EPOCH`) | **Corregido en el `.env` local** (12-nov, a petición del propietario): `KEY_EPOCH` definida; la BD local no tenía datos de la aplicación (el usuario del `.env` no existe en esa MariaDB), así que no había nada que migrar. Sigue propuesto (§3.1.2): no arrancar en producción con claves `legacy` |
 | 2 | Media | `getSecret()` devolvía una clave **fija y pública** (`scrypt('fallback_<tipo>', 'dynamic_salt')`) si faltaba un secreto, en vez de fallar | `src/config/secure-env.js:69-71` | Lectura; hoy inalcanzable desde el servidor (siempre hay secretos derivados), pero es una trampa | **Corregido**: lanza un error |
 | 3 | Media-baja | En modo `legacy`, sin `BASE_SEED` las claves salían de la cadena conocida `default_seed_change_this`. `index.js` exige `BASE_SEED`, pero `scripts/rotateKeys.js` y `scripts/emergencyRecovery.js` no pasan por él | `src/crypto/key-provider.js:72` | Lectura; ninguna prueba depende del valor por defecto | **Corregido**: `BASE_SEED` obligatoria también en `legacy` (se mantiene `jwt_default` para `JWT_SEED`: replica la fórmula antigua) |
 | 4 | Baja | **Código muerto peligroso**: `cleanupEmptyUsernames()` borra usuarios y escribe en el registro hashes y textos cifrados; `validateDataIntegrity()`; `secureQuery()` (contaba mal: `result.affectedRows` sobre `[filas]` siempre daba 1) y su `logDatabaseAccess()` | `src/api/controllers/auth.controller.js:678-760`; `src/config/database.js:217-256` | Sin ningún llamante en `src/`, `scripts/`, pruebas ni `web/` | **Corregido**: eliminado |
@@ -37,6 +37,18 @@ tipados con mensajes pensados para el cliente), 6 «TODO» (es la palabra españ
 | 12 | Portabilidad | SQL acoplado a MySQL (fechas, upsert, `GET_LOCK`, esquema) | `docs/BASES-DE-DATOS.md` §2 | Inventario | En curso (pasos 2–4) |
 | 13 | Dependencias | Actualizaciones menores disponibles (`@aws-sdk/*`, `axios` 1.21.1, `helmet` 8.3, `jose` 6.2.17, `@simplewebauthn/server` 14.1…) | `package.json` | `npm outdated` | Propuesto: dejar que Dependabot abra los PR |
 | 14 | Pruebas | Instaladores de Linux y macOS sin ejecutar | `instalador/` | Solo hay Windows aquí | Propuesto: job del CI con `linux.sh --si` |
+
+## 2 bis. Hallazgos de la revisión de la rotación (12-nov, #34)
+
+| # | Gravedad | Hallazgo | Estado |
+|---|---|---|---|
+| 15 | **Alta** | `recover` trataba un error al consultar la BD como «no confirmado»: deshacía y borraba `.env.pending` (la única copia de las semillas nuevas) aunque la BD ya hubiera confirmado → datos cifrados con una clave perdida | **Corregido**: sin respuesta de la BD no decide nada |
+| 16 | Media | La rotación no comprobaba que **seguía** teniendo el cerrojo de la BD antes de confirmar (si la BD cortó una rotación parada, otras máquinas podían haberse reabierto) | **Corregido** |
+| 17 | Media | Durante el mantenimiento seguían la limpieza, la evaluación de alertas, los webhooks, los correos y los streams ya abiertos; `/health` daba 503 (un orquestador reiniciaría a mitad) | **Corregido**: sin entradas ni salidas salvo el aviso de fallo |
+| 18 | Media | Una alerta enviada durante el mantenimiento se registraba **cifrada en la BD** con la clave del proceso, que podía ser ya la antigua → fila ilegible que haría abortar la rotación siguiente | **Corregido**: en mantenimiento no se escribe en la BD |
+| 19 | Baja | La alerta de rotación fallida incluía `error.message`; `executeSessionCleanup` nunca informaba de lo borrado (`affectedRows` sobre `[filas]`) | **Corregido** |
+| 20 | Baja | `node-cron` 4.2.1 calcula mal la próxima ejecución de expresiones semanales (devuelve 2034) | Se informa la programación (cron + zona) en vez de una fecha falsa |
+| 21 | Información | Con este `.env` el servidor local no conecta a la MariaDB local: `NODE_ENV=production` exige TLS verificado (certificado autofirmado) y el usuario de BD del `.env` no existe allí | Propuesto: credenciales de prueba válidas o `NODE_ENV=development` en local |
 
 ## 3. Propuestas que necesitan decisión
 

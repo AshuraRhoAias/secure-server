@@ -32,7 +32,9 @@
   camino (no se afirma hasta tener su job del CI).
 - **Revisión del código 2026-11-12 (#33, `docs/REVISION-CODIGO-2026-11.md`):** 0 vulnerabilidades, cobertura 77 % líneas / 84 % ramas.
   Cerradas dos trampas de claves (clave pública de reserva y semilla por defecto) y quitado código muerto peligroso. **Riesgo abierto:**
-  el `.env` local funciona en producción con claves `legacy` (cambian cada día): falta `KEY_EPOCH` (decide el propietario).
+  el `.env` local funcionaba en producción con claves `legacy` (cambian cada día).
+- **Rotación 2026-11-12 (#34):** `KEY_EPOCH` ya en el `.env` local; rotación **semanal** que descifra y re-cifra todo con el servidor
+  **sin entradas ni salidas**; caídas y pausas reales probadas sin pérdida de datos (y corregido un `recover` que podía perder las semillas).
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -240,7 +242,8 @@ Docker, que ya tiene pruebas ejecutadas.
 | Media | Proveedores reales sin probar (Entra ID/Okta, AWS KMS/Vault, AWS S3/R2) | Pruebas contra simuladores | Diferencias de un proveedor real | Prueba en preproducción con cada proveedor usado | Abierto |
 | Media | Rotación de claves en memoria | 83 MB → 593 MB de RAM, 75 s cerrado | Inviable con BD de GB | Snapshot y re-cifrado por lotes en streaming | Propuesto |
 | Media | Multi-organización, HIBP, límite de sesiones simultáneas, versionado de API | `docs/CONTROLES.md` §2 | Controles ASVS no cubiertos | Diseño y desarrollo por separado | Propuesto |
-| **Alta** | `.env` local con `NODE_ENV=production` y sin `KEY_EPOCH`: claves `legacy` que cambian cada día | `src/crypto/key-provider.js:14-17`; `.env` (#33) | Lo cifrado un día no se descifra al siguiente (notas, MFA, nombres) | Definir `KEY_EPOCH` (migrar datos `legacy` con `rotateKeys --legacy-scan-days`); propuesto: no arrancar en producción con `legacy` | Abierto (propietario) |
+| Media | Producción puede arrancar con claves `legacy` (cambian cada día) | `src/crypto/key-provider.js:14-17` (#33) | Un `.env` sin `KEY_EPOCH` pierde lo cifrado cada día | `.env` local corregido (#34); propuesto: no arrancar en producción con `legacy` | Abierto (decisión del propietario) |
+| Media | El servidor local no conecta a la MariaDB local con el `.env` actual | TLS verificado con certificado autofirmado + usuario de BD inexistente (#34) | No se puede probar `npm start` de punta a punta en local | Credenciales de prueba válidas o `NODE_ENV=development` en local | Abierto |
 | Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
 | Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
@@ -290,7 +293,8 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 | #30 · `1c7666a`, `b558261`, `67051e9` | `database/setup-local.sql`, `docs/BASES-DE-DATOS.md` | `test_files.js`, `test_files_backup.js`, `test_rotation.js`, `test_scale.js`, `CLAUDE.md` | — | MariaDB 13.1 local; 8 fallos solo de Windows | Archivos afectados 168/170 + cluster 3/3 |
 | #31 · `a559875`, `2cf2bd1` | `instalar.{cmd,sh,command}`, `instalador/*` | `install.js`, `install.sh`, `install.ps1`, `INSTALL.md`, `test_av.js`, `.gitattributes`, `.gitignore` | — | Instalador con menú y ClamAV por sistema | Instalación real en Windows; `test_av` 23/23 |
 | #32 · `d9a7fe9`, `c6f5ec9` | `src/config/db-drivers/{index,mysql}.js`, `test_db.js` | `database.js`, `live-stream.js`, `anomaly-detection.service.js`, `rate-limiter.service.js`, `package.json`, `.env.example`, docs | — | Adaptador (paso 1) y `SUM(CASE …)` | `test_db` 11/11; suite local 601/602 (1 omitida); lint 0 |
-| #33 · (este commit) | `docs/REVISION-CODIGO-2026-11.md` | `secure-env.js`, `key-provider.js`, `auth.controller.js`, `database.js`, `test_rotation.js`, `test_api.js`, docs | 4 métodos de mantenimiento muertos, `secureQuery`/`logDatabaseAccess` | Revisión: claves sin valores conocidos y código muerto fuera | Pruebas nuevas; cobertura 77 %; ver #33 |
+| #33 · `881a59d` | `docs/REVISION-CODIGO-2026-11.md` | `secure-env.js`, `key-provider.js`, `auth.controller.js`, `database.js`, `test_rotation.js`, `test_api.js`, docs | 4 métodos de mantenimiento muertos, `secureQuery`/`logDatabaseAccess` | Revisión: claves sin valores conocidos y código muerto fuera | Pruebas nuevas; cobertura 77 %; ver #33 |
+| #34 · (este commit) | `src/maintenance/cutoff.js`, `test_helpers/rotation-child.js` | `rotation.service.js`, `guard.js`, `scheduleKeyRotation.js`, `keyRotator.js`, `securityHousekeeping.js`, `alerts.service.js`, `secure-communications.service.js`, `live-stream.js`, `index.js`, `test_rotation.js`, `README.md`, `.env.example`, docs | — | Rotación semanal sin entradas ni salidas; caídas y pausas sin pérdida | 9 pruebas nuevas; ver #34 |
 
 ---
 
@@ -301,11 +305,11 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 - ✅ Dependencias al día (#23). ✅ Interfaz web completa (#24). ✅ Escalabilidad: S3, Docker, réplica, particiones (#25).
 - ✅ PruebasLinux ampliado (#26). ✅ Documentación fiel y con prueba de sincronía (#27). ✅ CI de todas las fases en verde (#28, #29).
 - ✅ Fases fusionadas en `main` (PR #26, #33–#35). ✅ Suite completa en local con MariaDB 13.1 (#30). ✅ Instalador con menú y ClamAV,
-  probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32). ✅ Revisión del código y trampas de claves cerradas (#33).
+  probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32). ✅ Revisión del código y trampas de claves cerradas (#33). ✅ Rotación semanal sin entradas ni salidas, caídas y pausas reales probadas (#34).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
-0. **Claves estables en el `.env` local** (`KEY_EPOCH`) y, si se aprueba, no arrancar en producción con claves `legacy` · alta · el servidor
-   arranca en modo `stable` y lo cifrado ayer se descifra hoy.
+0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
+   servidor se niega a arrancar sin `KEY_EPOCH` con `NODE_ENV=production`.
 1. **Cambiar la contraseña filtrada** de la BD remota · crítica · el usuario de `test.js` ya no da acceso.
 2. **PostgreSQL/Supabase** (pasos 2–4 de `docs/BASES-DE-DATOS.md`) · media · `test:all` en verde con `DB_CLIENT=postgres` en un job
    del CI, además del de MariaDB. MongoDB después (capa de repositorios).
@@ -619,7 +623,7 @@ necesita BD se verifica en CI); archivos en S3 con un driver propio; interfaz we
 - **Problemas restantes:** CodeQL (falso positivo, descartar en GitHub); SSO, KMS y S3 solo contra simuladores o SeaweedFS.
   **Siguiente mejora:** §F 3 y 4. *(Baja / media.)*
 
-## M. Intervención 2026-11-10/12: MariaDB local, instalador con ClamAV, adaptador de base de datos y revisión (#30–#33)
+## M. Intervención 2026-11-10/12: MariaDB local, instalador con ClamAV, adaptador de base de datos y revisión (#30–#34)
 
 Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a su rama **y** a `main` por avance rápido.
 
@@ -703,3 +707,29 @@ Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a s
   propietario.
 - **Problemas restantes:** definir `KEY_EPOCH` (y migrar datos `legacy` si los hay); propuestas 5–14 del informe; CI sin comprobar
   desde aquí. **Siguiente mejora:** decidir §3.1 del informe. *(Alta.)*
+
+### #34 — Claves estables en local, rotación semanal sin entradas ni salidas, y caídas/pausas sin pérdida de datos
+- **Estado:** completado (12-nov). Detalle de hallazgos 15–21 en `docs/REVISION-CODIGO-2026-11.md` §2 bis.
+- **Archivos y módulos revisados:** `src/maintenance/{rotation.service,guard,maintenance,cutoff}.js`, `src/tasks/{scheduleKeyRotation,securityHousekeeping}.js`,
+  `src/crypto/keyRotator.js`, `src/security/alerts.service.js`, `src/services/secure-communications.service.js`, `src/index.js`,
+  `src/observability/live-stream.js`, `.env` local (solo `KEY_EPOCH`, `AUTO_ROTATION_ENABLED` y si el host de la BD es local).
+- **Problema detectado:** la rotación era **mensual** y estaba desactivada en el `.env` local (además en modo `legacy`); durante el
+  mantenimiento seguían la limpieza, las alertas, los webhooks, los correos y los streams abiertos, y `/health` daba 503;
+  `recover` sin respuesta de la BD deshacía y borraba `.env.pending` (la única copia de las semillas nuevas) aunque la BD hubiera
+  confirmado; la rotación no comprobaba que seguía teniendo el cerrojo de la BD antes de confirmar; una alerta enviada en
+  mantenimiento se registraba cifrada con una clave que podía ser ya la antigua; no había pruebas de caídas **reales** en la suite.
+- **Acciones realizadas:** `.env` local con `KEY_EPOCH` y `AUTO_ROTATION_ENABLED=true` (no se sube: `skip-worktree`; la BD local no
+  tenía datos de la aplicación). Rotación **semanal** por defecto (`KEY_ROTATION_CRON`, `KEY_ROTATION_TZ`), que se niega con cron
+  inválido o claves `legacy`; 8 backups por defecto. Mantenimiento **sin entradas ni salidas** (`src/maintenance/cutoff.js`: streams
+  cerrados al momento y conexiones abiertas cortadas a los 4 s; sin webhooks, alertas, limpieza ni correos; `/health` sigue vivo),
+  con una excepción: el aviso de rotación fallida, de texto fijo, también al arrancar si la rotación quedó interrumpida.
+  `recover` no decide sin la BD; comprobación del cerrojo antes del `COMMIT`; puntos de control `onPhase` para las pruebas.
+- **Pruebas ejecutadas:** nuevas en `test_rotation.js` con proceso hijo real (`test_helpers/rotation-child.js`): muerte con la
+  transacción abierta, justo tras el `COMMIT` de la BD y a mitad de colocar archivos; rotación parada a la que la BD corta las
+  conexiones; pérdida del cerrojo; `recover` sin BD; bloqueo de entradas y salidas con servidor HTTP y webhook reales; planificador
+  semanal. 9/9 en local. **Suite completa en serie: 611 pruebas, 610 bien, 0 fallos, 1 omitida** (`SIGHUP`); lint 0.
+- **Puntuación:** 8,5/10 — los puntos de pérdida de datos están cubiertos por pruebas reales; falta ver la rotación con el reloj
+  real del domingo y en varias máquinas.
+- **Problemas restantes:** el servidor local no conecta con este `.env` (TLS verificado + usuario inexistente en la MariaDB local);
+  decidir si producción debe negarse a arrancar con claves `legacy`; las alertas retenidas en mantenimiento no se reenvían.
+  **Siguiente mejora:** credenciales locales válidas y una rotación real de punta a punta con `npm start`. *(Media.)*

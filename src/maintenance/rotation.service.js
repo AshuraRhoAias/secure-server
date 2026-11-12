@@ -414,10 +414,13 @@ class RotationService {
             this.log('🔒 Modo mantenimiento activado: el servidor rechaza todas las peticiones');
 
             lockConn = await this.db.getConnection();
-            const [[lockRow]] = await lockConn.query("SELECT GET_LOCK('secure_server_rotation', 0) AS got");
+            const [[lockRow]] = await lockConn.query("SELECT GET_LOCK('secure_server_rotation', 0) AS got, CONNECTION_ID() AS id");
             if (lockRow.got !== 1) throw new Error('Otra rotación tiene el bloqueo de la base de datos');
+            const lockConnectionId = Number(lockRow.id);
 
             await hooks.afterLock?.();
+            // onPhase(nombre, { conn, lockConn }): puntos de control (registro y pruebas de caídas/pausas en el instante exacto)
+            const checkpoint = async (name) => { await hooks.onPhase?.(name, { conn, lockConn }); };
 
             conn = await this.db.getConnection();
             await this.ensureMetaTable(conn);
@@ -519,6 +522,7 @@ class RotationService {
             };
             this.writeJournal(journal);
             this.maintenance.setPhase('PREPARED');
+            await checkpoint('PREPARED');
 
             // ---- 4. Re-cifrado en una transacción
             phase = 'REENCRYPT';
@@ -532,10 +536,19 @@ class RotationService {
                 [newSet.fingerprint, newEpoch, rotationId]
             );
             hashes.clear();
+            await checkpoint('REENCRYPTED'); // transacción abierta: todo re-cifrado y nada confirmado
+
+            // El cerrojo de la BD es lo que mantiene cerradas las OTRAS máquinas. Si se perdió (la BD cortó la conexión de una
+            // rotación parada, un corte de red…), otra instancia puede haberse reabierto con las claves antiguas: no se confirma.
+            const [[holder]] = await conn.query("SELECT IS_USED_LOCK('secure_server_rotation') AS id");
+            if (Number(holder?.id) !== lockConnectionId) {
+                throw new Error('La rotación perdió el bloqueo de la base de datos antes de confirmar: se deshace sin cambiar nada');
+            }
 
             // ---- 5. Commit (punto de no retorno)
             phase = 'COMMIT';
             await conn.commit();
+            await checkpoint('DB_COMMITTED'); // la BD ya confirmó; el journal todavía dice PREPARED
             journal.phase = 'COMMITTED';
             this.writeJournal(journal);
             this.maintenance.setPhase('COMMITTED');
@@ -544,7 +557,8 @@ class RotationService {
 
             // ---- 6. Finalizar: renombrar temporales (los pasos son idempotentes)
             phase = 'FINALIZE';
-            this.finalizeFiles(journal);
+            await checkpoint('FINALIZE');
+            this.finalizeFiles(journal, hooks.onFinalizeStep);
 
             // Barrido: cualquier proceso rezagado que escribiera con la clave antigua entre medias
             if (drainSeconds > 0) await this.sleep(Math.min(drainSeconds, 5) * 1000);
@@ -625,13 +639,17 @@ class RotationService {
     }
 
     // Coloca en su sitio lo preparado antes del commit. Idempotente: se puede repetir.
-    finalizeFiles(journal) {
+    // onStep(nombre) se llama tras cada paso (las pruebas cortan aquí el proceso para comprobar que repetirlo termina el trabajo).
+    finalizeFiles(journal, onStep = null) {
         for (const { tmp, final } of journal.rewraps) {
             if (fs.existsSync(tmp)) fs.renameSync(tmp, final);
+            onStep?.('backup');
         }
         if (journal.keyring.tmp && fs.existsSync(journal.keyring.tmp)) fs.renameSync(journal.keyring.tmp, journal.keyring.final);
         if (journal.keyring.remove && fs.existsSync(journal.keyring.remove)) fs.unlinkSync(journal.keyring.remove);
+        onStep?.('keyring');
         if (journal.env.tmp && fs.existsSync(journal.env.tmp)) fs.renameSync(journal.env.tmp, journal.env.final);
+        onStep?.('env');
     }
 
     pruneBackups(keep) {
@@ -694,15 +712,21 @@ class RotationService {
         }
 
         // PREPARED o COMMITTED: ¿la BD llegó a confirmar? Lo dice la huella guardada en crypto_meta.
-        const conn = await this.db.getConnection();
+        // Si NO se puede preguntar, no se decide nada: deshacer a ciegas borraría .env.pending, la única copia de las semillas
+        // nuevas, y si la BD sí había confirmado los datos quedarían cifrados con una clave perdida.
         let committed = journal.phase === 'COMMITTED';
-        try {
-            if (!committed) {
-                const [rows] = await conn.query('SELECT key_fingerprint FROM crypto_meta WHERE id = 1').catch(() => [[]]);
+        if (!committed) {
+            let conn;
+            try {
+                conn = await this.db.getConnection();
+                const [rows] = await conn.query('SELECT key_fingerprint FROM crypto_meta WHERE id = 1');
                 committed = rows[0]?.key_fingerprint === journal.newFingerprint;
+            } catch (error) {
+                throw new Error(`No se puede comprobar en la base de datos si la rotación ${journal.id} llegó a confirmar (${error.code || error.message}). ` +
+                    'No se toca nada: el servidor sigue en mantenimiento. Repite "npm run rotate-keys -- recover" cuando la BD responda.');
+            } finally {
+                conn?.release();
             }
-        } finally {
-            conn.release();
         }
 
         if (committed) {

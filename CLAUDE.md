@@ -41,6 +41,9 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   (`docs/BASES-DE-DATOS.md`, sección «Estado»). El motor se elige con `DB_CLIENT` en `src/config/db-drivers/` (el ÚNICO sitio que
   importa `mysql2`/`pg`; `test_db.js` lo comprueba). Todo driver cumple el contrato documentado allí. SQL nuevo, portable:
   `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, nunca `SUM(condición)`. No afirmar soporte de PostgreSQL sin su job del CI en verde.
+- Claves: el `.env` local ya tiene `KEY_EPOCH` (modo estable) y `AUTO_ROTATION_ENABLED=true`. La rotación automática es **semanal**
+  (`KEY_ROTATION_CRON`, domingo 02:00): en mantenimiento no entra ni sale nada salvo el aviso de rotación fallida; todo cambio en
+  la rotación debe mantener las pruebas de caídas reales de `test_rotation.js` (proceso hijo `test_helpers/rotation-child.js`).
 - ClamAV local (1.5.4, servicio `ClamD` en arranque **manual**: `Start-Service ClamD`); instaladores con menú en `instalar.*` e
   `instalador/` (`INSTALL.md`). Linux y macOS sin ejecutar todavía.
 - Archivos en S3 con driver propio (`src/files/s3-store.js`); interfaz web con alcance completo.

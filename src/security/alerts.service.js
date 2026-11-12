@@ -156,6 +156,7 @@ function severityAtLeast(severity, minimum) {
 async function notify(alert) {
     const url = process.env.ALERT_WEBHOOK_URL;
     if (!url || !severityAtLeast(alert.severity, process.env.ALERT_NOTIFY_MIN_SEVERITY || 'high')) return { skipped: true };
+    if (!require('../maintenance').guard.isOpen()) return { skipped: 'maintenance' }; // en mantenimiento no sale nada
 
     try {
         const target = new URL(url);
@@ -215,6 +216,8 @@ async function raise(rule, finding) {
 
 async function evaluate() {
     if (evaluating) return { skipped: true };
+    // En mantenimiento no se evalúa ni se avisa por webhook: no sale nada del servidor mientras se cambian las claves
+    if (!require('../maintenance').guard.isOpen()) return { skipped: 'maintenance' };
     evaluating = true;
     const summary = { created: 0, updated: 0, autoResolved: 0, errors: [] };
     try {

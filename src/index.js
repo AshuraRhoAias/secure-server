@@ -110,6 +110,8 @@ class SecureServer {
             const guardState = await maintenanceGuard.start();
             if (guardState.maintenance) console.log('🔒 Hay una rotación/migración en curso: el servidor arranca en MANTENIMIENTO');
             if (guardState.outOfSync) console.log(`⚠️ Claves desincronizadas con la base de datos: ${guardState.detail}`);
+            this.watchMaintenance();
+            if (guardState.maintenance) this.reportInterruptedRotation();
 
             // Verificar sistemas
             await this.performInitialChecks();
@@ -278,7 +280,8 @@ class SecureServer {
         this.app.get('/health', async (req, res) => {
             try {
                 const healthStatus = {
-                    status: 'healthy',
+                    // El proceso vive; en mantenimiento lo dice (y /health/ready da 503 para no recibir tráfico)
+                    status: maintenanceGuard.isOpen() ? 'healthy' : 'maintenance',
                     timestamp: new Date().toISOString(),
                     uptime: process.uptime(),
                     version: '1.0.0',
@@ -386,6 +389,33 @@ class SecureServer {
         });
 
         console.log('✅ Manejo de errores configurado');
+    }
+
+    // Mantenimiento = sin entradas ni salidas: corta streams y conexiones abiertas (src/maintenance/cutoff.js)
+    watchMaintenance() {
+        require('./maintenance/cutoff').cutOffOnMaintenance({
+            guard: maintenanceGuard,
+            getServer: () => this.server,
+            liveStream: require('./observability/live-stream')
+        });
+    }
+
+    // Arranque con el lock de una rotación cuyo proceso ya no existe (se cortó la luz, kill -9…): los datos están a salvo porque
+    // el servidor sigue CERRADO, pero sin este aviso nadie se enteraría. Solo un proceso del cluster lo envía.
+    reportInterruptedRotation() {
+        const cluster = require('cluster');
+        if (!cluster.isPrimary && cluster.worker?.id !== 1) return;
+        const holder = maintenanceGuard.maintenance.read();
+        const { isPidAlive } = require('./maintenance/fsutil');
+        if (!holder || holder.host !== require('os').hostname() || isPidAlive(holder.pid)) return;
+        console.error('⛔ Rotación de claves interrumpida: el servidor sigue en mantenimiento. Ejecuta "npm run rotate-keys -- recover".');
+        secureCommunications.sendSecureAlert({
+            type: 'KEY_ROTATION_FAILED',
+            severity: 'critical',
+            details: 'El servidor arrancó con una rotación de claves interrumpida (el proceso que la hacía ya no existe). ' +
+                'Sigue en mantenimiento para no perder datos: ejecuta "npm run rotate-keys -- recover".',
+            timestamp: new Date().toISOString()
+        }, 'critical').catch(() => {});
     }
 
     async performInitialChecks() {

@@ -4,6 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const credentialBuilder = require('../config/credential-builder');
 
+// Alertas que pueden salir aunque el servidor esté en mantenimiento (ver sendSecureAlert)
+const MAINTENANCE_ALLOWED_ALERTS = new Set(['KEY_ROTATION_FAILED']);
+
 class SecureCommunications {
     constructor() {
         this.channels = new Map();
@@ -78,6 +81,15 @@ class SecureCommunications {
     }
 
     async sendSecureAlert(alertData, priority = 'normal') {
+        // En mantenimiento (rotación de claves) no sale nada del servidor: la alerta NO se envía; queda una copia en disco local
+        // (NOTIFICATIONS_DIR) para revisarla después (no hay cola de reenvío). ÚNICA excepción: el aviso de que la rotación falló (texto fijo), porque si no nadie sabría que el
+        // servidor sigue cerrado. Nada se escribe en la BD mientras tanto (las claves están cambiando).
+        const open = require('../maintenance').guard.isOpen();
+        if (!open && !MAINTENANCE_ALLOWED_ALERTS.has(alertData?.type)) {
+            const saved = await this.saveAsJSON(await this.createCamouflageMessage(alertData), alertData, priority).catch(() => null);
+            console.log(`⏸️ Alerta ${alertData?.type} retenida: servidor en mantenimiento (copia local: ${saved ? 'sí' : 'no'})`);
+            return { success: true, deferred: true, channelsUsed: saved ? [saved] : [] };
+        }
         try {
             // Crear mensaje camuflado
             const camouflageMessage = await this.createCamouflageMessage(alertData);
@@ -120,8 +132,8 @@ class SecureCommunications {
                 throw new Error('Todos los canales de comunicación fallaron');
             }
 
-            // Log del envío exitoso
-            await this.logCommunication({
+            // Log del envío exitoso (cifrado en la BD: solo con el servidor abierto)
+            if (open) await this.logCommunication({
                 type: 'ALERT_SENT',
                 alertType: alertData.type,
                 priority,

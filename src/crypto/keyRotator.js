@@ -8,7 +8,7 @@ class KeyRotator {
         this.rotationInProgress = false;
     }
 
-    // Rotación dentro del propio servidor (la usa el planificador mensual): el servidor se pone en
+    // Rotación dentro del propio servidor (la usa el planificador, semanal por defecto): el servidor se pone en
     // mantenimiento, rota, recarga las claves en memoria y se reabre. Requiere que las claves
     // vivan en un archivo .env escribible; si están en el panel del hosting, usa el CLI con
     // `--no-write-env` (npm run rotate-keys).
@@ -25,7 +25,8 @@ class KeyRotator {
             return await getRotationService().run({
                 trigger: 'in-process',
                 writeEnv: true,
-                keepBackups: Number(process.env.BACKUP_RETENTION) || 0,
+                // Con rotación semanal, guardar todo crecería sin fin: 8 copias (≈ 2 meses) salvo BACKUP_RETENTION (0 = todas)
+                keepBackups: process.env.BACKUP_RETENTION === undefined ? 8 : Number(process.env.BACKUP_RETENTION) || 0,
                 ...options,
                 reloadInProcess: async () => { secureEnv.reload(); },
                 hooks: { afterLock: () => guard.tick() }

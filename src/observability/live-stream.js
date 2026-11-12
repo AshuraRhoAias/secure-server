@@ -184,8 +184,8 @@ class LiveStream {
     }
 
     // Cierre ordenado del servidor: avisa y cierra todas (si no, server.close() esperaría al plazo máximo)
-    closeAll() {
-        for (const client of [...this.clients]) client.close?.('bye', { code: 'SERVER_SHUTDOWN' });
+    closeAll(code = 'SERVER_SHUTDOWN') {
+        for (const client of [...this.clients]) client.close?.('bye', { code });
     }
 }
 

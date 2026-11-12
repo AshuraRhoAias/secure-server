@@ -20,6 +20,7 @@ class MaintenanceGuard {
         this._secureEnv = secureEnv;
         this.intervalMs = intervalMs;
         this.onChange = onChange;
+        this.listeners = new Set();
         this.state = { maintenance: this.maintenance.isLocked(), outOfSync: false, detail: null };
         this.timer = null;
     }
@@ -32,9 +33,17 @@ class MaintenanceGuard {
         return !this.state.maintenance && !this.state.outOfSync;
     }
 
+    // Avisa de cada cambio de estado (abierto ↔ cerrado). Devuelve la función para darse de baja.
+    onStateChange(fn) {
+        this.listeners.add(fn);
+        return () => this.listeners.delete(fn);
+    }
     middleware() {
         return (req, res, next) => {
             if (this.isOpen()) return next();
+            // /health es "el proceso vive" (liveness): si diera 503, un orquestador reiniciaría el contenedor A MITAD de la
+            // rotación. Sigue respondiendo (y dice que está en mantenimiento); /health/ready sí da 503 para no recibir tráfico.
+            if ((req.method === 'GET' || req.method === 'HEAD') && req.path === '/health') return next();
 
             res.setHeader('Retry-After', '300');
             res.status(503).json({
@@ -121,8 +130,11 @@ class MaintenanceGuard {
 
         this.state = { maintenance: locked, outOfSync, detail };
 
-        if (this.onChange && (previous.maintenance !== locked || previous.outOfSync !== outOfSync)) {
-            this.onChange(this.state, previous);
+        if (previous.maintenance !== locked || previous.outOfSync !== outOfSync) {
+            this.onChange?.(this.state, previous);
+            for (const fn of this.listeners) {
+                try { fn(this.state, previous); } catch (error) { console.error('⚠️ Aviso de cambio del guardián:', error.message); }
+            }
         }
         return this.state;
     }

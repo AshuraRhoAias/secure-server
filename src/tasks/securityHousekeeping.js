@@ -17,6 +17,8 @@ class SecurityHousekeeping {
 
     async runOnce() {
         if (this.running) return null;
+        // En mantenimiento (rotación de claves) no se toca la BD: borrar filas mientras se re-cifra solo añade bloqueos
+        if (!require('../maintenance').guard.isOpen()) return { skipped: 'maintenance' };
         this.running = true;
 
         const result = {};
