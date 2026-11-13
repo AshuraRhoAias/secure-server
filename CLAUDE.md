@@ -50,6 +50,9 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 
 ## Flujo de git (obligatorio)
 
+- **Ramas (decisión del propietario, 13-nov-2026):** `main` es la **rama oficial**. `pruebas` es la rama de trabajo (todo commit
+  nuevo se hace ahí o en una rama que salga de ella) y `postproduccion` es la de validación (sube por avance rápido desde `pruebas`
+  cuando el CI está en verde). `revision-codigo`, `instalador` y `cierre/*` quedan como histórico: no se trabaja en ellas.
 - **`main` siempre tiene todo**: cada rama de trabajo sale de `main` actualizada y, **tras cada commit**: push de la rama y
   **también a `main`** por avance rápido (`git push origin HEAD:main`). Si `main` avanzó por su cuenta (PR fusionados, correcciones
   automáticas de GitHub), primero `git fetch` + `git merge origin/main` en la rama, y después push de las dos.
@@ -125,6 +128,34 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 - Grep/Glob masivo sobre `src/` sin consultar antes el grafo.
 - `cat` de archivos completos > 300 líneas.
 - Volcar salidas completas de tests o logs al contexto.
+
+## Plugin ECC (obligatorio, junto con graphify y context-mode)
+
+El plugin **ECC** (`/ecc:*`, skills `ecc:*` y agentes `ecc:*`) se usa en todo el flujo de trabajo. No sustituye a las reglas
+anteriores: graphify sigue siendo el primer paso para entender código y context-mode para salidas grandes; ECC aporta los
+flujos, las revisiones y las puertas de calidad. Si una skill de ECC choca con este archivo (idioma, flujo de git, invariantes,
+decisiones del propietario), **manda este archivo**.
+
+| Momento | Usar de ECC |
+|---|---|
+| Planificar una función o fase | `/ecc:plan` · agentes `ecc:planner` / `ecc:architect` |
+| Función nueva / cambio / defecto | `/ecc:orch-add-feature` · `/ecc:orch-change-feature` · `/ecc:orch-fix-defect` (prueba que falla primero: skill `ecc:tdd-workflow`) |
+| Tras escribir código | agentes `ecc:code-reviewer` y `ecc:security-reviewer` (siempre que toque entrada de usuario, auth, cripto o SQL) · `/ecc:code-review` |
+| JS/TS, React/Next (`web/`) | agentes `ecc:typescript-reviewer`, `ecc:react-reviewer` · `/ecc:react-review` |
+| SQL, esquema y migraciones | skills `ecc:mysql-patterns`, `ecc:postgres-patterns`, `ecc:database-migrations` · agente `ecc:database-reviewer` |
+| Errores silenciosos / manejo de errores | agente `ecc:silent-failure-hunter` · skill `ecc:error-handling` |
+| Build o tipos rotos | `/ecc:build-fix` · agente `ecc:build-error-resolver` |
+| Pruebas e2e (Playwright) | skill `ecc:e2e-testing` · agente `ecc:e2e-runner` |
+| Cobertura y calidad antes de commit | `/ecc:test-coverage` · `/ecc:quality-gate` · skill `ecc:verification-loop` |
+| Seguridad del repositorio y la configuración | `/ecc:security-scan` · skill `ecc:security-review` |
+| Commit y PR | `/ecc:prp-commit` · `/ecc:pr` (respetando el **Flujo de git** de arriba: rama + `main` por avance rápido, sin force) |
+| Documentación | `/ecc:update-docs` (además de las reglas de `ReadmeLogsMejoras.md` y OpenAPI → README) |
+| Dudas sobre qué usar de ECC | `/ecc:ecc-guide` |
+
+- Los prompts de agentes `ecc:*` que exploren código deben incluir la regla de graphify (consultar el grafo antes de leer).
+- Los hooks de ECC (p. ej. GateGuard, que pide declarar la petición y el propósito antes del primer comando Bash) se respetan;
+  no desactivarlos sin que lo pida el propietario.
+- Las skills `ecc:multi-*` y `ecc:council-multi-model` necesitan runtimes externos: solo si el propietario lo pide.
 
 ## graphify
 
