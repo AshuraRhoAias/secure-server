@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-12 (ver §A, §L y §M)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-15 (ver §A, §L, §M y §N)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -35,6 +35,11 @@
   el `.env` local funcionaba en producción con claves `legacy` (cambian cada día).
 - **Rotación 2026-11-12 (#34):** `KEY_EPOCH` ya en el `.env` local; rotación **semanal** que descifra y re-cifra todo con el servidor
   **sin entradas ni salidas**; caídas y pausas reales probadas sin pérdida de datos (y corregido un `recover` que podía perder las semillas).
+- **Mantenimiento 2026-11-15 (#35, §N):** por decisión del propietario solo queda la rama `main` (29 ramas remotas borradas; lo único sin
+  fusionar se conserva en la etiqueta `archivo/project-thread-qjkfd0`); 9 actualizaciones de Dependabot aplicadas y 3 aparcadas;
+  `npm audit fix` sin `--force` (quedan 5 moderadas, solo de desarrollo); grafo de graphify regenerado. **Verificado solo en local**
+  (Windows, MariaDB 13.1): el CI real de GitHub, el job `compose` con las imágenes nuevas y `web/` **no** se han comprobado. Problema
+  nuevo: `test_fuzz.js` no termina en este equipo, así que `test:all` y `coverage` se cuelgan en local.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -214,19 +219,24 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Base de datos | Evaluado (CI; réplica de lectura solo con la principal) | 8 | 8 | 8 | 8 | 7 | 8 | 8 | **7,9** | Parámetros siempre; réplica y particiones opcionales; adaptador con contrato probado (#32), aún solo MySQL/MariaDB |
 | Archivos (local y S3) | Evaluado (CI: simulador y SeaweedFS) | 9 | 9 | 8 | 9 | 8 | 8 | 8 | **8,4** | Integridad por bloque; S3 con una petición por rango; antivirus con ClamAV real también en Windows (#31); audio/vídeo sin sanear |
 | Gestión de errores | Evaluado | 8 | 8 | 8 | 8 | — | 8 | 7 | **7,8** | Sin trazas al cliente (fuzzing); fallos de S3/BD sin filas a medias |
-| Dependencias | Evaluado (CI, fases 0–2) | 9 | 9 | 8 | — | — | 8 | 8 | **8,4** | `npm audit` producción 0 (raíz y web); Dependabot incluye docker |
+| Dependencias | Parcial (CI de fases 0–2; #35 solo en local) | 9 | 8 | 8 | — | — | 8 | 8 | **8,2** | `npm audit`: `web/` 0; raíz 5 moderadas solo de desarrollo (minimatch/glob; corrección con versión mayor, pendiente de decisión); 9 actualizaciones y 3 aparcadas (#35) |
 | Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente), `.env` versionado y, en local, claves `legacy` sin `KEY_EPOCH` (#33) |
 | Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
 | Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
-| Pruebas automatizadas | Evaluado | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | ~590 API + 57 web + e2e; en local (Windows) ya con MariaDB 13.1 y ClamAV (#30, #31) |
+| Pruebas automatizadas | Parcial (local; CI sin comprobar tras #35) | 9 | 8 | 8 | 8 | — | 7 | 8 | **8,0** | ~590 API + 57 web + e2e; en local 592/593 sin `test_fuzz.js`, que no termina en este equipo (#35); `web/` sin ejecutar en #35 |
 | Interfaz web | Evaluado (CI: e2e en 3 navegadores + axe) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
-| Infraestructura / Docker | Evaluado (CI: imagen construida y 2 réplicas probadas) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
+| Infraestructura / Docker | Parcial (CI hasta #34; imágenes nuevas de #35 sin probar) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
 | PruebasLinux | Evaluado (local y CI) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
 | Documentación | Evaluado | 9 | — | 8 | — | — | 8 | 9 | **8,5** | README 4979→560 líneas, histórico separado, tabla de endpoints con prueba |
 
 **Media de los 16 componentes ≈ 8,1/10** (antes 6,7 el 21-oct). El CI de las fases 3–6 está en verde desde el 10-nov: «Parcial» pasa a
 «Evaluado». Las notas se mantienen porque los fallos que encontró el CI (#29) se corrigieron con pruebas que los cubren. Solo sube la T de
 Docker, que ya tiene pruebas ejecutadas.
+
+**Actualización 2026-11-15 (#35, mantenimiento):** no sube ninguna nota. Bajan dos por falta de evidencia: Dependencias (S 9→8: 5
+moderadas de desarrollo abiertas; pasa a «Parcial») y Pruebas automatizadas (T 8→7: `test_fuzz.js` no termina en local; «Parcial»).
+Infraestructura / Docker pasa a «Parcial» porque nginx, SeaweedFS y aws-cli cambiaron de versión y el job `compose` no se ha ejecutado.
+La media sigue en **≈ 8,1/10**. Lo ejecutado en #35 es solo local; el CI real de GitHub no se ha podido comprobar.
 
 ---
 
@@ -246,6 +256,10 @@ Docker, que ya tiene pruebas ejecutadas.
 | Media | El servidor local no conecta a la MariaDB local con el `.env` actual | TLS verificado con certificado autofirmado + usuario de BD inexistente (#34) | No se puede probar `npm start` de punta a punta en local | Credenciales de prueba válidas o `NODE_ENV=development` en local | Abierto |
 | Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
 | Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
+| Media | `test_fuzz.js` no termina en local: 16/17 pasan, la 17.ª cae por timeout de 120 s y el proceso queda colgado (también con `--test-force-exit`); `test:all` y `coverage` se cuelgan | Ejecución local (#35); se reproduce en `main` con las dependencias anteriores | Sin `test:all` ni cobertura completos en local | Investigar; sospecha (no confirmada): handle abierto tras «fuzz HTTP: subida de archivos con multipart malformado» | Abierto |
+| Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4) | `npm audit` tras #35; GitHub avisó de 2 moderadas en `main` (no se pudo ver la página; probablemente los dos advisories de minimatch/glob) | Solo herramientas de desarrollo, no producción | Exige versión mayor (minimatch 11 / glob >14.0.1) o volver a `c8` 9.1.0; posible `overrides` | Abierto (decisión del propietario) |
+| Baja | 3 actualizaciones aparcadas: `mariadb` 10.11→13.0 en `deploy/`, imagen `node` 22→26-bookworm-slim, `actions/upload-artifact` 4→7 | Dependabot (#35) | El CI usa MariaDB 10.11 a propósito | Decidir cada una | Abierto (decisión del propietario) |
+| Baja | Commit `5ee29e5` sin fusionar (token de cliente diario, `capacity.js`, optimización de `level3.js`) | Etiqueta `archivo/project-thread-qjkfd0` (#35) | Trabajo conservado pero fuera de `main` | Decidir si se rescata o se descarta | Abierto (decisión del propietario) |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
 | Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
 | Baja | Saneado solo de imágenes y PDF | `docs/SEGURIDAD.md` §22 | Metadatos en audio/vídeo/texto | Recodificar o despojar metadatos | Propuesto |
@@ -296,6 +310,16 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 | #33 · `881a59d` | `docs/REVISION-CODIGO-2026-11.md` | `secure-env.js`, `key-provider.js`, `auth.controller.js`, `database.js`, `test_rotation.js`, `test_api.js`, docs | 4 métodos de mantenimiento muertos, `secureQuery`/`logDatabaseAccess` | Revisión: claves sin valores conocidos y código muerto fuera | Pruebas nuevas; cobertura 77 %; ver #33 |
 | #34 · (este commit) | `src/maintenance/cutoff.js`, `test_helpers/rotation-child.js` | `rotation.service.js`, `guard.js`, `scheduleKeyRotation.js`, `keyRotator.js`, `securityHousekeeping.js`, `alerts.service.js`, `secure-communications.service.js`, `live-stream.js`, `index.js`, `test_rotation.js`, `README.md`, `.env.example`, docs | — | Rotación semanal sin entradas ni salidas; caídas y pausas sin pérdida | 9 pruebas nuevas; ver #34 |
 
+### Intervención 9 (15-nov, mantenimiento, rama `fix/audit-bitacora-2026-11-15`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #35 · `c6255e2` | etiqueta `archivo/project-thread-qjkfd0` | `CLAUDE.md` | 29 ramas remotas | Solo `main` + rama corta por tarea | `main` contiene todo salvo `5ee29e5` (archivado) |
+| #35 · `9805d95` | — | `package*.json`, Dockerfile/compose, workflows (nginx, SeaweedFS, aws-cli, dependency-review) | — | 9 actualizaciones de Dependabot | Local: lint 0, `test:api` 16/16, suite sin fuzz 592/593; CI sin comprobar |
+| #35 · `4ddb01d` | — | `package-lock.json` (eslint 10.15.0, `@eslint/config-array` 0.23.6) | — | `npm audit fix` sin `--force` (GHSA-g3hv-75wg-m249) | Lint 0 y `test:api` 16/16 tras el cambio |
+| #35 · `42da76d` | — | `graphify-out/`, `.gitignore` | — | Grafo regenerado; copias por fecha ignoradas | 3337 nodos, 6101 aristas, 203 comunidades |
+| #35 · (este commit) | — | `ReadmeLogsMejoras.md` | — | Bitácora de la entrega | — |
+
 ---
 
 ## F. Plan de mejora continua
@@ -306,6 +330,8 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 - ✅ PruebasLinux ampliado (#26). ✅ Documentación fiel y con prueba de sincronía (#27). ✅ CI de todas las fases en verde (#28, #29).
 - ✅ Fases fusionadas en `main` (PR #26, #33–#35). ✅ Suite completa en local con MariaDB 13.1 (#30). ✅ Instalador con menú y ClamAV,
   probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32). ✅ Revisión del código y trampas de claves cerradas (#33). ✅ Rotación semanal sin entradas ni salidas, caídas y pausas reales probadas (#34).
+- ✅ Solo `main` en el remoto, con el commit sin fusionar archivado en una etiqueta (#35). ✅ 9 actualizaciones de Dependabot y
+  `npm audit fix` aplicados, verificados **solo en local** (#35). ✅ Grafo de graphify regenerado (#35).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -321,6 +347,11 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 8. **ASVS pendientes**: HIBP, límite de sesiones, versionado de API, multi-organización · media.
 9. `.env` fuera del repositorio cuando deje de ser de pruebas · alta antes de producción.
 10. **Instaladores de Linux y macOS ejecutados** en equipos reales o en el CI · media · `linux.sh --si` termina con EICAR detectado.
+11. **Comprobar el CI de `main` tras #35** (jobs `test`, `web`, `compose`, `pruebaslinux`, `production-install`, `dependency-review` v5) y
+    `web/` en local (typecheck, build, e2e) · alta · todo en verde o fallos anotados.
+12. **Investigar el cuelgue de `test_fuzz.js`** en local · media · `npm run test:all` y `npm run coverage` terminan.
+13. **Decidir las 5 moderadas de desarrollo** (`overrides` de minimatch/glob o `c8` 9.1.0), **las 3 actualizaciones aparcadas** y **el
+    commit archivado** · baja · decisión del propietario anotada.
 
 ---
 
@@ -733,3 +764,48 @@ Rama `cierre/8-bd` (#30) y rama `instalador` (#31, #32). Cada commit se sube a s
 - **Problemas restantes:** el servidor local no conecta con este `.env` (TLS verificado + usuario inexistente en la MariaDB local);
   decidir si producción debe negarse a arrancar con claves `legacy`; las alertas retenidas en mantenimiento no se reenvían.
   **Siguiente mejora:** credenciales locales válidas y una rotación real de punta a punta con `npm start`. *(Media.)*
+
+## N. Intervención 2026-11-15: mantenimiento (#35)
+
+Rama `fix/audit-bitacora-2026-11-15` (rama corta por tarea, desde `main`).
+
+### #35 — Ramas solo `main`, Dependabot, `npm audit` y grafo (verificación solo local)
+- **Estado:** completado en lo que se pudo ejecutar en local (15-nov); **CI real de GitHub sin comprobar** (el repositorio responde 404
+  sin sesión).
+- **Archivos y módulos revisados:** ramas remotas y PR de Dependabot #27–#41; `package.json` y `package-lock.json` (raíz y `web/`),
+  Dockerfile, `deploy/docker-compose.yml` y workflows de `.github/`; `npm audit` (raíz y `web/`); `graphify-out/`, `.gitignore`;
+  `CLAUDE.md`; suites del API (`test_*.js`, incluida `test_fuzz.js`) y cobertura.
+- **Problema detectado:** (1) 30 ramas remotas con flujo confuso; todo estaba fusionado en `main` salvo el commit `5ee29e5` de
+  `claude/project-thread-qjkfd0` (token de cliente diario, `capacity.js`, optimización de `level3.js`); (2) 12 PR de Dependabot y una
+  rama corta de dependencias pendientes; (3) `npm audit` en la raíz con 7 moderadas, todas de desarrollo (`web/`: 0); (4) grafo
+  desactualizado; (5) `test_fuzz.js` no termina en este equipo (16/17 pasan, la 17.ª cae por timeout de 120 s y el proceso queda
+  colgado, también con `--test-force-exit`), por lo que `npm run test:all` y `npm run coverage` se cuelgan en local; se reproduce en
+  `main` con las dependencias anteriores.
+- **Acciones realizadas:** por decisión del propietario solo queda `main`: **29 ramas remotas borradas** (`pruebas`, `postproduccion`,
+  `cierre/0-base`…`cierre/8-bd`, `instalador`, `revision-codigo`, `claude/codigo-apis-readme-wrr430`, `claude/project-thread-qjkfd0`,
+  `repo/sharp-noether-tbr0bz`, 12 de Dependabot y `deps/dependabot-2026-11`); `5ee29e5` conservado en la etiqueta
+  `archivo/project-thread-qjkfd0`; nuevo flujo en `CLAUDE.md` (`c6255e2`): rama corta por tarea desde `main`, push de la rama y avance
+  rápido de `main` tras cada commit, rama borrada al terminar. Los PR #27–#41 quedaron cerrados al borrar sus ramas. **Dependabot**
+  (`9805d95`): c8 12.0.0, concurrently 10.0.7, fs-extra 11.4.1, globals 17.14.0, node-cron 4.6.0, nginx 1.31-alpine,
+  chrislusf/seaweedfs 4.52, amazon/aws-cli 2.39.6 y actions/dependency-review-action 5.0.0 (SHA fijado). **Aparcadas** por decisión del
+  propietario: mariadb 10.11→13.0 en `deploy/` (el CI usa 10.11 a propósito), imagen node 22→26-bookworm-slim y
+  actions/upload-artifact 4→7. **Seguridad** (`4ddb01d`): `npm audit fix` sin `--force` subió eslint 10.14.0→10.15.0 y
+  `@eslint/config-array` 0.23.5→0.23.6 (minimatch 11.0.8 anidado; GHSA-g3hv-75wg-m249). Quedan **5 moderadas de desarrollo**
+  (minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13; GHSA-3g3m-2fjr-6pw4) porque la corrección exige versión mayor o
+  retroceder `c8` a 9.1.0; pendiente de decisión (posible `overrides`). GitHub avisó de 2 moderadas en `main`; no se pudo ver la
+  página y probablemente son esos advisories. **Grafo** (`42da76d`): 3337 nodos, 6101 aristas, 203 comunidades (45 con nombre en
+  español); 6 documentos re-extraídos; avisos de salud (25 aristas colgantes, 10 bucles, ≈ 600 aristas colapsadas, sobre todo
+  `contains` del YAML del CI); los 19 `.sql` no aportan (falta `tree_sitter_sql`); `.gitignore` ignora las copias por fecha
+  `graphify-out/20??-??-??/`.
+- **Pruebas ejecutadas (solo local: Windows, Node 26, MariaDB 13.1.1; el CI usa 10.11):** `lint:security` 0 errores y 0 avisos;
+  `test:api` 16/16; suite completa **sin `test_fuzz.js`**: 593 pruebas, 592 pasadas, 0 fallidas, 1 omitida; cobertura con c8 12 (sin
+  `test_fuzz.js`): sentencias y líneas 78,74 %, funciones 89,6 %, ramas 83,42 %, sobre los umbrales 72/72/88/80. En esa pasada
+  `test_av.js` dio 23 fallos «fetch failed: bad port» por un puerto aleatorio inválido; ejecutado solo, 23/23. `test:api` 16/16 y lint
+  0 avisos también tras `4ddb01d`. **No verificado:** CI real de GitHub, job `compose` con las imágenes nuevas, scripts con
+  concurrently 10, `web/` (typecheck, build, e2e) y dependency-review v5. `test_fuzz.js` **no** se pudo completar.
+- **Puntuación:** 7/10 — entrega de mantenimiento: el repositorio queda más simple y con dependencias al día, pero la evidencia es solo
+  local, queda un cuelgue de pruebas sin explicar y 5 moderadas abiertas. No cambia el estado de ningún componente salvo a la baja (§C).
+- **Problemas restantes:** CI de `main` sin comprobar tras #35; `test_fuzz.js` colgado (causa no investigada; sospecha: handle abierto
+  tras «fuzz HTTP: subida de archivos con multipart malformado»); 5 moderadas de desarrollo; contraseña de la BD remota del historial de
+  `test.js` (la rota el propietario); decidir el commit archivado y las 3 actualizaciones aparcadas.
+  **Siguiente mejora:** comprobar el CI de `main` y `web/`, y encontrar el handle abierto de `test_fuzz.js`. *(Alta.)*
