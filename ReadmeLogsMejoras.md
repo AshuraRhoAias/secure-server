@@ -315,7 +315,7 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 | Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
 |---|---|---|---|---|---|
 | #35 · `c6255e2` | etiqueta `archivo/project-thread-qjkfd0` | `CLAUDE.md` | 29 ramas remotas | Solo `main` + rama corta por tarea | `main` contiene todo salvo `5ee29e5` (archivado) |
-| #35 · `9805d95` | — | `package*.json`, Dockerfile/compose, workflows (nginx, SeaweedFS, aws-cli, dependency-review) | — | 9 actualizaciones de Dependabot | Local: lint 0, `test:api` 16/16, suite sin fuzz 592/593; CI sin comprobar |
+| #35 · `9805d95` | — | `package*.json`, `deploy/docker-compose.yml`, `ci.yml` (nginx, SeaweedFS, aws-cli, dependency-review) | — | 9 actualizaciones de Dependabot | Local: lint 0, `test:api` 16/16, suite sin fuzz 592/593; CI sin comprobar |
 | #35 · `4ddb01d` | — | `package-lock.json` (eslint 10.15.0, `@eslint/config-array` 0.23.6) | — | `npm audit fix` sin `--force` (GHSA-g3hv-75wg-m249) | Lint 0 y `test:api` 16/16 tras el cambio |
 | #35 · `42da76d` | — | `graphify-out/`, `.gitignore` | — | Grafo regenerado; copias por fecha ignoradas | 3337 nodos, 6101 aristas, 203 comunidades |
 | #35 · (este commit) | — | `ReadmeLogsMejoras.md` | — | Bitácora de la entrega | — |
