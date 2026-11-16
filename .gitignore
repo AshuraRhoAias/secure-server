@@ -184,6 +184,7 @@ graphify-out/cost.json
 graphify-out/.graphify_*
 graphify-out/.cloud-cta-shown
 graphify-out/.rebuild.lock
+graphify-out/20??-??-??/
 
 # Registros de los instaladores (instalador/registros/)
 instalador/registros/
