@@ -50,12 +50,13 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 
 ## Flujo de git (obligatorio)
 
-- **Ramas (decisión del propietario, 13-nov-2026):** `main` es la **rama oficial**. `pruebas` es la rama de trabajo (todo commit
-  nuevo se hace ahí o en una rama que salga de ella) y `postproduccion` es la de validación (sube por avance rápido desde `pruebas`
-  cuando el CI está en verde). `revision-codigo`, `instalador` y `cierre/*` quedan como histórico: no se trabaja en ellas.
-- **`main` siempre tiene todo**: cada rama de trabajo sale de `main` actualizada y, **tras cada commit**: push de la rama y
-  **también a `main`** por avance rápido (`git push origin HEAD:main`). Si `main` avanzó por su cuenta (PR fusionados, correcciones
-  automáticas de GitHub), primero `git fetch` + `git merge origin/main` en la rama, y después push de las dos.
+- **Ramas (decisión del propietario, 15-nov-2026):** solo existe **`main`**, la rama oficial. Cada tarea usa una **rama corta**
+  que sale de `main` actualizada (p. ej. `deps/…`, `fix/…`, `docs/…`) y **se borra, local y remota, al terminar la tarea**.
+  `pruebas`, `postproduccion`, `cierre/*`, `instalador` y `revision-codigo` se borraron (todo estaba fusionado en `main`); el único
+  commit suelto que había (rama `claude/project-thread-qjkfd0`) se conserva en la etiqueta `archivo/project-thread-qjkfd0`.
+- **`main` siempre tiene todo**: **tras cada commit**, push de la rama corta y **también a `main`** por avance rápido
+  (`git push origin HEAD:<rama> HEAD:main`). Si `main` avanzó por su cuenta (PR fusionados, correcciones automáticas de GitHub),
+  primero `git fetch` + `git merge origin/main` en la rama, y después push de las dos.
 - Nunca acumular commits solo en local. **Nunca** rebase de ramas publicadas ni `push --force` (tampoco a `main`).
 - Comprobar tras cada subida: `git merge-base --is-ancestor origin/main HEAD` y que local = remoto en la rama y en `main`.
 - Historial: las fases `cierre/0-base` … `cierre/8-bd` ya están fusionadas en `main` (PR #26, #33–#35).
