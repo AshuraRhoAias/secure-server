@@ -10,6 +10,7 @@ const approvals = require('../../security/admin-actions');
 const alerts = require('../../security/alerts.service');
 const dashboard = require('../../security/dashboard.service');
 const privacy = require('../../security/privacy.service');
+const userAdmin = require('../../security/user-admin.service');
 
 class SystemController {
     constructor() {
@@ -427,6 +428,105 @@ class SystemController {
         }
         console.error(`❌ ${fallback}:`, error.code || error.message);
         res.status(500).json({ success: false, message: fallback });
+    }
+
+    // ------------------------------------------------------------------ gestión de usuarios (SOLO admin)
+
+    userFailure(res, error, fallback) {
+        if (error instanceof userAdmin.UserAdminError || error instanceof approvals.ApprovalError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error(`❌ ${fallback}:`, error.code || error.message);
+        res.status(500).json({ success: false, message: fallback });
+    }
+
+    async listUsers(req, res) {
+        try {
+            const { q, role, limit, before } = req.validated?.query || {};
+            const page = await userAdmin.listUsers({ q, role, limit, before });
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, ...page });
+        } catch (error) {
+            this.userFailure(res, error, 'Error listando usuarios');
+        }
+    }
+
+    // Rol admin: la cuenta se crea como "user" y otro administrador debe aprobar la subida (202).
+    // La contraseña temporal se devuelve UNA vez en esta respuesta; no se guarda en claro en ningún sitio.
+    async createUser(req, res) {
+        try {
+            const { username, role, reason, password } = req.body;
+            const created = await userAdmin.createUser({ username, role, password, createdBy: req.user.id });
+            await audit.log('USER_CREATED_BY_ADMIN', { userId: created.id, role: created.requestedRole, reason: reason.trim() }, { req, severity: 'high', riskScore: 30 });
+            await securityEvents.record({
+                type: 'USER_CREATED_BY_ADMIN', severity: 'high', riskScore: 30, req, userId: created.id,
+                details: { createdBy: req.user.id, requestedRole: created.requestedRole, temporaryPassword: created.temporaryPassword !== null }
+            });
+
+            const user = { id: created.id, username: created.username, role: created.role, mustChangePassword: true };
+            const base = { success: true, user, temporaryPassword: created.temporaryPassword };
+
+            if (created.requestedRole !== 'admin') {
+                return res.status(201).json({ ...base, message: 'Usuario creado' });
+            }
+            // Con una sola firma (ADMIN_APPROVALS_REQUIRED=1) la solicitud se ejecutaría ya y fallaría: la cuenta nace con la
+            // contraseña temporal y nunca se da admin así. Queda como user; el rol se pide cuando el titular la haya cambiado.
+            if (!approvals.twoPersonRequired()) {
+                return res.status(201).json({
+                    ...base, message: 'Usuario creado con rol user: asígnale admin cuando haya cambiado su contraseña temporal'
+                });
+            }
+            const outcome = await approvals.request({
+                action: 'user_set_role', targetUserId: created.id, params: { role: 'admin' }, reason, requestedBy: req.user.id
+            });
+            if (outcome.status === 'pending') {
+                return res.status(202).json({
+                    ...base, approvalId: outcome.id, status: 'pending',
+                    message: 'Usuario creado con rol user: otro administrador debe aprobar el rol admin en Aprobaciones'
+                });
+            }
+            res.status(201).json({ ...base, user: { ...user, role: 'admin' }, approvalId: outcome.id, status: outcome.status, message: 'Usuario creado con rol admin' });
+        } catch (error) {
+            this.userFailure(res, error, 'Error creando el usuario');
+        }
+    }
+
+    async setUserRole(req, res) {
+        try {
+            const targetId = req.validated.params.id;
+            const { role, reason } = req.body;
+            if (Number(targetId) === Number(req.user.id)) {
+                return res.status(403).json({ success: false, message: 'No puedes cambiar tu propio rol', code: 'SELF_ROLE_CHANGE' });
+            }
+            const db = require('../../config/database');
+            const [rows] = await db.query('SELECT role FROM users WHERE id = ?', [targetId]);
+            if (!rows[0]) return res.status(404).json({ success: false, message: 'Usuario no encontrado', code: 'NOT_FOUND' });
+            if (rows[0].role === role) {
+                return res.status(409).json({ success: false, message: `El usuario ya tiene el rol ${role}`, code: 'ROLE_UNCHANGED' });
+            }
+
+            // Dar O quitar el rol admin exige la firma de otro administrador (simétrico: un admin comprometido tampoco
+            // puede degradar a los demás él solo). El resto de cambios son directos.
+            if (role === 'admin' || rows[0].role === 'admin') {
+                const outcome = await approvals.request({
+                    action: 'user_set_role', targetUserId: targetId, params: { role }, reason, requestedBy: req.user.id
+                });
+                await audit.log('USER_ROLE_REQUESTED', { userId: targetId, role, approvalId: outcome.id, status: outcome.status }, { req, severity: 'high', riskScore: 40 });
+                if (outcome.status === 'pending') {
+                    return res.status(202).json({
+                        success: true, approvalId: outcome.id, status: 'pending',
+                        message: 'Solicitud creada: otro administrador debe aprobarla con POST /api/system/approvals/:id/approve'
+                    });
+                }
+                return res.json({ success: true, approvalId: outcome.id, status: outcome.status, role, message: 'Rol cambiado' });
+            }
+
+            const result = await userAdmin.applyRole(targetId, role, { actor: req.user.id });
+            await audit.log('USER_ROLE_CHANGED', { userId: targetId, from: result.from, to: result.to, reason: reason.trim() }, { req, severity: 'high', riskScore: 40 });
+            res.json({ success: true, role: result.to, previousRole: result.from, sessionsClosed: result.sessionsClosed, message: 'Rol cambiado y sesiones cerradas' });
+        } catch (error) {
+            this.userFailure(res, error, 'Error cambiando el rol');
+        }
     }
 
     async getBlockedIPs(req, res) {

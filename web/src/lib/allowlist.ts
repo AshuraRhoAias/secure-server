@@ -5,6 +5,9 @@ type Method = 'GET' | 'POST' | 'DELETE';
 const RULES: ReadonlyArray<{ method: Method; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/system\/(status|rotation|blocked-ips|security-events|security-summary|approvals|alerts|dashboard)$/ },
   { method: 'GET', path: /^\/api\/system\/logs$/ },
+  { method: 'GET', path: /^\/api\/system\/users$/ },
+  { method: 'POST', path: /^\/api\/system\/users$/ },
+  { method: 'POST', path: /^\/api\/system\/users\/[1-9]\d{0,9}\/role$/ },
   { method: 'GET', path: /^\/api\/metrics$/ },
   { method: 'DELETE', path: /^\/api\/system\/blocked-ips\/[0-9a-fA-F:.]{1,45}$/ },
   { method: 'POST', path: /^\/api\/system\/accounts\/(unlock|mfa-reset)$/ },

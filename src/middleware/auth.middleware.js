@@ -1,5 +1,8 @@
 const secureAuthService = require('../security/secure-auth.service');
 
+// Con must_change_password = 1 (contraseña temporal) solo se permite lo necesario para cambiarla o salir
+const PASSWORD_CHANGE_ALLOWED = new Set(['/api/auth/password', '/api/auth/logout', '/api/auth/profile', '/api/auth/refresh']);
+
 class AuthMiddleware {
     constructor() {
         this.activeValidations = new Map();
@@ -43,8 +46,20 @@ class AuthMiddleware {
                 username: validation.username,
                 sessionId: validation.sessionId,
                 riskLevel: validation.riskLevel,
-                amr: validation.amr
+                amr: validation.amr,
+                mustChangePassword: validation.mustChangePassword === true
             };
+
+            if (req.user.mustChangePassword) {
+                const route = req.originalUrl.split('?')[0].replace(/\/+$/, '').toLowerCase();
+                if (!PASSWORD_CHANGE_ALLOWED.has(route)) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Debes cambiar la contraseña temporal antes de continuar',
+                        code: 'PASSWORD_CHANGE_REQUIRED'
+                    });
+                }
+            }
 
             // Agregar headers de información de sesión
             res.setHeader('X-Session-Risk-Level', validation.riskLevel);

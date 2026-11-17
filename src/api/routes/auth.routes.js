@@ -93,6 +93,16 @@ router.delete('/webauthn/credentials/:id',
     authController.webauthnRemove
 );
 
+// Cambio de la propia contraseña (también lo único que puede hacer una cuenta con contraseña temporal)
+router.post('/password',
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        currentPassword: { type: 'string', required: true, min: 1, max: 128, trim: false },
+        newPassword: { type: 'string', required: true, min: 10, max: 128, trim: false }
+    }),
+    authController.changePassword
+);
+
 router.post('/logout', authController.logout);
 router.post('/logout-all', validate.body({ keepCurrent: { type: 'boolean' } }), authController.logoutAll);
 router.get('/sessions', authController.listSessions);

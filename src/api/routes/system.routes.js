@@ -88,6 +88,37 @@ router.get('/stream',
     require('../../observability/live-stream').handler
 );
 
+// Gestión de usuarios (SOLO admin). Dar el rol admin exige la aprobación de otro administrador (acción user_set_role).
+const roleEnum = { type: 'enum', values: ['user', 'auditor', 'operator', 'admin'], required: true };
+router.get('/users',
+    allow('users:read'),
+    validate.query({
+        q: { type: 'string', max: 64 },
+        role: { type: 'enum', values: ['user', 'auditor', 'operator', 'admin'] },
+        before: { type: 'integer', min: 1 },
+        limit: { type: 'integer', min: 1, max: 200, default: 50 }
+    }),
+    systemController.listUsers
+);
+router.post('/users',
+    allow('users:create'),
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        username: { type: 'string', required: true, min: 3, max: 64 },
+        role: roleEnum,
+        reason: { type: 'string', required: true, min: 10, max: 255 },
+        password: { type: 'string', min: 10, max: 128, trim: false }
+    }),
+    systemController.createUser
+);
+router.post('/users/:id/role',
+    allow('users:manage'),
+    protectionMiddleware.highSecurity(),
+    idParam,
+    validate.body({ role: roleEnum, reason: { type: 'string', required: true, min: 10, max: 255 } }),
+    systemController.setUserRole
+);
+
 // Datos personales e incidentes (SOLO admin)
 router.get('/users/:id/export', allow('privacy:export'), protectionMiddleware.highSecurity(), idParam, systemController.exportUserData);
 router.post('/users/:id/erase',

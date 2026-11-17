@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { login, loginMfa, logout, me, proxyData } from './bff';
+import { changePassword, login, loginMfa, logout, me, proxyData } from './bff';
 import { sessionCookieName } from './config';
 import { seal, unseal } from './seal';
 import type { Session } from './session';
@@ -42,6 +42,8 @@ beforeAll(async () => {
       if (path === '/api/auth/login') {
         if (input.username === 'admin' && input.password === 'ok') return send(200, issue('admin', true));
         if (input.username === 'plain' && input.password === 'ok') return send(200, issue('plain', false));
+        if (input.username === 'newbie' && input.password === 'temp') return send(200, { ...issue('admin', true), passwordChangeRequired: true });
+        if (input.username === 'newplain' && input.password === 'temp') return send(200, { ...issue('plain', false), passwordChangeRequired: true });
         if (input.username === 'mfa' && input.password === 'ok') return send(200, { success: true, mfaRequired: true, mfaToken: 'MFA-TOKEN-1', methods: ['otp', 'recovery'] });
         if (input.username === 'locked') return send(429, { success: false, message: 'Demasiados intentos', code: 'RATE_LIMITED', retryAfter: 30 }, { 'Retry-After': '30' });
         return send(401, { success: false, message: 'Credenciales inválidas', code: 'INVALID_CREDENTIALS' });
@@ -59,6 +61,10 @@ beforeAll(async () => {
       }
       if (path === '/api/auth/logout') { state.logoutCalls++; return send(200, { success: true }); }
       if (!state.validAccess.has(auth)) return send(401, { success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
+      if (path === '/api/auth/password') {
+        if (input.currentPassword !== 'temp') return send(401, { success: false, message: 'La contraseña actual no es correcta', code: 'INVALID_CREDENTIALS' });
+        return send(200, { success: true });
+      }
       if (path.startsWith('/api/system/') || path === '/api/metrics') {
         if (!state.adminTokens.has(auth)) return send(403, { success: false, code: 'FORBIDDEN', message: 'No tienes permisos' });
         if (path === '/api/metrics') { res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' }); return res.end('# HELP x\nx 1\n'); }
@@ -181,6 +187,58 @@ describe('inicio de sesión', () => {
   });
 });
 
+describe('cambio de contraseña obligatorio', () => {
+  const newbie = async () => {
+    const response = await login(post('/session/login', { username: 'newbie', password: 'temp' }));
+    return { response, cookie: cookieOf(response) as string };
+  };
+
+  it('login con contraseña temporal: guarda la sesión sin comprobar el rol, avisa y no entrega tokens', async () => {
+    const { response, cookie } = await newbie();
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text).passwordChangeRequired).toBe(true);
+    expect(text).not.toMatch(/h\.|rt_|"token"/i);
+    expect(cookie).toBeTruthy();
+    expect(state.seen.some(s => s.path === '/api/system/dashboard')).toBe(false);
+  });
+
+  it('cambiarla (admin): 200, sesión conservada; contraseña actual mala: 401 SIN borrar la sesión', async () => {
+    const { cookie } = await newbie();
+    const bad = await changePassword(post('/session/password', { currentPassword: 'mala', newPassword: 'Nueva-Contraseña-1' }, withCookie(cookie)));
+    expect(bad.status).toBe(401);
+    expect((await bad.json()).code).toBe('INVALID_CREDENTIALS');
+    expect(bad.headers.getSetCookie().some(c => c.startsWith(`${sessionCookieName()}=;`) || /Max-Age=0/.test(c))).toBe(false);
+
+    const ok = await changePassword(post('/session/password', { currentPassword: 'temp', newPassword: 'Nueva-Contraseña-1' }, withCookie(cookie)));
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).not.toMatch(/h\.|rt_|"token"/i);
+    expect(cookieOf(ok)).toBeTruthy();
+    const sent = state.seen.find(s => s.path === '/api/auth/password')!;
+    expect(sent.headers.authorization).toMatch(/^Bearer /);
+  });
+
+  it('si no es administrador, tras cambiarla se cierra la sesión (la interfaz es solo para admins)', async () => {
+    const response = await login(post('/session/login', { username: 'newplain', password: 'temp' }));
+    const cookie = cookieOf(response) as string;
+    const done = await changePassword(post('/session/password', { currentPassword: 'temp', newPassword: 'Nueva-Contraseña-1' }, withCookie(cookie)));
+    expect(done.status).toBe(403);
+    const body = await done.json();
+    expect(body.code).toBe('NOT_ADMIN');
+    expect(body.passwordChanged).toBe(true);
+    expect(state.logoutCalls).toBe(1);
+    expect(done.headers.getSetCookie().some(c => /Max-Age=0/.test(c))).toBe(true);
+  });
+
+  it('exige sesión y CSRF, y valida la entrada', async () => {
+    expect((await changePassword(post('/session/password', { currentPassword: 'a', newPassword: 'Nueva-Contraseña-1' }))).status).toBe(401);
+    const { cookie } = await newbie();
+    expect((await changePassword(post('/session/password', { currentPassword: 'temp', newPassword: 'Nueva-Contraseña-1' }, { ...withCookie(cookie), origin: 'http://evil.test', 'x-ops-csrf': '' }))).status).toBe(403);
+    expect((await changePassword(post('/session/password', { currentPassword: 'temp', newPassword: 'corta' }, withCookie(cookie)))).status).toBe(400);
+    expect((await changePassword(post('/session/password', 'no-json', withCookie(cookie)))).status).toBe(400);
+  });
+});
+
 describe('proxy de datos', () => {
   it('reenvía con el Bearer que guarda la cookie, sin exponer tokens, y conserva la consulta', async () => {
     const cookie = await adminCookie();
@@ -208,7 +266,7 @@ describe('proxy de datos', () => {
 
   it('solo reenvía rutas permitidas y no deja salir del árbol del API', async () => {
     const cookie = await adminCookie();
-    for (const segments of [['api', 'system', 'rotate-keys'], ['api', 'auth', 'profile'], ['api', 'system', '..', 'auth', 'profile']]) {
+    for (const segments of [['api', 'system', 'rotate-keys'], ['api', 'auth', 'password'], ['api', 'auth', 'profile'], ['api', 'system', '..', 'auth', 'profile']]) {
       expect((await proxyData(post('/bff/x', {}, withCookie(cookie)), segments, '')).status).toBe(404);
     }
     expect(state.seen.filter(s => s.path.includes('rotate-keys') || s.path.includes('profile')).length).toBe(0);

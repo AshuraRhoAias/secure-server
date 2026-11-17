@@ -98,6 +98,15 @@ async function request({ action, targetUserId = null, params = {}, reason, reque
 }
 
 async function approve(id, approverId) {
+    // Comprobación previa opcional de la acción (handler.precheck): si el objetivo aún no está listo, la solicitud SIGUE
+    // pendiente (no se reclama ni se marca como fallida) y quien aprueba recibe el motivo.
+    const [pre] = await db.query('SELECT action, status, target_user_id, params, requested_by FROM admin_approvals WHERE id = ?', [id]);
+    const candidate = pre[0];
+    const precheck = candidate ? handlers.get(candidate.action)?.precheck : null;
+    if (precheck && candidate.status === 'pending' && Number(candidate.requested_by) !== Number(approverId)) {
+        await precheck({ targetUserId: candidate.target_user_id, params: candidate.params ? JSON.parse(candidate.params) : {} });
+    }
+
     // Atómico: solo pasa de pending a approved UNA vez, si no caducó y si el aprobador no es quien lo pidió
     const [claimed] = await db.query(
         `UPDATE admin_approvals SET status = 'approved', approved_by = ?, decided_at = NOW()

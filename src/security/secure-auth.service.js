@@ -589,9 +589,11 @@ class SecureAuthService {
 
             const db = require('../config/database');
             const [sessions] = decoded.v === 2
-                ? await db.query(`SELECT id, user_id, risk_level, is_suspicious, last_used_at < DATE_SUB(NOW(), INTERVAL 60 SECOND) AS stale
+                ? await db.query(`SELECT id, user_id, risk_level, is_suspicious, last_used_at < DATE_SUB(NOW(), INTERVAL 60 SECOND) AS stale,
+                                         (SELECT must_change_password FROM users WHERE users.id = user_sessions.user_id) AS must_change
                                   FROM user_sessions WHERE session_uid = ? AND ${sqlFragment('liveSession')}`, [String(decoded.sessionId)])
-                : await db.query(`SELECT id, user_id, risk_level, is_suspicious, 0 AS stale
+                : await db.query(`SELECT id, user_id, risk_level, is_suspicious, 0 AS stale,
+                                         (SELECT must_change_password FROM users WHERE users.id = user_sessions.user_id) AS must_change
                                   FROM user_sessions WHERE jwt_token_hash = ? AND ${sqlFragment('liveSession')}`, [this.hashToken(token)]);
 
             const session = sessions[0];
@@ -610,7 +612,9 @@ class SecureAuthService {
                 username: decoded.username,
                 sessionId: session.id,
                 riskLevel: session.risk_level,
-                amr: Array.isArray(decoded.amr) ? decoded.amr : ['pwd']
+                amr: Array.isArray(decoded.amr) ? decoded.amr : ['pwd'],
+                // Una sola consulta (la de la sesión): cuenta con contraseña temporal, solo puede cambiarla
+                mustChangePassword: Number(session.must_change) === 1
             };
         } catch (error) {
             // Mensaje genérico: no se distingue firma inválida de caducada

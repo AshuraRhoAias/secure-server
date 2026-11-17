@@ -10,7 +10,7 @@ import { apiCall } from '@/lib/client';
 import { dateTime, relativeTime } from '@/lib/format';
 import type { ApprovalItem } from '@/lib/types';
 
-const ACTIONS: Record<string, string> = { mfa_reset: 'Reset de MFA', user_erase: 'Borrado de datos de un usuario' };
+const ACTIONS: Record<string, string> = { mfa_reset: 'Reset de MFA', user_erase: 'Borrado de datos de un usuario', user_set_role: 'Dar rol de administrador' };
 const STATUSES = [{ value: '', label: 'Todas' }, { value: 'pending', label: 'Pendientes' }, { value: 'executed', label: 'Ejecutadas' }, { value: 'rejected', label: 'Rechazadas' }, { value: 'failed', label: 'Fallidas' }];
 
 export default function ApprovalsPage() {
