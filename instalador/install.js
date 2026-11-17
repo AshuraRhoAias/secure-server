@@ -8,13 +8,13 @@
  * No añade dependencias: usa sólo módulos nativos de Node (>=22; 18 y 20 ya no tienen soporte).
  *
  * Uso:
- *   node install.js                 # modo interactivo (pregunta el SO)
- *   node install.js --os linux      # sin preguntar
- *   node install.js --os windows
- *   node install.js --os macos
- *   node install.js --yes           # acepta pasos opcionales (toolset de seguridad)
- *   node install.js --no-tools      # omite el toolset de seguridad de PruebasLinux
- *   node install.js --help
+ *   node instalador/install.js                 # modo interactivo (pregunta el SO)
+ *   node instalador/install.js --os linux      # sin preguntar
+ *   node instalador/install.js --os windows
+ *   node instalador/install.js --os macos
+ *   node instalador/install.js --yes           # acepta pasos opcionales (toolset de seguridad)
+ *   node instalador/install.js --no-tools      # omite el toolset de seguridad de PruebasLinux
+ *   node instalador/install.js --help
  */
 'use strict';
 
@@ -24,7 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const ROOT = __dirname;
+const ROOT = path.join(__dirname, '..'); // install.js vive en instalador/
 const isTTY = process.stdout.isTTY;
 
 // ---- Colores (desactivados sin TTY o con NO_COLOR) ----
@@ -55,14 +55,14 @@ function parseArgs(argv) {
 function usage() {
   log(`Instalador de secure-server
 
-  node install.js                 Modo interactivo (pregunta Windows/Linux/macOS)
-  node install.js --os linux      Instala para Linux sin preguntar
-  node install.js --os windows    Instala para Windows sin preguntar
-  node install.js --os macos      Instala para macOS sin preguntar
+  node instalador/install.js                 Modo interactivo (pregunta Windows/Linux/macOS)
+  node instalador/install.js --os linux      Instala para Linux sin preguntar
+  node instalador/install.js --os windows    Instala para Windows sin preguntar
+  node instalador/install.js --os macos      Instala para macOS sin preguntar
   (Node, MariaDB y ClamAV: instalar.cmd / bash instalar.sh)
-  node install.js --yes           Acepta pasos opcionales (toolset de seguridad)
-  node install.js --no-tools      Omite el toolset de PruebasLinux
-  node install.js --help          Esta ayuda`);
+  node instalador/install.js --yes           Acepta pasos opcionales (toolset de seguridad)
+  node instalador/install.js --no-tools      Omite el toolset de PruebasLinux
+  node instalador/install.js --help          Esta ayuda`);
 }
 
 // ---- Prompt (readline) ----

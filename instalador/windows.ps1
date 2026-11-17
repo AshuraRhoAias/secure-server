@@ -177,7 +177,7 @@ try {
         Paso 'Dependencias del proyecto (npm)'
         Push-Location $Root
         try {
-            & node install.js --os windows --no-tools
+            & node instalador/install.js --os windows --no-tools
             if ($LASTEXITCODE -ne 0) { throw 'install.js falló' }
             if (Preguntar '¿Instalar también la interfaz web (web\)?' $true) {
                 Push-Location web; & npm.cmd ci --no-audit --no-fund; $rc = $LASTEXITCODE; Pop-Location

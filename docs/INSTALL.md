@@ -23,7 +23,7 @@ desde otro sistema indica cómo hacerlo en el Mac. Sin preguntar: `instalar.cmd 
 | Node.js ≥ 22 | `OpenJS.NodeJS.LTS` | NodeSource 22 (apt, con su clave) · `nodejs` (dnf/pacman) | `node@22` |
 | MariaDB | `MariaDB.Server` (instalador gráfico: **tú** eliges la contraseña de root) | `mariadb-server` + servicio | `mariadb` + `brew services` |
 | ClamAV | `Cisco.ClamAV`; servicios **ClamD** y **FreshClam** | `clamav-daemon` / `clamd@scan` / `clamav-daemon` + freshclam (systemd) | `clamav`; agentes de launchd `com.secure-server.clamd` y `.freshclam` |
-| npm | `install.js` (+ `web/` si quieres) | igual | igual |
+| npm | `instalador/install.js` (+ `web/` si quieres) | igual | igual |
 
 Lo ya instalado se respeta (se puede repetir sin romper nada). Cada ejecución deja un registro en `instalador/registros/`.
 Opcionalmente crea las **bases y el usuario de pruebas** con `database/setup-local.sql` (pregunta antes; la contraseña de root
@@ -60,7 +60,7 @@ local**, nunca hacia fuera, y con `StreamMaxLength 25M` (= `CLAMAV_MAX_BYTES`).
 | `-SinMariaDB` · `-SinClamAV` · `-SinNpm` | `--sin-mariadb` · `--sin-clamav` · `--sin-npm` | omite ese bloque |
 | `-InicioClamd auto\|manual` | — | arranque del servicio ClamD |
 
-`node install.js [--os windows|linux|macos] [--yes] [--no-tools] [--production]` es solo el paso de npm/.env (lo llaman los
+`node instalador/install.js [--os windows|linux|macos] [--yes] [--no-tools] [--production]` es solo el paso de npm/.env (lo llaman los
 tres instaladores). `install.sh` e `install.ps1` se mantienen por compatibilidad y llevan al instalador nuevo.
 
 ## Después de instalar
