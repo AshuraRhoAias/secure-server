@@ -1,7 +1,7 @@
 # Graph Report - secure-server  (2026-11-17)
 
 ## Corpus Check
-- 274 files · ~265,946 words
+- 274 files · ~266,832 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 14 file(s) not represented in the graph (top: (none) 7, .example 3, .conf 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2a890b14`
+- Built from commit: `a248917e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -223,17 +223,17 @@
 7. `x-api-env` - 26 edges
 8. `environment` - 26 edges
 9. `normalizeIp()` - 25 edges
-10. `registerAndLogin()` - 21 edges
+10. `apiCall()` - 21 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Instalacion de secure-server (Windows, Linux, macOS)` --references--> `secure-server API`  [INFERRED]
   docs/INSTALL.md → README.md
+- `newDetector()` --calls--> `IcmpCovertChannelDetector`  [EXTRACTED]
+  test/test_icmp.js → src/security/icmp-covert-channel.service.js
 - `freshWorld()` --calls--> `RotationService`  [EXTRACTED]
   test/test_rotation.js → src/maintenance/rotation.service.js
 - `runRotationChild()` --calls--> `resolve()`  [EXTRACTED]
   test/test_rotation.js → src/security/alerts.service.js
-- `newDetector()` --calls--> `IcmpCovertChannelDetector`  [EXTRACTED]
-  test/test_icmp.js → src/security/icmp-covert-channel.service.js
 - `highRules()` --calls--> `scanText()`  [EXTRACTED]
   test/test_security.js → src/security/injection-detector.js
 
@@ -836,7 +836,7 @@ Nodes (3): engines, node, npm
   docs/historico/GUIA-ORIGINAL.md · relation: calls
 
 ## Knowledge Gaps
-- **71 isolated node(s):** `RFC-6238`, `RFC-4226`, `RFC-5737`, `RFC-6238`, `Credenciales fragmentadas en variables de entorno (DB_FRAGMENT_1..3)` (+66 more)
+- **71 isolated node(s):** `RFC-5737`, `RFC-4226`, `RFC-6238`, `RFC-6238`, `Credenciales fragmentadas en variables de entorno (DB_FRAGMENT_1..3)` (+66 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1410 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **58 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -844,17 +844,17 @@ Nodes (3): engines, node, npm
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `scripts` connect `Módulo package.json` to `package.json`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
-- **What connects `RFC-6238`, `RFC-4226`, `RFC-5737` to the rest of the system?**
+  _High betweenness centrality (0.018) - this node is a cross-community bridge._
+- **What connects `RFC-5737`, `RFC-4226`, `RFC-6238` to the rest of the system?**
   _71 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Módulo historico/GUIA-ORIGINAL.md` be split into smaller, more focused modules?**
   _Cohesion score 0.05010351966873706 - nodes in this community are weakly interconnected._
-- **Why does `SystemController` connect `Módulo controllers/system.controller.js` to `security-events.service.js`, `secure-auth.service.js`, `Módulo config/secure-env.js`, `Módulo security/icmp-covert-channel.service.js`?**
-  _High betweenness centrality (0.010) - this node is a cross-community bridge._
+- **Why does `SecureCommunications` connect `Módulo services/secure-communications.service.js` to `test_ops.js`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Should `Módulo services/secure-communications.service.js` be split into smaller, more focused modules?**
   _Cohesion score 0.11494252873563218 - nodes in this community are weakly interconnected._
-- **Why does `express` connect `Módulo routes/metrics.routes.js` to `Módulo files/file-types.js`, `Módulo helpers/app.js`, `package.json`, `Módulo test/test_rotation.js`, `Módulo routes/notes.routes.js`, `Módulo test/test_api.js`, `package.json`, `Módulo src/index.js`?**
-  _High betweenness centrality (0.010) - this node is a cross-community bridge._
+- **Why does `ServerCheckMiddleware` connect `test_ops.js` to `tripleEncryptor.js`?**
+  _High betweenness centrality (0.013) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

@@ -49,6 +49,10 @@
   `GET /api/system/stream` como admin y el cliente de pruebas esperaba un cuerpo que no termina nunca. El helper `api()` ahora corta las
   respuestas `text/event-stream`. Resultado **solo en local**: `test:all` 614/615 (1 omitida por SIGHUP) en 699 s; `web/` typecheck,
   57/57 y build. Revisados también los commits de TLS de MariaDB y del usuario `secure_app` (PR #42), sin defectos.
+- **CI de nuevo en verde 2026-11-17 (#38, §P):** los jobs no arrancaban por la facturación de la cuenta (repositorio privado); con el
+  repositorio público vuelven a correr. El job `web` fallaba al instalar los navegadores porque `ubuntu-latest` ya es Ubuntu 26 y
+  Playwright 1.56 no lo soporta: queda fijado a `ubuntu-24.04`. Resultado en GitHub (`a248917`): `test` (MariaDB 10.11, cobertura y fuzz),
+  `web` (e2e en Chromium, Firefox y WebKit + axe), `compose`, `pruebaslinux` y `production-install` **en verde**. `Security`, pendiente del PR.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -232,9 +236,9 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente), `.env` versionado y, en local, claves `legacy` sin `KEY_EPOCH` (#33) |
 | Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
 | Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
-| Pruebas automatizadas | Parcial (local; CI sin comprobar tras #35) | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | 615 API + 57 web + e2e; en local `test:all` completo 614/615 (1 omitida: SIGHUP en Windows) con `test_fuzz.js` 18/18 (#37); `web/` typecheck, 57/57 y build en local (#37); e2e sin ejecutar |
+| Pruebas automatizadas | Evaluado (CI en verde, #38) | 9 | 8 | 8 | 8 | — | 9 | 8 | **8,3** | 615 API + 57 web + e2e; CI `a248917`: `test` (MariaDB 10.11, cobertura y fuzz), `web` (e2e en 3 navegadores + axe), `compose`, `pruebaslinux` en verde; en local `test:all` 614/615 (#37) |
 | Interfaz web | Evaluado (CI: e2e en 3 navegadores + axe) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
-| Infraestructura / Docker | Parcial (CI hasta #34; imágenes nuevas de #35 sin probar) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
+| Infraestructura / Docker | Evaluado (CI `compose` en verde con las imágenes de #35 y la ruta `test/`, #38) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
 | PruebasLinux | Evaluado (local y CI) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
 | Documentación | Evaluado | 9 | — | 8 | — | — | 8 | 9 | **8,5** | README 4979→560 líneas, histórico separado, tabla de endpoints con prueba |
 
@@ -256,6 +260,11 @@ Docker/compose no se probó con la nueva ruta `test/`.
 **Actualización 2026-11-17 (#37, cuelgue de `test_fuzz.js`):** Pruebas automatizadas sube de T 7 a 8 (8,0 → **8,2**) porque `test:all`
 vuelve a terminar en local (614/615, 1 omitida por SIGHUP en Windows) y `web/` pasa typecheck, 57/57 y build. Sigue en «Parcial»: la
 evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha comprobado. La media no cambia (**≈ 8,1/10**).
+
+**Actualización 2026-11-17 (#38, CI de nuevo en verde):** con el repositorio público vuelven a ejecutarse los jobs y todo el CI pasa en
+`a248917`. Pruebas automatizadas pasa a «Evaluado» y T 8 → 9 (**8,3**); Infraestructura / Docker pasa a «Evaluado» (`compose` en verde
+con la ruta `test/`), sin cambiar notas. La media sigue en **≈ 8,1/10**. `Security` (CodeQL, gitleaks, SBOM, DAST) no se ha ejecutado aún:
+solo corre en PR o en push a `main`.
 
 ---
 
@@ -279,7 +288,9 @@ evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha compr
 | Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4) | `npm audit` tras #35; GitHub avisó de 2 moderadas en `main` (no se pudo ver la página; probablemente los dos advisories de minimatch/glob) | Solo herramientas de desarrollo, no producción | Exige versión mayor (minimatch 11 / glob >14.0.1) o volver a `c8` 9.1.0; posible `overrides` | Abierto (decisión del propietario) |
 | Baja | 3 actualizaciones aparcadas: `mariadb` 10.11→13.0 en `deploy/`, imagen `node` 22→26-bookworm-slim, `actions/upload-artifact` 4→7 | Dependabot (#35) | El CI usa MariaDB 10.11 a propósito | Decidir cada una | Abierto (decisión del propietario) |
 | Baja | Commit `5ee29e5` sin fusionar (token de cliente diario, `capacity.js`, optimización de `level3.js`) | Etiqueta `archivo/project-thread-qjkfd0` (#35) | Trabajo conservado pero fuera de `main` | Decidir si se rescata o se descarta | Abierto (decisión del propietario) |
-| Alta | CI de GitHub caído por la cuenta: los jobs fallan en 1–2 s (también `Security`, que no cambió) y `compose` no se ha probado con la ruta `test/` | Ejecuciones de Actions tras #36 | Nada del CI está verificado desde #35 | Resolver cuenta/facturación de Actions y relanzar | Abierto (propietario) |
+| Alta | CI de GitHub caído por la cuenta: los jobs no llegaban a arrancar («recent account payments have failed or your spending limit needs to be increased»; el repositorio era privado) | Anotaciones de los check-runs (#38) | Nada del CI verificado desde #35 | El propietario hizo público el repositorio; además el job `web` se fijó a `ubuntu-24.04` (Playwright 1.56 no instala dependencias en Ubuntu 26) | **Cerrado (#38): CI en verde en `a248917`** |
+| Media | `Security` (CodeQL, gitleaks, SBOM, DAST) sin ejecutar desde que volvió el CI | Solo corre en PR o en push a `main` (#38) | Análisis de seguridad sin evidencia reciente | Abrir el PR de `ci/revision` y revisar su resultado | Abierto |
+| Baja | Playwright fijado en 1.56.1 obliga a usar `ubuntu-24.04` en el job `web` | #38 | Al retirar 24.04 de los runners, el job fallaría | Subir Playwright a una versión que soporte Ubuntu 26 y volver a `ubuntu-latest` | Abierto |
 | Baja | `install.sh`, `install.ps1` (atajos que solo redirigen) y `security.config.js` (sin importadores; objeto estático de 2025) siguen en la raíz | Raíz tras #36 | Ruido y código muerto | Borrarlos o mantenerlos | Abierto (decisión del propietario) |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
 | Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
@@ -357,7 +368,15 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 
 | Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
 |---|---|---|---|---|---|
-| #37 · (este commit) | — | `test/helpers/app.js` (`api()` corta respuestas SSE), `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | `test_fuzz.js` se colgaba al abrir `GET /api/system/stream` como admin | Local: `test_fuzz.js` 18/18 (105 s), `test:all` 614/615, lint 0, `test:api` 20/20, `web/` typecheck + 57/57 + build |
+| #37 · `a64e066` | — | `test/helpers/app.js` (`api()` corta respuestas SSE), `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | `test_fuzz.js` se colgaba al abrir `GET /api/system/stream` como admin | Local: `test_fuzz.js` 18/18 (105 s), `test:all` 614/615, lint 0, `test:api` 20/20, `web/` typecheck + 57/57 + build |
+
+### Intervención 12 (17-nov, CI de GitHub, rama `ci/revision`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #38 · `14a4cbf` | — | `.github/workflows/ci.yml` (comentario de `production-install` en su job) | — | Comentario mal colocado | CI: todo en verde salvo `web` (instalación de Playwright en Ubuntu 26) |
+| #38 · `a248917` | — | `.github/workflows/ci.yml` (`web` en `ubuntu-24.04`; anotación si falla la instalación de navegadores) | — | `ubuntu-latest` es Ubuntu 26 y Playwright 1.56 no instala allí | CI: `test`, `web`, `compose`, `pruebaslinux`, `production-install` en verde |
+| #38 · (este commit) | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora de la entrega | — |
 
 ---
 
@@ -374,6 +393,8 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 - ✅ Raíz ordenada: de 49 a 20 archivos versionados (pruebas en `test/`, documentación en `docs/`, instalador en `instalador/`), sin
   cambios de comportamiento; verificada **solo en local** (#36).
 - ✅ Cuelgue de `test_fuzz.js` resuelto: `test:all` termina en local con 614/615 (#37, **solo local**).
+- ✅ CI de GitHub de nuevo en verde (`test`, `web`, `compose`, `pruebaslinux`, `production-install`) tras hacer público el repositorio y
+  fijar `web` a `ubuntu-24.04` (#38).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -389,8 +410,8 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 8. **ASVS pendientes**: HIBP, límite de sesiones, versionado de API, multi-organización · media.
 9. `.env` fuera del repositorio cuando deje de ser de pruebas · alta antes de producción.
 10. **Instaladores de Linux y macOS ejecutados** en equipos reales o en el CI · media · `linux.sh --si` termina con EICAR detectado.
-11. **Comprobar el CI de `main` tras #35** (jobs `test`, `web`, `compose`, `pruebaslinux`, `production-install`, `dependency-review` v5) y
-    `web/` en local (typecheck, build, e2e) · alta · todo en verde o fallos anotados.
+11. ~~**Comprobar el CI tras #35**~~ · hecho en #38: todo el CI en verde en `a248917`. Queda ejecutar `Security` (al abrir el PR) y subir
+    Playwright para volver a `ubuntu-latest` · media.
 12. ~~**Investigar el cuelgue de `test_fuzz.js`**~~ · hecho en #37 (solo local): `test:all` y `coverage` terminan con 614/615 (1 omitida por SIGHUP); `check-coverage` pasa.
 13. **Decidir las 5 moderadas de desarrollo** (`overrides` de minimatch/glob o `c8` 9.1.0), **las 3 actualizaciones aparcadas** y **el
     commit archivado** · baja · decisión del propietario anotada.
@@ -900,7 +921,7 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
 
 ---
 
-## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js` y revisión del código (#37)
+## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código y CI de GitHub (#37–#38)
 
 Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusionado).
 
@@ -937,3 +958,31 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
   decidir `install.sh`, `install.ps1` y `security.config.js`; aviso de Next sobre `turbopack.root` (inocuo); la rama `fix/db-tls` tiene
   un commit solo del grafo (`550227a`) sin pasar a `main`.
   **Siguiente mejora:** comprobar el CI de `main` (jobs `test`, `web`, `compose`) y ejecutar los e2e de `web/` en local. *(Alta.)*
+
+### #38 — CI de GitHub de nuevo en verde (verificado en GitHub)
+- **Estado:** completado. Todos los jobs de `CI` pasan en `a248917` (rama `ci/revision`); `Security` aún sin ejecutar (solo en PR o en
+  push a `main`).
+- **Archivos y módulos revisados:** `.github/workflows/ci.yml`, `fuzz.yml`, `security.yml` (YAML válido, acciones fijadas por SHA,
+  permisos mínimos, `timeout-minutes` en todos los jobs), `.github/scripts/annotate-log.sh`, `.github/dependabot.yml`; anotaciones de los
+  check-runs de las ejecuciones fallidas desde #35.
+- **Problema detectado:** (1) desde el 16-nov ningún job arrancaba (0 pasos, sin runner, 2 s). La anotación de GitHub lo explica: «The job
+  was not started because recent account payments have failed or your spending limit needs to be increased»; el repositorio era privado,
+  así que Actions consumía minutos de pago. (2) Con el CI de vuelta, el job `web` fallaba en «Navegadores de Playwright»: `ubuntu-latest`
+  pasó a Ubuntu 26 el 19-oct y Playwright 1.56.1 (fijado) no sabe instalar allí las dependencias. Ese paso no publicaba anotación, así que el
+  motivo no se podía leer sin sesión. (3) En `ci.yml`, el comentario de `production-install` estaba encima de `pruebaslinux`.
+- **Acciones realizadas:** el propietario hizo público el repositorio (los runners estándar son gratuitos en repositorios públicos). Job
+  `web` fijado a `ubuntu-24.04`, con un comentario que explica cuándo volver a `ubuntu-latest`. La instalación de navegadores guarda su
+  registro y, si falla, publica las últimas 40 líneas como anotación. Comentario de `production-install` movido a su job.
+- **Pruebas ejecutadas:** **en GitHub**, ejecución de `a248917`: `test` (MariaDB 10.11, `npm run coverage` con `test_fuzz.js` y umbral de
+  cobertura, `npm audit` de producción), `web` (typecheck, 57 unitarias, build, e2e en Chromium, Firefox y WebKit + axe), `compose`
+  (2 réplicas + nginx + MariaDB + SeaweedFS), `pruebaslinux` (invariantes + Semgrep), `production-install`: **todos en verde**;
+  `dependency-review` omitido (solo en PR). La ejecución anterior (`14a4cbf`) ya tenía todo en verde salvo `web`. En local: YAML de los
+  tres workflows validado, `check:prod-deps` limpio, `npm audit --omit=dev --audit-level=high` sin hallazgos en la raíz ni en `web/`,
+  invariantes 119–121 y 124 de PruebasLinux en OK, `npm run dev` se niega con `NODE_ENV=production`.
+  **No verificado:** el workflow `Security` (CodeQL, gitleaks, SBOM, DAST) y el `Fuzzing` nocturno, que no han corrido desde que volvió el CI.
+- **Puntuación:** 9/10 — el CI completo vuelve a estar en verde con evidencia en GitHub y los fallos de instalación quedan legibles; falta
+  ver `Security`.
+- **Problemas restantes:** ejecutar `Security` (al abrir el PR); Playwright 1.56 obliga a seguir en `ubuntu-24.04`; 1 moderada de
+  Dependabot en `main` (según el aviso de `git push`; en local, las 5 moderadas de desarrollo ya conocidas); decidir `install.sh`,
+  `install.ps1` y `security.config.js`.
+  **Siguiente mejora:** abrir el PR de `ci/revision` para que corra `Security` y revisar su resultado; luego subir Playwright. *(Alta.)*
