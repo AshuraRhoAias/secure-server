@@ -146,7 +146,6 @@ jobs:
         if: failure()
         run: grep -E -A30 "not ok" "$RUNNER_TEMP/e2e.log" | grep -vE "^ *(type|duration_ms|failureType|location):" | head -150 | bash .github/scripts/annotate-log.sh - "web e2e" 150
 
-  # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   # Entorno independiente de pruebas de seguridad (PruebasLinux): perfil seguro (repositorio y localhost) como informe, y las
   # comprobaciones de invariantes y Semgrep con reglas propias como puerta (fallan si algo se deshace).
   pruebaslinux:
@@ -236,6 +235,7 @@ jobs:
         if: always()
         run: docker compose -f deploy/docker-compose.yml --env-file deploy/compose.env down -v
 
+  # Lo que se despliega: instalación SOLO de producción, sin herramientas de desarrollo, y el servidor arranca así
   production-install:
     runs-on: ubuntu-latest
     timeout-minutes: 10
