@@ -1057,10 +1057,10 @@
     "semantic_hash": "68d81b4d7f943280a5a0555934bd4bff"
   },
   "web/src/components/Shell.tsx": {
-    "mtime": 1794328705.839508,
-    "seen": 1794342065.8991714,
-    "ast_hash": "29e1a33d4293c6e9b00008b3c28b8971",
-    "semantic_hash": "29e1a33d4293c6e9b00008b3c28b8971"
+    "mtime": 1794952468.1476855,
+    "seen": 1794952847.1518576,
+    "ast_hash": "9f8ee96443521d9476a359e763d19526",
+    "semantic_hash": ""
   },
   "web/src/components/Toasts.tsx": {
     "mtime": 1794232004.735973,
@@ -1717,9 +1717,9 @@
     "semantic_hash": ""
   },
   "docs/ReadmeLogsMejoras.md": {
-    "mtime": 1794943130.064456,
-    "seen": 1794943173.7054002,
-    "ast_hash": "da14a26a431ddd1e5ca0099e94f8e8bf",
+    "mtime": 1794952831.7123837,
+    "seen": 1794952847.1518576,
+    "ast_hash": "96e1f1135ae0ab59c2bca2513879fdb4",
     "semantic_hash": ""
   },
   "instalador/install.js": {
@@ -1747,9 +1747,9 @@
     "semantic_hash": ""
   },
   "web/src/components/Backdrop3D.tsx": {
-    "mtime": 1794947703.300547,
-    "seen": 1794947972.5749204,
-    "ast_hash": "963aaf1747b31576705e7ad6075f7317",
+    "mtime": 1794952406.4314945,
+    "seen": 1794952847.1518576,
+    "ast_hash": "a80d9ac0f1e5ff8ae1f49b0eaf0e1a64",
     "semantic_hash": ""
   },
   "package-lock.json": {

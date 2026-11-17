@@ -5,7 +5,10 @@ import { useEffect, useRef } from 'react';
 // Fondo decorativo en 3D (Three.js) DETRÁS de un velo opaco: formas que flotan y giran despacio con los colores del tema.
 // - Solo decoración: aria-hidden, sin foco ni eventos; el contenido sigue legible porque el velo (.backdrop-veil) lo tapa casi entero.
 // - Sin WebGL no se crea nada (se comprueba ANTES de cargar three: su renderer escribe console.error si falla, y los e2e lo vigilan).
-// - prefers-reduced-motion: un solo fotograma estático. Pestaña oculta: se para el bucle.
+// - Movimiento (data-motion en <html>, botón «Movimiento» de Shell, guardado en localStorage 'ops-motion'):
+//     on  = animación completa aunque el sistema pida reducir; off = un fotograma fijo;
+//     auto (sin atributo) = completa, o lenta (30 %, sin paralaje) si el sistema pide reducir movimiento.
+//   Pestaña oculta: se para el bucle.
 // - Sin estilos en línea en el marcado (la CSP lo prohíbe): el canvas se coloca con la clase .backdrop-3d.
 
 type Palette = { a: string; b: string; c: string; d: string };
@@ -14,6 +17,22 @@ function readPalette(): Palette {
   const css = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
   return { a: v('--accent', '#2456d6'), b: v('--chart-2', '#1a7f46'), c: v('--chart-3', '#b54708'), d: v('--low', '#1d6b7a') };
+}
+
+const MOTION_KEY = 'ops-motion';
+export type MotionPref = 'auto' | 'on' | 'off';
+
+// Aplica la preferencia guardada al <html> (también en /login, que no tiene Shell)
+export function applyStoredMotion(): MotionPref {
+  let pref: MotionPref = 'auto';
+  try { const saved = window.localStorage.getItem(MOTION_KEY); if (saved === 'on' || saved === 'off') pref = saved; } catch { /* sin almacenamiento */ }
+  if (pref === 'auto') delete document.documentElement.dataset.motion; else document.documentElement.dataset.motion = pref;
+  return pref;
+}
+
+export function storeMotion(pref: MotionPref) {
+  try { if (pref === 'auto') window.localStorage.removeItem(MOTION_KEY); else window.localStorage.setItem(MOTION_KEY, pref); } catch { /* sin almacenamiento */ }
+  if (pref === 'auto') delete document.documentElement.dataset.motion; else document.documentElement.dataset.motion = pref;
 }
 
 function webglAvailable(): boolean {
@@ -33,6 +52,7 @@ export function Backdrop3D() {
 
   useEffect(() => {
     const container = host.current;
+    applyStoredMotion();
     if (!container || !webglAvailable()) return;
     let disposed = false;
     let cleanup: (() => void) | null = null;
@@ -115,13 +135,23 @@ export function Backdrop3D() {
 
       // Tiempo propio (THREE.Clock está obsoleto y getElapsedTime() reinicia el delta)
       let frame = 0, last = performance.now(), t = 0;
+      // Velocidad según la preferencia: 0 = fijo, 0.3 = lento (sistema pide reducir), 1 = completo
+      const speed = () => {
+        const pref = document.documentElement.dataset.motion;
+        if (pref === 'off') return 0;
+        if (pref === 'on') return 1;
+        return reduced.matches ? 0.3 : 1;
+      };
       const tick = () => {
         const now = performance.now();
-        const dt = Math.min((now - last) / 1000, 0.05);
+        const k = speed();
+        const dt = Math.min((now - last) / 1000, 0.05) * k;
         last = now;
         t += dt;
-        pointer.x += (pointer.tx - pointer.x) * 0.04;
-        pointer.y += (pointer.ty - pointer.y) * 0.04;
+        // Paralaje del puntero solo con movimiento completo
+        const follow = k >= 1 ? 1 : 0;
+        pointer.x += (pointer.tx * follow - pointer.x) * 0.04;
+        pointer.y += (pointer.ty * follow - pointer.y) * 0.04;
         for (const s of shapes) {
           s.group.rotation.x += s.spin[0] * dt * 2;
           s.group.rotation.y += s.spin[1] * dt * 2;
@@ -134,14 +164,15 @@ export function Backdrop3D() {
         renderer.render(scene, camera);
         frame = window.requestAnimationFrame(tick);
       };
-      const start = () => { if (!frame && !reduced.matches && !document.hidden) { last = performance.now(); frame = window.requestAnimationFrame(tick); } };
+      const start = () => { if (!frame && speed() > 0 && !document.hidden) { last = performance.now(); frame = window.requestAnimationFrame(tick); } };
       const stop = () => { if (frame) window.cancelAnimationFrame(frame); frame = 0; };
       const onVisibility = () => (document.hidden ? stop() : start());
-      const onMotion = () => { if (reduced.matches) { stop(); renderer.render(scene, camera); } else start(); };
+      const onMotion = () => { if (speed() === 0) { stop(); renderer.render(scene, camera); } else start(); };
 
       // El tema cambia con data-theme en <html> (Shell) o con la preferencia del sistema
-      const themeObserver = new MutationObserver(() => { applyPalette(); if (!frame) renderer.render(scene, camera); });
-      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      // data-theme: recolorea; data-motion: arranca o para el bucle
+      const themeObserver = new MutationObserver(() => { applyPalette(); onMotion(); if (!frame) renderer.render(scene, camera); });
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-motion'] });
       const scheme = window.matchMedia('(prefers-color-scheme: dark)');
       const onScheme = () => { applyPalette(); if (!frame) renderer.render(scene, camera); };
 

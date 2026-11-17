@@ -58,7 +58,10 @@ code, .mono { font-family: var(--mono); font-size: 0.86em; }
   .menu-button { display: inline-flex; }
   .main { padding: 16px 14px 40px; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+/* Movimiento: el sistema pide reducir → sin animaciones CSS, salvo que el usuario elija «activado» (data-motion='on', botón
+   «Movimiento»); «reducido» (data-motion='off') las quita siempre. El fondo 3D lo decide Backdrop3D (lento en vez de fijo). */
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion='on']) * { transition: none !important; animation: none !important; } }
+:root[data-motion='off'] * { transition: none !important; animation: none !important; }
 
 /* ---------- componentes ---------- */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); min-width: 0; }

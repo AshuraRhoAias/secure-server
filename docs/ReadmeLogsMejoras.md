@@ -1067,6 +1067,10 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
   degradado (`useId`) que crecen; títulos con degradado (con alternativa en `forced-colors`); Inter y JetBrains Mono con `next/font`
   (autoalojadas: cumplen `font-src 'self'`); transiciones de página y de tema. Nada de estilos en línea en el marcado. Revisión de
   `ecc:react-reviewer` (aprobado; se aplicaron sus avisos). E2E: `freshToken()` renueva el token justo antes de llamar al API.
+  **Movimiento:** en el equipo del propietario Windows tiene «Efectos de animación» desactivado, así que el navegador informa
+  `prefers-reduced-motion: reduce` y todo quedaba quieto. Nuevo botón «Movimiento» (auto / activado / reducido, guardado en
+  `localStorage` y aplicado también en `/login`): en auto con reducir movimiento el fondo 3D sigue moviéndose despacio (30 %, sin
+  paralaje) y las animaciones CSS se apagan; «activado» lo anima todo; «reducido» lo deja fijo. Comprobado comparando capturas.
 - **Pruebas ejecutadas:** local: typecheck, `npm test` 57/57, `npm run build` sin avisos; navegador (Chrome con DevTools): login y panel
   en tema oscuro y claro, formas recoloreadas al cambiar de tema, Inter cargada, sin errores de la aplicación en consola. **GitHub
   (`b42d12a`): `web` (e2e en Chromium, Firefox y WebKit + axe), `test`, `compose`, `pruebaslinux`, `production-install` en verde.**

@@ -1,44 +1,44 @@
 # Graph Report - secure-server  (2026-11-17)
 
 ## Corpus Check
-- 275 files · ~270,451 words
+- 275 files · ~271,527 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 14 file(s) not represented in the graph (top: (none) 7, .example 3, .conf 1)
 
 ## Summary
-- 3248 nodes · 5981 edges · 185 communities (135 shown, 50 thin omitted)
+- 3252 nodes · 5993 edges · 202 communities (150 shown, 52 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 272 edges (avg confidence: 0.84)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b0503e43`
+- Built from commit: `de6a4f96`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- Módulo historico/GUIA-ORIGINAL.md
+- TripleEncryptor (src/crypto/tripleEncryptor.js)
 - Módulo services/secure-communications.service.js
 - Módulo package.json
 - test_security.js
 - dependencies
 - Módulo e2e-support/harness.cjs
 - SecurityAudit
-- Módulo security/webauthn.service.js
+- webauthn.service.js
 - test_rbac.js
 - test_ops.js
 - Módulo lib/core.sh
 - Módulo test/test_rotation.js
 - files-backup.js
 - test_av.js
-- Módulo security/icmp-covert-channel.service.js
+- test_icmp.js
 - Módulo lib/bff.ts
 - Módulo workflows/fuzz.yml
 - Módulo lib/sso-passkey-stream.test.ts
 - Módulo web/README.md
 - test_kms.js
 - scripts/kms.js
-- AuthError
-- test_saml.js
+- storage.js
+- Shell.tsx
 - Módulo web/package.json
 - Módulo controllers/auth.controller.js
 - secure-auth.service.js
@@ -60,7 +60,7 @@
 - credential-builder.js
 - Módulo test/test_scale.js
 - Módulo deploy/docker-compose.yml (2)
-- Módulo docs/ReadmeLogsMejoras.md
+- Registro de problemas y tareas pendientes (seccion D)
 - (ops)/page.tsx
 - stress-api.js
 - Módulo lib/sso.ts
@@ -73,26 +73,26 @@
 - Módulo scripts/rotateKeys.js
 - Módulo security/alerts.service.js
 - mock-kms-server.js
-- sessionCookieName
+- session.ts
 - Módulo package.json (3)
 - @aws-sdk/client-kms
-- AuthMiddleware
+- metrics.routes.js
 - key-provider.js
 - Módulo src/index.js
 - securityHousekeeping.js
 - Módulo modules/03_dns_http_tls.sh
 - sanitize.js
-- system.controller.js
+- approvals/page.tsx
 - Módulo config/database.js
 - engines
 - cors
 - Módulo helpers/app.js
 - Módulo rules/semgrep-node.yml
 - scripts/kms.js
-- Módulo security/mfa.service.js
+- secure-auth.service.js
 - Módulo test/test_files_backup.js
 - Módulo stream/route.ts
-- live-stream.js
+- events/page.tsx
 - crypto/kms.js
 - Módulo test/test_sso.js
 - express
@@ -101,11 +101,11 @@
 - securityAudit.js
 - Módulo deploy/docker-compose.yml (3)
 - Módulo workflows/ci.yml
-- Exporter
+- file-cipher.js
 - Módulo src/index.js (2)
 - protection.middleware.js
 - Módulo test/test_compose.js
-- registerAndLogin
+- Backdrop3D.tsx
 - Módulo benchmarks/scale-bench.js
 - Módulo docs/CONTROLES.md
 - package.json
@@ -115,7 +115,7 @@
 - Módulo deploy/docker-compose.yml (4)
 - Módulo workflows/ci.yml (2)
 - Módulo workflows/security.yml
-- Módulo config/secure-env.js
+- maintenance/index.js
 - emergencyRecovery.js
 - Módulo maintenance/guard.js
 - test_files_s3.js
@@ -143,7 +143,7 @@
 - geoip-lite
 - Módulo controllers/notes.controller.js
 - ref_child_process
-- buildApp
+- Guía de instalación original (agosto 2025, histórica)
 - Módulo workflows/ci.yml (4)
 - Módulo workflows/ci.yml (5)
 - Módulo workflows/security.yml (3)
@@ -180,21 +180,37 @@
 - level3.js
 - speakeasy@^2.0.0
 - ref_http
+- icmpMonitor.js
 - Módulo codeql/codeql-config.yml
+- apiCall
 - Módulo docs/INSTALL.md
 - Módulo docs/SEGURIDAD.md
 - Módulo package.json (4)
-- ref_crypto
+- rotation.service.js
+- FilesController
 - Módulo workflows/ci.yml (7)
 - Módulo instalar.sh
+- SoftAuthenticator
 - Módulo .claude/CLAUDE.md
 - Módulo docs/ReadmeLogsMejoras.md (2)
 - Módulo docs/SEGURIDAD.md (2)
 - Módulo scripts/annotate-log.sh
 - Módulo install.sh
 - test-exclude
+- SEGURIDAD.md (seguridad, archivos y anomalias)
+- file-types.js
+- LeaderElection
 - node-cron
 - @xmldom/xmldom
+- alerts/page.tsx
+- pruebas.sh lanzador (menu y modo no interactivo)
+- IcmpCovertChannelDetector
+- Entrega SSO por codigo de un solo uso (SSO_HANDOFF_URL, /api/sso/exchange)
+- API de archivos /api/files (cifrado por bloque, magic bytes)
+- kms-data-keys.js
+- icmp-covert-channel.service.js
+- main
+- filesBackup.js
 - winston@^3.19.0
 
 ## God Nodes (most connected - your core abstractions)
@@ -210,16 +226,16 @@
 10. `apiCall()` - 21 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Instalacion de secure-server (Windows, Linux, macOS)` --references--> `secure-server API`  [INFERRED]
-  docs/INSTALL.md → README.md
 - `newDetector()` --calls--> `IcmpCovertChannelDetector`  [EXTRACTED]
   test/test_icmp.js → src/security/icmp-covert-channel.service.js
+- `Instalacion de secure-server (Windows, Linux, macOS)` --references--> `secure-server API`  [INFERRED]
+  docs/INSTALL.md → README.md
+- `main()` --calls--> `IcmpCovertChannelDetector`  [EXTRACTED]
+  scripts/icmpMonitor.js → src/security/icmp-covert-channel.service.js
 - `freshWorld()` --calls--> `RotationService`  [EXTRACTED]
   test/test_rotation.js → src/maintenance/rotation.service.js
-- `highRules()` --calls--> `scanText()`  [EXTRACTED]
-  test/test_security.js → src/security/injection-detector.js
-- `Catalogo de 126 opciones en 15 categorias` --references--> `Sesiones cortas: JWT 15 min + refresh token rotatorio y logout-all`  [INFERRED]
-  PruebasLinux/ReadmeLogMejoras.md → docs/SEGURIDAD.md
+- `handleAlert()` --calls--> `levelRank()`  [EXTRACTED]
+  scripts/icmpMonitor.js → src/security/icmp-covert-channel.service.js
 
 ## Import Cycles
 - 2-file cycle: `src/config/database.js -> src/observability/metrics.js -> src/config/database.js`
@@ -237,11 +253,11 @@
 - **Flujo de alertas camufladas y su recuperación** — docs_historico_guia_original_securecommunications, docs_historico_guia_original_messagedisguiser, docs_historico_guia_original_messagedecryptor, docs_historico_guia_original_credentialbuilder [INFERRED 0.85]
 - **Cadena de protección de peticiones (bloqueo IP, anomalías, JWT)** — docs_historico_guia_original_protectionmiddleware, docs_historico_guia_original_anomalydetection, docs_historico_guia_original_authmiddleware, docs_historico_guia_original_secureauthservice, docs_historico_guia_original_auth_routes [INFERRED 0.85]
 
-## Communities (185 total, 50 thin omitted)
+## Communities (202 total, 52 thin omitted)
 
-### Community 0 - "Módulo historico/GUIA-ORIGINAL.md"
-Cohesion: 0.05
-Nodes (65): AnomalyDetection (src/security/anomaly-detection.service.js), auth.routes.js (/api/auth), AuthController (register/login/logout/profile), AuthMiddleware.verifyJWT, Tabla blocked_ips, CredentialBuilder (src/config/credential-builder.js), database/schema.sql original (secure_platform), DatabaseConfig (src/config/database.js, pool mysql2) (+57 more)
+### Community 0 - "TripleEncryptor (src/crypto/tripleEncryptor.js)"
+Cohesion: 0.25
+Nodes (18): CredentialBuilder (src/config/credential-builder.js), DatabaseConfig (src/config/database.js, pool mysql2), EmergencyRecovery (scripts/emergencyRecovery.js), Credenciales fragmentadas en variables de entorno (DB_FRAGMENT_1..3), KeyRotator (src/crypto/keyRotator.js), Level1Encryption (AES-256-CBC), Level2Encryption (AES-256-GCM), Level3Encryption (ChaCha20-Poly1305) (+10 more)
 
 ### Community 1 - "Módulo services/secure-communications.service.js"
 Cohesion: 0.08
@@ -263,17 +279,17 @@ Nodes (19): dependencies, @aws-sdk/client-s3@^3.1165.0, compression@^1.8.1, cryp
 Cohesion: 0.06
 Nodes (38): assert, contexts, { createMockIdp }, crypto, fs, itE2e(), path, { SoftAuthenticator } (+30 more)
 
-### Community 7 - "Módulo security/webauthn.service.js"
-Cohesion: 0.07
-Nodes (34): beginAuthentication(), beginRegistration(), claimedChallenge(), cleanName(), config(), consumeChallenge(), countCredentials(), crypto (+26 more)
+### Community 7 - "webauthn.service.js"
+Cohesion: 0.16
+Nodes (19): beginAuthentication(), beginRegistration(), claimedChallenge(), cleanName(), config(), consumeChallenge(), countCredentials(), crypto (+11 more)
 
 ### Community 8 - "test_rbac.js"
-Cohesion: 0.17
-Nodes (8): RoleMiddleware, assert, call(), itDb(), MATRIX, test, userWithMfa(), userWithRole()
+Cohesion: 0.08
+Nodes (28): RFC-4226, main(), parseArgs(), RoleMiddleware, can(), isKnownRole(), isPrivileged(), PERMISSIONS (+20 more)
 
 ### Community 9 - "test_ops.js"
-Cohesion: 0.12
-Nodes (10): assert, call(), crypto, fs, http, itDb(), metricsText(), openStream() (+2 more)
+Cohesion: 0.08
+Nodes (23): registerAndLogin(), testIp(), actor(), assert, itDb(), RFC-6238, jwt, test (+15 more)
 
 ### Community 10 - "Módulo lib/core.sh"
 Cohesion: 0.09
@@ -284,28 +300,28 @@ Cohesion: 0.07
 Nodes (27): cutOffOnMaintenance(), resolve(), assert, connectionIdForKill(), crypto, currentKey(), DB_NAME, dbUrl (+19 more)
 
 ### Community 12 - "files-backup.js"
-Cohesion: 0.05
-Nodes (47): args, main(), option(), aadFor(), chunkCount(), cipherSize(), createDecryptStream(), crypto (+39 more)
+Cohesion: 0.22
+Nodes (19): backup(), backupPath(), backupRoot(), copyWithHash(), crypto, dbRows(), fs, listSource() (+11 more)
 
 ### Community 13 - "test_av.js"
 Cohesion: 0.05
 Nodes (36): command(), EICAR, main(), net, ClamSession, config(), connect(), enabled() (+28 more)
 
-### Community 14 - "Módulo security/icmp-covert-channel.service.js"
-Cohesion: 0.06
-Nodes (30): formatAlert(), fs, handleAlert(), main(), parseArgs(), path, readline, RISK_BY_LEVEL (+22 more)
+### Community 14 - "test_icmp.js"
+Cohesion: 0.10
+Nodes (13): fs, getNetworkPosture(), hasCapNetRaw(), pingGroupRangeMode(), assert, CHILD_PROCESS_ALLOWED, crypto, { execFileSync } (+5 more)
 
 ### Community 15 - "Módulo lib/bff.ts"
-Cohesion: 0.11
-Nodes (25): Context, DELETE, dynamic, GET, handle(), POST, dynamic, POST() (+17 more)
+Cohesion: 0.10
+Nodes (29): Context, DELETE, dynamic, GET, handle(), POST, dynamic, POST() (+21 more)
 
 ### Community 16 - "Módulo workflows/fuzz.yml"
 Cohesion: 0.06
 Nodes (35): FUZZ_RUNS, FUZZ_SEED, MARIADB_ROOT_PASSWORD, runs-on, services, steps, timeout-minutes, runs (+27 more)
 
 ### Community 17 - "Módulo lib/sso-passkey-stream.test.ts"
-Cohesion: 0.09
-Nodes (30): vitest, dynamic, POST(), login(), adminCookie(), almostExpiredCookie(), cookieOf(), issue() (+22 more)
+Cohesion: 0.10
+Nodes (25): vitest, adminCookie(), almostExpiredCookie(), cookieOf(), issue(), jwt(), post(), State (+17 more)
 
 ### Community 18 - "Módulo web/README.md"
 Cohesion: 0.07
@@ -313,54 +329,58 @@ Nodes (31): Informe de rendimiento (2026-10-21), 1M GET /health load test (2462 
 
 ### Community 19 - "test_kms.js"
 Cohesion: 0.12
-Nodes (11): assert, crypto, fs, KMS_VARS, os, path, ROOT, servers (+3 more)
+Nodes (12): assert, crypto, fs, KMS_VARS, os, path, ROOT, servers (+4 more)
 
 ### Community 20 - "scripts/kms.js"
 Cohesion: 0.15
 Nodes (15): args, commands, crypto, DEFAULT_VARS, dotenv, envFile, flag(), fs (+7 more)
 
-### Community 22 - "test_saml.js"
-Cohesion: 0.21
-Nodes (10): acsPost(), assert, begin(), configure(), crypto, itDb(), jwt, SAML_VARS (+2 more)
+### Community 21 - "storage.js"
+Cohesion: 0.15
+Nodes (24): assertName(), blob(), commit(), createTempWriteStream(), crypto, driver(), ensureDirs(), finalPath() (+16 more)
+
+### Community 22 - "Shell.tsx"
+Cohesion: 0.13
+Nodes (23): Context, KINDS, LiveAlert, LiveApi, LiveIndicator(), LiveKind, LiveMessage, LiveProvider() (+15 more)
 
 ### Community 23 - "Módulo web/package.json"
-Cohesion: 0.05
-Nodes (42): react-dom, three, @types/node, @types/react, @types/react-dom, @types/three, typescript, dependencies (+34 more)
+Cohesion: 0.07
+Nodes (33): react-dom, three, @types/node, @types/react, @types/react-dom, @types/three, typescript, dependencies (+25 more)
 
 ### Community 24 - "Módulo controllers/auth.controller.js"
-Cohesion: 0.09
-Nodes (4): AuthController, SamlController, SsoController, normalizeIp()
+Cohesion: 0.06
+Nodes (7): AuthController, SamlController, SsoController, normalizeIp(), ISSUER(), MfaError, MfaService
 
 ### Community 25 - "secure-auth.service.js"
-Cohesion: 0.14
-Nodes (11): FRAGMENTS, sqlInt(), compute(), count(), inflight, snapshot(), previousCache, RateLimiter (+3 more)
+Cohesion: 0.09
+Nodes (19): FRAGMENTS, sqlInt(), sqlPlaceholders(), config(), intEnv(), jwt, LiveStream, parseCursor() (+11 more)
 
 ### Community 26 - "Módulo helpers/mock-saml-idp.js"
-Cohesion: 0.15
-Nodes (11): crypto, { execFileSync }, fs, iso(), MockSamlIdp, newKeyPair(), os, path (+3 more)
+Cohesion: 0.09
+Nodes (21): crypto, { execFileSync }, fs, iso(), MockSamlIdp, newKeyPair(), os, path (+13 more)
 
 ### Community 27 - "Módulo lib/bff.ts (2)"
-Cohesion: 0.23
-Nodes (19): dynamic, POST(), dynamic, POST(), dynamic, POST(), completeLogin(), cookieValue() (+11 more)
+Cohesion: 0.18
+Nodes (24): dynamic, POST(), dynamic, POST(), dynamic, POST(), dynamic, POST() (+16 more)
 
 ### Community 28 - "Módulo benchmarks/loadtest.js"
 Cohesion: 0.08
 Nodes (24): agent, BODY, codes, CONC, finishOne(), fireOne(), fs, h (+16 more)
 
 ### Community 29 - "Módulo test/test_fuzz.js"
-Cohesion: 0.06
-Nodes (27): main(), parseArgs(), can(), isKnownRole(), isPrivileged(), PERMISSIONS, ROLES, anyString (+19 more)
+Cohesion: 0.07
+Nodes (20): anyString, assert, bodyValue, bytes, CONTROL, crypto, DANGEROUS, documented() (+12 more)
 
 ### Community 30 - "Módulo test/test_api.js"
 Cohesion: 0.07
 Nodes (15): currentBlock(), fs, path, render(), ROOT, assert, express, fakeDb (+7 more)
 
 ### Community 31 - "Módulo maintenance/rotation.service.js"
-Cohesion: 0.13
+Cohesion: 0.15
 Nodes (7): summarize(), applyEnvUpdates(), nowCompact(), OldKeyDecryptor, RotationService, sha256(), sleep()
 
 ### Community 32 - "Módulo maintenance/maintenance.js"
-Cohesion: 0.14
+Cohesion: 0.12
 Nodes (9): fs, isPidAlive(), path, readJsonIfExists(), writeFileAtomic(), fs, Maintenance, os (+1 more)
 
 ### Community 33 - "Módulo deploy/docker-compose.yml"
@@ -368,52 +388,52 @@ Cohesion: 0.08
 Nodes (26): x-api-env, ALLOWED_ORIGINS, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, BASE_SEED, DB_FRAGMENT_1, DB_FRAGMENT_2, DB_FRAGMENT_3 (+18 more)
 
 ### Community 34 - "Módulo observability/tracing.js"
-Cohesion: 0.19
-Nodes (14): httpMiddleware(), als, { AsyncLocalStorage }, crypto, endSpan(), exporter, hex(), middleware() (+6 more)
+Cohesion: 0.13
+Nodes (15): httpMiddleware(), als, { AsyncLocalStorage }, crypto, endSpan(), Exporter, exporter, hex() (+7 more)
 
 ### Community 35 - "ref_node_assert"
-Cohesion: 0.14
-Nodes (10): CLIENTS, resolveClient(), assert, fs, itDb(), path, test, assert (+2 more)
+Cohesion: 0.06
+Nodes (23): jsonwebtoken@^9.0.2, jsonwebtoken, CLIENTS, resolveClient(), assert, fs, itDb(), path (+15 more)
 
 ### Community 36 - "Módulo instalador/install.js"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (19): ask(), chooseOS(), errline(), fs, have(), info(), log(), main() (+11 more)
 
 ### Community 37 - "tripleEncryptor.js"
-Cohesion: 0.15
-Nodes (8): EmergencyRecovery, crypto, V4_AAD, crypto, fs, path, crypto, testSystem()
+Cohesion: 0.28
+Nodes (3): EmergencyRecovery, crypto, V4_AAD
 
 ### Community 39 - "oidc.service.js"
-Cohesion: 0.05
-Nodes (42): bcryptjs@^3.0.2, bcryptjs, SsoError, bcrypt, crypto, resolveFederatedUser(), sha256(), challengeOf() (+34 more)
+Cohesion: 0.06
+Nodes (40): SsoError, bcrypt, crypto, resolveFederatedUser(), sha256(), challengeOf(), crypto, handoffUrl() (+32 more)
 
 ### Community 40 - "Módulo test/test_files.js"
-Cohesion: 0.05
-Nodes (52): blob(), cached, client(), config(), fs, isNotFound(), objectKey(), put() (+44 more)
+Cohesion: 0.08
+Nodes (28): blob(), cached, client(), config(), fs, isNotFound(), objectKey(), put() (+20 more)
 
 ### Community 42 - "Módulo test/test_scale.js"
-Cohesion: 0.08
-Nodes (19): LeaderElection, seconds(), assert, envDir, envFile, freePort(), fs, itDb() (+11 more)
+Cohesion: 0.10
+Nodes (17): assert, envDir, envFile, freePort(), fs, itDb(), net, os (+9 more)
 
 ### Community 43 - "Módulo deploy/docker-compose.yml (2)"
 Cohesion: 0.08
 Nodes (24): environment, ALLOWED_ORIGINS, BASE_SEED, DB_FRAGMENT_1, DB_FRAGMENT_2, DB_FRAGMENT_3, DB_POOL_SIZE, DB_SSL (+16 more)
 
-### Community 44 - "Módulo docs/ReadmeLogsMejoras.md"
-Cohesion: 0.09
-Nodes (23): ReadmeLogsMejoras.md (bitacora maestra de auditoria), Alerta CodeQL js/user-controlled-bypass (falso positivo en mfa.service.js), #1 Creacion del entorno PruebasLinux, #22 Fase 1: seguridad pendiente y limpieza (DISABLE_IP_BLOCKING, MFA un factor), #26 Fase 5: PruebasLinux ampliado (semgrep, opciones 118-126), #33 Revision del codigo: claves sin valores conocidos, codigo muerto fuera, #34 Rotacion semanal sin entradas ni salidas y claves estables (KEY_EPOCH), #35 Mantenimiento: solo main, Dependabot, npm audit, grafo (+15 more)
+### Community 44 - "Registro de problemas y tareas pendientes (seccion D)"
+Cohesion: 0.21
+Nodes (12): ReadmeLogsMejoras.md (bitacora maestra de auditoria), Alerta CodeQL js/user-controlled-bypass (falso positivo en mfa.service.js), #22 Fase 1: seguridad pendiente y limpieza (DISABLE_IP_BLOCKING, MFA un factor), #33 Revision del codigo: claves sin valores conocidos, codigo muerto fuera, #34 Rotacion semanal sin entradas ni salidas y claves estables (KEY_EPOCH), #35 Mantenimiento: solo main, Dependabot, npm audit, grafo, #36 Raiz ordenada en carpetas (49 a 20 archivos), Credencial real de BD remota filtrada en test.js (historial) (+4 more)
 
 ### Community 45 - "(ops)/page.tsx"
-Cohesion: 0.05
-Nodes (106): next, react, LoginPage(), submitMfa(), usePasskey(), SSO_ERRORS, Step, AlertsPage() (+98 more)
+Cohesion: 0.20
+Nodes (22): MetricsPage(), ms(), DashboardPage(), sumValues(), WINDOWS, BarChart(), gradientId(), HBars() (+14 more)
 
 ### Community 46 - "stress-api.js"
 Cohesion: 0.15
 Nodes (15): CPU_WORKERS, crypto, GPU, GPU_FRACTION, http, MAX_RAM_MB, os, PORT (+7 more)
 
 ### Community 47 - "Módulo lib/sso.ts"
-Cohesion: 0.12
-Nodes (26): dynamic, GET(), dynamic, GET(), dynamic, GET(), serializeCookie(), ssoCookieName() (+18 more)
+Cohesion: 0.14
+Nodes (18): dynamic, GET(), dynamic, GET(), dynamic, GET(), serializeCookie(), CookieSpec (+10 more)
 
 ### Community 48 - "Módulo observability/metrics.js"
 Cohesion: 0.09
@@ -424,8 +444,8 @@ Cohesion: 0.09
 Nodes (22): compilerOptions, allowJs, esModuleInterop, forceConsistentCasingInFileNames, incremental, isolatedModules, jsx, lib (+14 more)
 
 ### Community 50 - "Módulo test/test_kms_files.js"
-Cohesion: 0.09
-Nodes (25): buildSnapshot(), decodeCell(), DEFAULT_RESTORE_SKIP, encodeCell(), listTables(), q(), restoreSnapshot(), ENCRYPTED_COLUMNS (+17 more)
+Cohesion: 0.11
+Nodes (14): assert, crypto, form(), fs, itDb(), kekCopy, kekFile, os (+6 more)
 
 ### Community 51 - "Módulo test/test_sanitize.js"
 Cohesion: 0.13
@@ -436,12 +456,12 @@ Cohesion: 0.24
 Nodes (18): aviso(), conf_poner(), conf_sin_example(), fallo(), iniciar_registro(), instalar_npm(), node_ok(), ok() (+10 more)
 
 ### Community 53 - "files.controller.js"
-Cohesion: 0.12
-Nodes (10): all, args, deleteInfected, limitIndex, INLINE_CATEGORIES, { pipeline, Readable }, express, idParam (+2 more)
+Cohesion: 0.19
+Nodes (9): INLINE_CATEGORIES, { pipeline, Readable }, SanitizeStage, Busboy, decideType(), { pipeline, Transform }, receiveUpload(), SniffGate (+1 more)
 
 ### Community 54 - "Módulo scripts/rotateKeys.js"
 Cohesion: 0.18
-Nodes (18): analyze(), backups(), { command, flags, positional }, envFile, { execFileSync }, finish(), firewall(), fmtBytes() (+10 more)
+Nodes (19): analyze(), backups(), { command, flags, positional }, envFile, { execFileSync }, finish(), firewall(), fmtBytes() (+11 more)
 
 ### Community 55 - "Módulo security/alerts.service.js"
 Cohesion: 0.16
@@ -451,9 +471,9 @@ Nodes (17): acknowledge(), AlertError, cfg(), crypto, evaluate(), intEnv(), list
 Cohesion: 0.33
 Nodes (3): crypto, http, MASTER
 
-### Community 57 - "sessionCookieName"
-Cohesion: 0.43
-Nodes (7): sessionFrom(), cookieSecure(), sessionCookieName(), readSession(), config, proxy(), PUBLIC_PATHS
+### Community 57 - "session.ts"
+Cohesion: 0.22
+Nodes (17): OpsLayout(), cookieSecure(), sessionCookieName(), ssoCookieName(), clearSessionCookie(), clearSsoCookie(), MFA_TTL_MS, MfaChallenge (+9 more)
 
 ### Community 58 - "Módulo package.json (3)"
 Cohesion: 0.12
@@ -463,25 +483,29 @@ Nodes (17): globals, security, devDependencies, c8@^12.0.0, concurrently@^10.0.7
 Cohesion: 0.67
 Nodes (3): @aws-sdk/client-kms@^3.1165.0, @aws-sdk/client-kms, awsClient()
 
+### Community 60 - "metrics.routes.js"
+Cohesion: 0.17
+Nodes (10): fs, path, crypto, express, requireAdminOrScraper(), router, scraperToken(), sha256() (+2 more)
+
 ### Community 61 - "key-provider.js"
 Cohesion: 0.35
 Nodes (9): cache, crypto, deriveFromEnv(), deriveLegacyKeySet(), deriveStableKeySet(), fingerprint(), requireValue(), scrypt() (+1 more)
 
 ### Community 62 - "Módulo src/index.js"
-Cohesion: 0.18
-Nodes (10): compression, cors, criticalVars, dotenvResult, express, fs, helmet, missingVars (+2 more)
+Cohesion: 0.14
+Nodes (16): compression, cors, criticalVars, dotenvResult, express, fs, helmet, missingVars (+8 more)
 
 ### Community 64 - "Módulo modules/03_dns_http_tls.sh"
 Cohesion: 0.13
 Nodes (6): _host_of_url(), m_sslscan(), m_tls_cert(), m_tls_expiry(), m_tls_versions(), 03_dns_http_tls.sh script
 
 ### Community 65 - "sanitize.js"
-Cohesion: 0.05
-Nodes (29): FilesController, ascii(), asciiFallbackName(), contentDisposition(), detectType(), FORBIDDEN_EXTENSIONS, startsWith(), TYPES (+21 more)
+Cohesion: 0.14
+Nodes (14): dangerousNames(), decodeName(), imageSanitizing(), inspectPdf(), intEnv(), passthrough(), PDF_DANGEROUS, planFor() (+6 more)
 
-### Community 66 - "system.controller.js"
-Cohesion: 0.27
-Nodes (5): execute(), fs, getNetworkPosture(), hasCapNetRaw(), pingGroupRangeMode()
+### Community 66 - "approvals/page.tsx"
+Cohesion: 0.23
+Nodes (20): AlertsPage(), ACTIONS, ApprovalsPage(), STATUSES, NetworkPage(), ClusterInfo, Rotation, Status (+12 more)
 
 ### Community 67 - "Módulo config/database.js"
 Cohesion: 0.23
@@ -492,36 +516,36 @@ Cohesion: 0.67
 Nodes (3): engines, node, npm
 
 ### Community 70 - "Módulo helpers/app.js"
-Cohesion: 0.14
-Nodes (13): RFC-5737, fs, http, mysql, path, rawRequest(), startApp(), uniqueName() (+5 more)
+Cohesion: 0.13
+Nodes (14): RFC-5737, api(), fs, http, mysql, path, rawRequest(), startApp() (+6 more)
 
 ### Community 71 - "Módulo rules/semgrep-node.yml"
 Cohesion: 0.11
 Nodes (17): exclude, include, pattern, patterns, pattern, pattern-either, pattern-inside, pattern-not (+9 more)
 
 ### Community 72 - "scripts/kms.js"
-Cohesion: 0.11
-Nodes (14): cache, nameFor(), remember(), ttlMs(), unwrapDataKey(), wrapDataKey(), aws, crypto (+6 more)
+Cohesion: 0.15
+Nodes (8): aws, crypto, file, fs, providers, vault, fail(), main()
 
-### Community 73 - "Módulo security/mfa.service.js"
-Cohesion: 0.10
-Nodes (18): RFC-4226, bcrypt, ISSUER(), MfaError, MfaService, QRCode, base32Decode(), base32Encode() (+10 more)
+### Community 73 - "secure-auth.service.js"
+Cohesion: 0.12
+Nodes (13): bcryptjs@^3.0.2, bcryptjs, bcrypt, execute(), bcrypt, QRCode, bcrypt, crypto (+5 more)
 
 ### Community 74 - "Módulo test/test_files_backup.js"
 Cohesion: 0.14
 Nodes (12): assert, backupDir, crypto, fs, itDb(), multipart(), os, path (+4 more)
 
 ### Community 75 - "Módulo stream/route.ts"
-Cohesion: 0.17
-Nodes (19): dynamic, GET(), runtime, establishSession(), clientIp(), apiBase(), trustedProxyHops(), upstreamTimeoutMs() (+11 more)
+Cohesion: 0.18
+Nodes (14): dynamic, GET(), runtime, clientIp(), apiBase(), trustedProxyHops(), upstreamTimeoutMs(), Session (+6 more)
 
-### Community 76 - "live-stream.js"
-Cohesion: 0.21
-Nodes (8): sqlPlaceholders(), config(), intEnv(), jwt, LiveStream, parseCursor(), SEVERITIES, toIso()
+### Community 76 - "events/page.tsx"
+Cohesion: 0.14
+Nodes (15): react, csv(), EMPTY, EventsPage(), Filters, FragmentRow(), toQuery(), Pending (+7 more)
 
 ### Community 77 - "crypto/kms.js"
-Cohesion: 0.21
-Nodes (15): cache, callWorker(), enabled(), { execFileSync }, isWrapped(), WORKER, path, resolveEnvCopy() (+7 more)
+Cohesion: 0.23
+Nodes (14): cache, callWorker(), enabled(), { execFileSync }, isWrapped(), WORKER, path, resolveEnvCopy() (+6 more)
 
 ### Community 78 - "Módulo test/test_sso.js"
 Cohesion: 0.15
@@ -529,11 +553,11 @@ Nodes (12): assert, callback(), challengeOf(), configureSso(), crypto, ENV_KEYS,
 
 ### Community 79 - "express"
 Cohesion: 0.07
-Nodes (25): express@^5.3.0, express, express, reauth, router, crypto, express, requireAdminOrScraper() (+17 more)
+Nodes (22): express@^5.3.0, express, express, reauth, router, express, idParam, router (+14 more)
 
 ### Community 80 - "secure-auth.service.js"
-Cohesion: 0.10
-Nodes (22): bcrypt, crypto, AnomalyDetection, blockCache, cacheMs(), expandIpv6(), ipSubject(), isLoopback() (+14 more)
+Cohesion: 0.12
+Nodes (17): crypto, AnomalyDetection, blockCache, cacheMs(), expandIpv6(), ipSubject(), isLoopback(), isNeverBlocked() (+9 more)
 
 ### Community 81 - "seed-notes.js"
 Cohesion: 0.22
@@ -551,17 +575,21 @@ Nodes (15): build, cap_drop, depends_on, deploy, read_only, security_opt, tmpfs,
 Cohesion: 0.13
 Nodes (14): runs-on, timeout-minutes, concurrency, cancel-in-progress, group, jobs, compose, production-install (+6 more)
 
+### Community 85 - "file-cipher.js"
+Cohesion: 0.17
+Nodes (11): aadFor(), chunkCount(), cipherSize(), createDecryptStream(), crypto, decryptRange(), EncryptStream, fs (+3 more)
+
 ### Community 87 - "protection.middleware.js"
-Cohesion: 0.22
-Nodes (9): main(), assertProtectionBypassAllowed(), config(), intEnv(), isCriticalPath(), isProduction(), protectionBypassed(), ProtectionMiddleware (+1 more)
+Cohesion: 0.15
+Nodes (13): all, args, deleteInfected, limitIndex, main(), assertProtectionBypassAllowed(), config(), intEnv() (+5 more)
 
 ### Community 88 - "Módulo test/test_compose.js"
 Cohesion: 0.17
 Nodes (13): assert, call(), COMPOSE, crypto, enabled, envValue(), fs, itCompose() (+5 more)
 
-### Community 89 - "registerAndLogin"
-Cohesion: 0.09
-Nodes (18): jsonwebtoken@^9.0.2, jsonwebtoken, api(), registerAndLogin(), testIp(), actor(), assert, itDb() (+10 more)
+### Community 89 - "Backdrop3D.tsx"
+Cohesion: 0.15
+Nodes (14): next, metadata, mono, RootLayout(), sans, viewport, applyStoredMotion(), Backdrop3D() (+6 more)
 
 ### Community 90 - "Módulo benchmarks/scale-bench.js"
 Cohesion: 0.14
@@ -576,15 +604,15 @@ Cohesion: 0.13
 Nodes (14): author, busboy@^1.6.0, sharp@^0.35.5, ua-parser-js@^2.0.4, description, keywords, license, main (+6 more)
 
 ### Community 93 - "Módulo scripts/dbTlsCerts.js"
-Cohesion: 0.24
-Nodes (12): carpetaPorDefecto(), comprobarOpenssl(), dentroDelRepo(), { execFileSync }, fs, main(), openssl(), os (+4 more)
+Cohesion: 0.15
+Nodes (15): detectGPU(), carpetaPorDefecto(), comprobarOpenssl(), dentroDelRepo(), { execFileSync }, fs, main(), openssl() (+7 more)
 
 ### Community 94 - "Módulo maintenance/events-partitions.js"
 Cohesion: 0.35
 Nodes (11): addMonths(), enable(), isPartitioned(), maintain(), monthsAhead(), monthStart(), nameFor(), pad() (+3 more)
 
 ### Community 95 - "Módulo backup/archive.js"
-Cohesion: 0.27
+Cohesion: 0.25
 Nodes (13): compressBest(), createArchive(), crypto, decompress(), decryptPayload(), deriveArchiveKey(), encode(), MAGIC (+5 more)
 
 ### Community 96 - "Módulo deploy/docker-compose.yml (4)"
@@ -599,21 +627,17 @@ Nodes (13): steps, COMPOSE_ENV_FILE, OPS_API_URL, steps, steps, env, if, name (+
 Cohesion: 0.15
 Nodes (13): with, allow_issue_writing, cache, config-file, fail_action, fetch-depth, format, languages (+5 more)
 
-### Community 99 - "Módulo config/secure-env.js"
-Cohesion: 0.31
-Nodes (6): dotenv, fs, KEY_VARIABLES, path, getRotationService(), guard()
-
 ### Community 100 - "emergencyRecovery.js"
 Cohesion: 0.40
 Nodes (4): fs-extra@^11.4.1, fs-extra, fs, path
 
 ### Community 102 - "test_files_s3.js"
-Cohesion: 0.14
-Nodes (9): assert, crypto, ENV, fs, itDb(), path, saved, test (+1 more)
+Cohesion: 0.07
+Nodes (23): createMockS3(), decodeAwsChunked(), http, assert, crypto, ENV, fs, itDb() (+15 more)
 
 ### Community 103 - "database.js"
-Cohesion: 0.15
-Nodes (5): fs, sqlFragment(), intEnv(), numEnv(), SecureAuthService
+Cohesion: 0.14
+Nodes (4): fs, sqlFragment(), AuthError, SecureAuthService
 
 ### Community 104 - "Módulo CLAUDE.md"
 Cohesion: 0.17
@@ -663,17 +687,13 @@ Nodes (10): MARIADB_ROOT_PASSWORD, test, env, image, options, ports, mariadb, ru
 Cohesion: 0.22
 Nodes (3): _dockerfiles(), m_dockerfile_present(), 11_docker.sh script
 
-### Community 125 - "Módulo controllers/notes.controller.js"
-Cohesion: 0.21
-Nodes (3): notify(), NotesController, AuditService
-
 ### Community 126 - "ref_child_process"
-Cohesion: 0.29
-Nodes (6): detectGPU(), devEnv(), main(), path, ROOT, { spawn }
+Cohesion: 0.40
+Nodes (5): devEnv(), main(), path, ROOT, { spawn }
 
-### Community 127 - "buildApp"
-Cohesion: 0.36
-Nodes (6): createErrorHandler(), inspect(), sanitizeInput(), POLLUTION_KEYS, buildApp(), express
+### Community 127 - "Guía de instalación original (agosto 2025, histórica)"
+Cohesion: 0.17
+Nodes (15): AnomalyDetection (src/security/anomaly-detection.service.js), auth.routes.js (/api/auth), AuthController (register/login/logout/profile), AuthMiddleware.verifyJWT, Tabla blocked_ips, database/schema.sql original (secure_platform), Tabla encryption_keys, Guía de instalación original (agosto 2025, histórica) (+7 more)
 
 ### Community 128 - "Módulo workflows/ci.yml (4)"
 Cohesion: 0.22
@@ -696,8 +716,8 @@ Cohesion: 0.25
 Nodes (3): m_schema_sensitive(), _schema(), 10_database.sh script
 
 ### Community 138 - "secure-communications.service.js"
-Cohesion: 0.17
-Nodes (8): KeyRotator, crypto, fs, MAINTENANCE_ALLOWED_ALERTS, nodemailer, path, cron, crypto
+Cohesion: 0.11
+Nodes (14): crypto, KeyRotator, crypto, fs, path, crypto, fs, MAINTENANCE_ALLOWED_ALERTS (+6 more)
 
 ### Community 140 - "Módulo deploy/docker-compose.yml (6)"
 Cohesion: 0.25
@@ -720,8 +740,8 @@ Cohesion: 0.36
 Nodes (5): clusterStatus(), inCluster(), pending, provider(), snapshot()
 
 ### Community 150 - "ref_fs"
-Cohesion: 0.09
-Nodes (17): DEV_ONLY, fs, path, pkg, problems, ROOT, walk(), criticalVars (+9 more)
+Cohesion: 0.12
+Nodes (13): DEV_ONLY, fs, path, pkg, problems, ROOT, walk(), criticalVars (+5 more)
 
 ### Community 152 - "Módulo deploy/docker-compose.yml (8)"
 Cohesion: 0.43
@@ -734,6 +754,10 @@ Nodes (7): services, MARIADB_ROOT_PASSWORD, env, image, options, ports, mariadb
 ### Community 154 - "Módulo scripts/maintenance-firewall.sh"
 Cohesion: 0.57
 Nodes (6): apply_family(), configure(), remove_family(), run(), run_quiet(), maintenance-firewall.sh script
+
+### Community 155 - "Módulo crypto/level1.js"
+Cohesion: 0.20
+Nodes (6): dotenv, fs, KEY_VARIABLES, path, crypto, Level1Encryption
 
 ### Community 157 - "Módulo workflows/ci.yml (6)"
 Cohesion: 0.33
@@ -751,9 +775,17 @@ Nodes (6): on, pull_request, push, schedule, branches, cron
 Cohesion: 0.20
 Nodes (5): createMockIdp(), idp, crypto, { generateKeyPair, exportJWK, SignJWT }, http
 
+### Community 164 - "icmpMonitor.js"
+Cohesion: 0.18
+Nodes (11): formatAlert(), fs, handleAlert(), main(), parseArgs(), path, readline, RISK_BY_LEVEL (+3 more)
+
 ### Community 165 - "Módulo codeql/codeql-config.yml"
 Cohesion: 0.40
 Nodes (4): id, name, query-filters, exclude
+
+### Community 166 - "apiCall"
+Cohesion: 0.21
+Nodes (14): LoginPage(), submitMfa(), usePasskey(), SSO_ERRORS, Step, doUnblock(), unlock(), apiCall() (+6 more)
 
 ### Community 167 - "Módulo docs/INSTALL.md"
 Cohesion: 0.50
@@ -767,17 +799,61 @@ Nodes (4): CI y produccion sin nodemon (ci.yml, security.yml, fuzz.yml), Pruebas
 Cohesion: 0.50
 Nodes (3): mysql2@^3.14.3, mysql2, mysql
 
-### Community 170 - "ref_crypto"
-Cohesion: 0.18
-Nodes (13): buildKeyring(), crypto, openKeyring(), wrapKey(), getPaths(), path, ROOT, crypto (+5 more)
+### Community 170 - "rotation.service.js"
+Cohesion: 0.16
+Nodes (19): buildKeyring(), crypto, openKeyring(), wrapKey(), buildSnapshot(), decodeCell(), DEFAULT_RESTORE_SKIP, encodeCell() (+11 more)
 
 ### Community 172 - "Módulo workflows/ci.yml (7)"
 Cohesion: 0.67
 Nodes (3): pruebaslinux, runs-on, timeout-minutes
 
+### Community 175 - "SoftAuthenticator"
+Cohesion: 0.27
+Nodes (6): b64u(), cbor(), crypto, FLAG, sha256(), SoftAuthenticator
+
 ### Community 182 - "test-exclude"
 Cohesion: 0.50
 Nodes (4): overrides, test-exclude, glob, minimatch
+
+### Community 183 - "SEGURIDAD.md (seguridad, archivos y anomalias)"
+Cohesion: 0.18
+Nodes (12): #9 Cifrado v4 y rotacion de claves, SEGURIDAD.md (seguridad, archivos y anomalias), Bloqueo de cuenta por (usuario, origen) y global, Analisis de anomalias (security-events, security-summary), Anti-inyeccion en tres capas (parametros, validacion, detector), Variables de entorno de seguridad, KMS: secretos del .env envueltos (file, vault, aws), Claves de archivo envueltas por el KMS (KMS_DATA_KEYS, kms1:) (+4 more)
+
+### Community 186 - "file-types.js"
+Cohesion: 0.19
+Nodes (7): ascii(), asciiFallbackName(), contentDisposition(), detectType(), FORBIDDEN_EXTENSIONS, startsWith(), TYPES
+
+### Community 191 - "alerts/page.tsx"
+Cohesion: 0.21
+Nodes (10): SEVERITIES, STATUSES, SEVERITY_LABEL, STATUS, Tone, AlertItem, ApprovalItem, BlockedIp (+2 more)
+
+### Community 192 - "pruebas.sh lanzador (menu y modo no interactivo)"
+Cohesion: 0.17
+Nodes (11): #1 Creacion del entorno PruebasLinux, #26 Fase 5: PruebasLinux ampliado (semgrep, opciones 118-126), PruebasLinux/ReadmeLogMejoras.md (entorno de pruebas de seguridad), modules/16_ampliacion.sh (opciones 118-126), Job pruebaslinux del CI (informe y puerta 119/120/121/124 + Semgrep ERROR), lib/core.sh (registro de opciones reg, dependencias, ejecucion), pruebas.sh lanzador (menu y modo no interactivo), modules/01..16 (una categoria por archivo) (+3 more)
+
+### Community 194 - "Entrega SSO por codigo de un solo uso (SSO_HANDOFF_URL, /api/sso/exchange)"
+Cohesion: 0.25
+Nodes (10): #24 Fase 3: interfaz web completa (SSO por codigo, SSE), Novedades en vivo SSE (GET /api/system/stream), SAML 2.0 proveedor de servicio (SP-initiated), Sesiones cortas: JWT 15 min + refresh token rotatorio y logout-all, Entrega SSO por codigo de un solo uso (SSO_HANDOFF_URL, /api/sso/exchange), SSO OpenID Connect (code + PKCE), Interfaz web Next.js como BFF (cookie httpOnly, CSRF, CSP con nonce), Catalogo de 126 opciones en 15 categorias (+2 more)
+
+### Community 195 - "API de archivos /api/files (cifrado por bloque, magic bytes)"
+Cohesion: 0.22
+Nodes (10): #25 Fase 4: escalabilidad (S3, Docker compose, particiones), #31 Instalador con menu y ClamAV (Windows, Linux, macOS), #7 Instalador multiplataforma, Antivirus ClamAV por INSTREAM, Saneado de archivos: imagenes recodificadas y PDF sin contenido activo, API de archivos /api/files (cifrado por bloque, magic bytes), Copias de FILES_DIR (files:backup, verify, restore), Lider unico de tareas periodicas (GET_LOCK, leader.js) (+2 more)
+
+### Community 196 - "kms-data-keys.js"
+Cohesion: 0.31
+Nodes (6): cache, nameFor(), remember(), ttlMs(), unwrapDataKey(), wrapDataKey()
+
+### Community 197 - "icmp-covert-channel.service.js"
+Cohesion: 0.33
+Nodes (8): analyzePayload(), canonicalRotation(), findPeriod(), isIncrementing(), LEVELS, os, shannonEntropy(), WINDOWS_PAYLOAD
+
+### Community 198 - "main"
+Cohesion: 0.40
+Nodes (5): getPaths(), path, ROOT, die(), main()
+
+### Community 199 - "filesBackup.js"
+Cohesion: 0.67
+Nodes (3): args, main(), option()
 
 ## Ambiguous Edges - Review These
 - `ProtectionMiddleware (autoProtect / highSecurity)` → `SystemController`  [AMBIGUOUS]
@@ -786,23 +862,23 @@ Nodes (4): overrides, test-exclude, glob, minimatch
 ## Knowledge Gaps
 - **71 isolated node(s):** `RFC-5737`, `RFC-4226`, `RFC-6238`, `RFC-6238`, `Credenciales fragmentadas en variables de entorno (DB_FRAGMENT_1..3)` (+66 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1420 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **50 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **52 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `next` connect `(ops)/page.tsx` to `sessionCookieName`, `ref_fs`, `Módulo web/package.json`?**
-  _High betweenness centrality (0.144) - this node is a cross-community bridge._
+- **Why does `next` connect `Backdrop3D.tsx` to `(ops)/page.tsx`, `Módulo web/package.json`, `Shell.tsx`, `ref_fs`, `session.ts`?**
+  _High betweenness centrality (0.147) - this node is a cross-community bridge._
 - **What connects `RFC-5737`, `RFC-4226`, `RFC-6238` to the rest of the system?**
   _71 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Módulo historico/GUIA-ORIGINAL.md` be split into smaller, more focused modules?**
-  _Cohesion score 0.05010351966873706 - nodes in this community are weakly interconnected._
-- **Why does `scripts` connect `Módulo package.json` to `package.json`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
 - **Should `Módulo services/secure-communications.service.js` be split into smaller, more focused modules?**
   _Cohesion score 0.0796221322537112 - nodes in this community are weakly interconnected._
-- **Why does `sessionCookieName()` connect `sessionCookieName` to `Módulo stream/route.ts`, `(ops)/page.tsx`, `Módulo lib/sso.ts`, `Módulo lib/bff.ts`, `Módulo lib/sso-passkey-stream.test.ts`?**
-  _High betweenness centrality (0.016) - this node is a cross-community bridge._
+- **Why does `scripts` connect `Módulo package.json` to `package.json`?**
+  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+- **Should `Módulo package.json` be split into smaller, more focused modules?**
+  _Cohesion score 0.03389830508474576 - nodes in this community are weakly interconnected._
+- **Should `test_security.js` be split into smaller, more focused modules?**
+  _Cohesion score 0.10846560846560846 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
