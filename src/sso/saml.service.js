@@ -8,7 +8,7 @@ const { resolveFederatedUser } = require('./federated-users');
 
 // SSO por SAML 2.0 (proveedor de servicio, SP). Funciona con Entra ID, Okta, ADFS, Keycloak, Google Workspace, etc.
 // La verificación XML (firma, audiencia, ventanas de validez, InResponseTo) la hace @node-saml/node-saml; aquí van las
-// reglas del sistema, todas con prueba en test_saml.js contra un IdP simulado que firma de verdad:
+// reglas del sistema, todas con prueba en test/test_saml.js contra un IdP simulado que firma de verdad:
 //
 //   - Solo SP-initiated: la respuesta debe contestar a una AuthnRequest NUESTRA (InResponseTo, guardada en BD y de un
 //     solo uso). El inicio "IdP-initiated" no se admite (es la puerta de la repetición y de la inyección de aserciones).

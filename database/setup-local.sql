@@ -7,7 +7,7 @@
 -- Es idempotente (se puede ejecutar varias veces). El usuario `sec` / `sec_test_pw` es SOLO de pruebas (el mismo que el CI,
 -- público en .github/workflows/ci.yml) y solo tiene permisos sobre las dos bases de prueba. No lo uses para datos reales.
 --
--- Después:  npm run test:all     (test_helpers/env.js usa mysql://sec:sec_test_pw@127.0.0.1:3306/secure_platform_test_app;
+-- Después:  npm run test:all     (test/helpers/env.js usa mysql://sec:sec_test_pw@127.0.0.1:3306/secure_platform_test_app;
 --                                 otra URL con TEST_APP_DB_URL)
 
 CREATE DATABASE IF NOT EXISTS secure_platform_test     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -3,7 +3,7 @@
 // La rotación de claves re-cifra únicamente las columnas listadas aquí. Si creas una tabla o
 // columna nueva con datos cifrados con tripleEncryptor y NO la añades a este registro, tras la
 // próxima rotación esos datos quedarán cifrados con una clave que ya no existe (irrecuperables).
-// test_rotation.js lo vigila: falla si database/schema.sql tiene una columna de texto cuyo
+// test/test_rotation.js lo vigila: falla si database/schema.sql tiene una columna de texto cuyo
 // nombre contiene "encrypted" y que no esté aquí ni en IGNORED.
 
 const ENCRYPTED_COLUMNS = {

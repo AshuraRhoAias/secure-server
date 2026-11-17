@@ -1,5 +1,5 @@
 # Varias réplicas del API detrás de un balanceador, con la base de datos y el almacenamiento de archivos COMPARTIDOS.
-# Es el montaje con el que se prueba la escalabilidad horizontal en el CI (job "compose", test_compose.js) y sirve de punto de
+# Es el montaje con el que se prueba la escalabilidad horizontal en el CI (job "compose", test/test_compose.js) y sirve de punto de
 # partida para un despliegue. NO es una configuración de producción tal cual: falta TLS (balanceador y BD), secretos en un gestor
 # (aquí llegan por variables de entorno) y copias del bucket.
 #

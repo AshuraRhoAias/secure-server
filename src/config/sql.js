@@ -5,7 +5,7 @@
 //      en el servidor, de modo que los valores nunca se interpretan como SQL.
 //   2. Lo único que no admite parámetros (LIMIT/OFFSET, listas de `?`, trozos de SQL constantes) pasa por
 //      estas funciones: o devuelven un entero seguro / un trozo de un registro CERRADO, o lanzan una excepción.
-//   3. test_security.js recorre el código fuente y FALLA si encuentra SQL con `${...}` que no sea
+//   3. test/test_security.js recorre el código fuente y FALLA si encuentra SQL con `${...}` que no sea
 //      una de estas ayudas (ver "no hay SQL con interpolación").
 
 // Entero seguro para LIMIT/OFFSET: lanza si no es un entero no negativo.

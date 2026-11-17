@@ -7,7 +7,7 @@ const validate = require('../utils/validate');
 
 // Montada en /api/system (el cargador ya exige JWT). Cada ruta pide su PERMISO (src/security/permissions.js):
 // auditor lee, operator además desbloquea, admin lo hace todo. No hay ninguna ruta sin permiso: la prueba
-// test_rbac.js recorre el router y falla si aparece una.
+// test/test_rbac.js recorre el router y falla si aparece una.
 const allow = (permission) => roleMiddleware.requirePermission(permission);
 const idParam = validate.params({ id: { type: 'integer', required: true, min: 1 } });
 

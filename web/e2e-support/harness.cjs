@@ -13,8 +13,8 @@ const ROOT = path.join(WEB, '..');
 const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 
 // Carga el entorno de pruebas del API (BD de pruebas, semillas…) ANTES que cualquier módulo del proyecto
-const { dbUrl, DB_NAME, filesDir } = require(path.join(ROOT, 'test_helpers/env'));
-const helpers = require(path.join(ROOT, 'test_helpers/app'));
+const { dbUrl, DB_NAME, filesDir } = require(path.join(ROOT, 'test/helpers/env'));
+const helpers = require(path.join(ROOT, 'test/helpers/app'));
 const totp = require(path.join(ROOT, 'src/security/totp'));
 
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });

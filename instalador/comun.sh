@@ -42,7 +42,7 @@ conf_sin_example() { $2 sed -i.bak -E 's/^[[:space:]]*Example/#Example/' "$1" &&
 # Paso de npm común a Linux y macOS (install.js: npm ci + .env); el toolset de PruebasLinux lo pregunta install.js
 instalar_npm() {
     paso "Dependencias del proyecto (npm)"
-    (cd "$ROOT" && node install.js --os "$1" $([ "${SI:-0}" = 1 ] && echo --no-tools)) || fallo "install.js falló"
+    (cd "$ROOT" && node instalador/install.js --os "$1" $([ "${SI:-0}" = 1 ] && echo --no-tools)) || fallo "install.js falló"
     if preguntar "¿Instalar también la interfaz web (web/)?" s; then
         (cd "$ROOT/web" && npm ci --no-audit --no-fund) && ok "dependencias de web/ instaladas" || aviso "npm ci en web/ falló"
     fi

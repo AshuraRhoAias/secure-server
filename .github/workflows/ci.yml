@@ -60,7 +60,7 @@ jobs:
             GRANT ALL ON secure_platform_test_app.* TO 'sec'@'%';"
 
       # Un archivo de prueba a la vez: comparten el mismo servidor MariaDB. Se miden con c8 (cobertura) y el umbral mínimo
-      # (.c8rc.json → check-coverage) hace fallar el job si baja. Incluye el fuzzing con propiedades (test_fuzz.js).
+      # (.c8rc.json → check-coverage) hace fallar el job si baja. Incluye el fuzzing con propiedades (test/test_fuzz.js).
       - name: Pruebas + cobertura (API, sesiones, RBAC, MFA/WebAuthn, SSO/SAML, KMS, archivos, operación, fuzzing)
         run: |
           set -o pipefail
@@ -218,7 +218,7 @@ jobs:
       - name: Varias réplicas
         run: |
           set -o pipefail
-          node --test test_compose.js 2>&1 | tee "$RUNNER_TEMP/compose-test.log"
+          node --test test/test_compose.js 2>&1 | tee "$RUNNER_TEMP/compose-test.log"
         env:
           COMPOSE_ENV_FILE: deploy/compose.env
       - name: Registros si algo falló
