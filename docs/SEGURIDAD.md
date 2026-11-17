@@ -533,7 +533,7 @@ la emite un auditor sobre una *organización*. Aquí no se afirma ninguna de las
 - `docs/CONTROLES.md` — modelo de amenazas y matriz de controles (OWASP ASVS, SOC 2, ISO 27001) con estado real y evidencia.
 - `docs/PENTEST-AUTOEVALUACION.md` — lo que ya se probó (sqlmap, análisis estático, ataques a SSO/MFA/archivos) y lo que **no**.
 - `docs/openapi.json` — definición de la API para ZAP/Burp (una prueba garantiza que está al día con el código).
-- `SECURITY.md` — política de divulgación de vulnerabilidades.
+- `.github/SECURITY.md` — política de divulgación de vulnerabilidades.
 - CI (`.github/workflows`): pruebas con MariaDB y ClamAV reales, `npm run lint:security` (a cero avisos), `npm audit`, CodeQL,
   gitleaks, SBOM CycloneDX y un escaneo DAST con OWASP ZAP (informativo), más Dependabot. CodeQL excluye dos consultas, con justificación en `.github/codeql/codeql-config.yml`:
 `js/missing-rate-limiting` (el limitador es propio y vive en MariaDB, CodeQL solo reconoce librerías como `express-rate-limit`) y
@@ -771,7 +771,7 @@ Resuelto desde la versión anterior: MFA (TOTP, passkeys), SSO (OIDC y SAML), se
 finos con aprobación de dos administradores, KMS para secretos **y** para las claves de archivo, antivirus, recodificación de imágenes y
 filtrado de PDF, alertas/métricas/trazas/datos personales para admin, cobertura, fuzzing y CI endurecido. Lo que **sigue sin estar** o tiene límites:
 
-Resuelto en la entrega de noviembre de 2026 (ver `ReadmeLogsMejoras.md` #21–#27): interfaz web con passkeys, SSO (sin tokens en el
+Resuelto en la entrega de noviembre de 2026 (ver `docs/ReadmeLogsMejoras.md` #21–#27): interfaz web con passkeys, SSO (sin tokens en el
 navegador) y datos en vivo; archivos en S3; varias réplicas probadas con Docker; réplica de lectura y particionado de eventos opcionales;
 `prom-client` sustituido por `@prometheus-io/client`.
 

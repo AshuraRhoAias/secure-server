@@ -26,7 +26,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   `src/observability` (métricas, trazas, stream SSE, estado del cluster) · `src/tasks/leader.js` (líder por `GET_LOCK`)
 - `database/schema.sql` + `database/migrations/NNN_*.sql` (toda columna nueva va en las dos)
 - `web/` (BFF: `src/lib/{bff,session,sso,stream,client}.ts`; e2e en `web/e2e/`) · `test/` (todas las `test_*.js`) · `test/helpers/`
-- Documentación: `README.md`, `docs/SEGURIDAD.md`, `docs/openapi.json`, `ReadmeLogsMejoras.md` (bitácora maestra),
+- Documentación: `README.md`, `docs/SEGURIDAD.md`, `docs/openapi.json`, `docs/ReadmeLogsMejoras.md` (bitácora maestra), `docs/INSTALL.md`, `.github/SECURITY.md`,
   `PruebasLinux/ReadmeLogMejoras.md`; histórico en `docs/historico/`.
 
 ## Decisiones del propietario (no cambiarlas sin preguntar)
@@ -45,7 +45,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   (`KEY_ROTATION_CRON`, domingo 02:00): en mantenimiento no entra ni sale nada salvo el aviso de rotación fallida; todo cambio en
   la rotación debe mantener las pruebas de caídas reales de `test/test_rotation.js` (proceso hijo `test/helpers/rotation-child.js`).
 - ClamAV local (1.5.4, servicio `ClamD` en arranque **manual**: `Start-Service ClamD`); instaladores con menú en `instalar.*` e
-  `instalador/` (`INSTALL.md`). Linux y macOS sin ejecutar todavía.
+  `instalador/` (`docs/INSTALL.md`). Linux y macOS sin ejecutar todavía.
 - Archivos en S3 con driver propio (`src/files/s3-store.js`); interfaz web con alcance completo.
 
 ## Flujo de git (obligatorio)
@@ -85,7 +85,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 
 ## Documentación
 
-- `ReadmeLogsMejoras.md`: cada entrega es una entrada `#N` con **Estado, Archivos y módulos revisados, Problema detectado, Acciones
+- `docs/ReadmeLogsMejoras.md`: cada entrega es una entrada `#N` con **Estado, Archivos y módulos revisados, Problema detectado, Acciones
   realizadas, Pruebas ejecutadas, Puntuación, Problemas restantes, Siguiente mejora**; §C puntúa 7 criterios (F, S, Q, E, R, T, D)
   y distingue evaluado / parcial / no evaluado; actualizar también §A, §D, §E y §F en cada fase.
 - Endpoints: código → `docs/openapi.json` → tabla del README (`npm run docs:endpoints -- --write`). Las pruebas fallan si se desincronizan.
@@ -150,7 +150,7 @@ decisiones del propietario), **manda este archivo**.
 | Cobertura y calidad antes de commit | `/ecc:test-coverage` · `/ecc:quality-gate` · skill `ecc:verification-loop` |
 | Seguridad del repositorio y la configuración | `/ecc:security-scan` · skill `ecc:security-review` |
 | Commit y PR | `/ecc:prp-commit` · `/ecc:pr` (respetando el **Flujo de git** de arriba: rama + `main` por avance rápido, sin force) |
-| Documentación | `/ecc:update-docs` (además de las reglas de `ReadmeLogsMejoras.md` y OpenAPI → README) |
+| Documentación | `/ecc:update-docs` (además de las reglas de `docs/ReadmeLogsMejoras.md` y OpenAPI → README) |
 | Dudas sobre qué usar de ECC | `/ecc:ecc-guide` |
 
 - Los prompts de agentes `ecc:*` que exploren código deben incluir la regla de graphify (consultar el grafo antes de leer).

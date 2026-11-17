@@ -6,7 +6,7 @@ const path = require('path');
 console.log('🔍 Diagnosticando problemas con variables de entorno...\n');
 
 // 1. Verificar archivo .env
-const envPath = path.join(__dirname, '.env');
+const envPath = path.join(__dirname, '..', '.env');
 console.log(`📍 Buscando archivo .env en: ${envPath}`);
 
 if (fs.existsSync(envPath)) {

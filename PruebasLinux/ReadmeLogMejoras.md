@@ -472,7 +472,7 @@ perfil de escaneo autenticado de la API (con token de prueba); empaquetado del t
 en una imagen de contenedor reproducible.
 
 Ver la bitácora de auditoría del proyecto completo en
-[`../ReadmeLogsMejoras.md`](../ReadmeLogsMejoras.md).
+[`../docs/ReadmeLogsMejoras.md`](../docs/ReadmeLogsMejoras.md).
 
 ## 12. Ampliación de noviembre de 2026 (opciones 118-126) y CI
 

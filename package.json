@@ -21,7 +21,7 @@
     "icmp-monitor": "node scripts/icmpMonitor.js",
     "icmp-firewall": "bash scripts/icmp-firewall.sh",
     "set-role": "node scripts/setUserRole.js",
-    "debug-env": "node debug-env.js",
+    "debug-env": "node scripts/debug-env.js",
     "fix-permissions": "chmod 600 .env || echo 'Permisos ajustados'",
     "decrypt-message": "node scripts/decryptMessage.js",
     "emergency-backup": "node scripts/emergencyRecovery.js backup",

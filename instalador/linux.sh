@@ -33,7 +33,7 @@ paso "Gestor de paquetes"
 if command -v apt-get >/dev/null; then PM=apt
 elif command -v dnf >/dev/null; then PM=dnf
 elif command -v pacman >/dev/null; then PM=pacman
-else fallo "No encuentro apt, dnf ni pacman: instala a mano Node >= 22, MariaDB y ClamAV (ver INSTALL.md)."
+else fallo "No encuentro apt, dnf ni pacman: instala a mano Node >= 22, MariaDB y ClamAV (ver docs/INSTALL.md)."
 fi
 ok "$PM"
 instalar() {

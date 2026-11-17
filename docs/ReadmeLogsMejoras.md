@@ -2,7 +2,7 @@
 
 > Documento maestro de auditoría, cambios, verificaciones y tareas pendientes del
 > proyecto. Se ha elaborado **con evidencia real**: ejecución de los tests del
-> repositorio, análisis estático con el entorno [`PruebasLinux/`](PruebasLinux/ReadmeLogMejoras.md)
+> repositorio, análisis estático con el entorno [`PruebasLinux/`](../PruebasLinux/ReadmeLogMejoras.md)
 > y revisión manual del código. Donde algo **no** ha podido verificarse (por falta de
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.

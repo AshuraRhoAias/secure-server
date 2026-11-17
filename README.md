@@ -2,7 +2,7 @@
 
 > **secure-server** es una API REST en Node.js (Express 5 + MySQL/MariaDB) para guardar y servir datos sensibles, con una **interfaz web de operación** (Next.js) para administradores. Los campos sensibles se cifran con AES-256-GCM (formato `v4`), los archivos se cifran por archivo y por bloques (en disco local o en un bucket S3), cada petición pasa por detección de inyecciones, límites y bloqueos **cuyo estado vive en MySQL**, y las claves se rotan con migración de datos.
 >
-> 📘 **Detalle, operación y límites honestos: [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md)** · bitácora de auditoría y mejoras: [`ReadmeLogsMejoras.md`](ReadmeLogsMejoras.md) · interfaz web: [`web/README.md`](web/README.md) · pruebas: `npm run test:all` (MariaDB; ver `test/helpers/env.js`).
+> 📘 **Detalle, operación y límites honestos: [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md)** · bitácora de auditoría y mejoras: [`docs/ReadmeLogsMejoras.md`](docs/ReadmeLogsMejoras.md) · interfaz web: [`web/README.md`](web/README.md) · pruebas: `npm run test:all` (MariaDB; ver `test/helpers/env.js`).
 
 ## 🧭 Descripción del proyecto
 
@@ -124,7 +124,7 @@ Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints
 
 ### Puesta en marcha rápida
 
-Requisitos: **Node.js ≥ 22** y MariaDB 10.11 / MySQL 8 (o Docker). Instalador guiado: [`INSTALL.md`](INSTALL.md).
+Requisitos: **Node.js ≥ 22** y MariaDB 10.11 / MySQL 8 (o Docker). Instalador guiado: [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ```bash
 npm install
