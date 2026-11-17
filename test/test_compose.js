@@ -16,8 +16,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const BASE = process.env.COMPOSE_BASE || 'http://127.0.0.1:8080';
-const ENV_FILE = process.env.COMPOSE_ENV_FILE || path.join(__dirname, 'deploy/compose.env');
-const COMPOSE = ['compose', '-f', path.join(__dirname, 'deploy/docker-compose.yml'), '--env-file', ENV_FILE];
+const ENV_FILE = process.env.COMPOSE_ENV_FILE || path.join(__dirname, '..', 'deploy/compose.env');
+const COMPOSE = ['compose', '-f', path.join(__dirname, '..', 'deploy/docker-compose.yml'), '--env-file', ENV_FILE];
 const REPLICAS = Number(process.env.API_REPLICAS) || 2;
 const PASSWORD = 'Contraseña-de-prueba-compose-1';
 const enabled = fs.existsSync(ENV_FILE);   // solo si se montó el compose (deploy/compose.env existe)

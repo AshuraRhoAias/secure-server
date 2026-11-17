@@ -9,19 +9,19 @@ const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 
-const { filesDir } = require('./test_helpers/env');
+const { filesDir } = require('./helpers/env');
 process.env.IMAGE_SANITIZE = 'off';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
 let app, db, enabled = false, admin, adminB;
-const events = () => require('./src/security/security-events.service');
-const alertsService = () => require('./src/security/alerts.service');
+const events = () => require('../src/security/security-events.service');
+const alertsService = () => require('../src/security/alerts.service');
 
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
     admin = await roleUser('admin');
     adminB = await roleUser('admin');

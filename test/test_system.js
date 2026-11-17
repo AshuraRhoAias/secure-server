@@ -11,7 +11,7 @@ async function testSystem() {
     totalTests++;
     try {
         console.log('🔐 Test 1: Sistema de cifrado triple');
-        const tripleEncryptor = require('./src/crypto/tripleEncryptor');
+        const tripleEncryptor = require('../src/crypto/tripleEncryptor');
 
         const testData = 'Test de cifrado ultra seguro ' + Date.now();
         const encrypted = tripleEncryptor.encrypt(testData);
@@ -31,7 +31,7 @@ async function testSystem() {
     totalTests++;
     try {
         console.log('🗄️ Test 2: Variables de entorno');
-        const credentialBuilder = require('./src/config/credential-builder');
+        const credentialBuilder = require('../src/config/credential-builder');
 
         // Solo validar que las variables existen
         credentialBuilder.validateCredentials();
@@ -46,7 +46,7 @@ async function testSystem() {
     totalTests++;
     try {
         console.log('🔑 Test 3: Generación de credenciales');
-        const credentialBuilder = require('./src/config/credential-builder');
+        const credentialBuilder = require('../src/config/credential-builder');
 
         const jwtSecret = credentialBuilder.generateJWTSecret();
 
@@ -64,7 +64,7 @@ async function testSystem() {
     totalTests++;
     try {
         console.log('🎭 Test 4: Sistema de camuflaje de mensajes');
-        const disguiser = require('./src/crypto/disguiser');
+        const disguiser = require('../src/crypto/disguiser');
 
         const testKeys = {
             key1: 'test_key_1',
@@ -88,7 +88,7 @@ async function testSystem() {
     totalTests++;
     try {
         console.log('🛡️ Test 5: Verificación de integridad');
-        const serverCheck = require('./src/middleware/serverCheck.middleware');
+        const serverCheck = require('../src/middleware/serverCheck.middleware');
 
         const status = serverCheck.getStatus();
 

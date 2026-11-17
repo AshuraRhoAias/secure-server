@@ -15,7 +15,7 @@ async function prepareDatabase() {
             multipleStatements: true, connectTimeout: 3000
         });
         await root.query(`DROP DATABASE IF EXISTS \`${DB_NAME}\`; CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4; USE \`${DB_NAME}\`;`);
-        await root.query(fs.readFileSync(path.join(__dirname, '../database/schema.sql'), 'utf8'));
+        await root.query(fs.readFileSync(path.join(__dirname, '../../database/schema.sql'), 'utf8'));
         await root.end();
         return true;
     } catch (error) {
@@ -25,13 +25,13 @@ async function prepareDatabase() {
 }
 
 function buildApp() {
-    const protection = require('../src/middleware/protection.middleware');
-    const { sanitizeInput } = require('../src/middleware/sanitize.middleware');
-    const { createErrorHandler } = require('../src/middleware/error.middleware');
-    const { registerRoutes } = require('../src/api/routes');
+    const protection = require('../../src/middleware/protection.middleware');
+    const { sanitizeInput } = require('../../src/middleware/sanitize.middleware');
+    const { createErrorHandler } = require('../../src/middleware/error.middleware');
+    const { registerRoutes } = require('../../src/api/routes');
 
-    const tracing = require('../src/observability/tracing');
-    const metrics = require('../src/observability/metrics');
+    const tracing = require('../../src/observability/tracing');
+    const metrics = require('../../src/observability/metrics');
 
     const app = express();
     app.set('trust proxy', true); // las pruebas simulan IPs distintas con X-Forwarded-For

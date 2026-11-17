@@ -3,7 +3,7 @@
   "info": {
     "title": "Secure Server API",
     "version": "1.0.0",
-    "description": "Definición para pentesters y escáneres (ZAP, Burp). Se valida contra el código en test_api.js: si se añade una ruta sin documentarla, la prueba falla."
+    "description": "Definición para pentesters y escáneres (ZAP, Burp). Se valida contra el código en test/test_api.js: si se añade una ruta sin documentarla, la prueba falla."
   },
   "servers": [
     {

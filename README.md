@@ -2,7 +2,7 @@
 
 > **secure-server** es una API REST en Node.js (Express 5 + MySQL/MariaDB) para guardar y servir datos sensibles, con una **interfaz web de operación** (Next.js) para administradores. Los campos sensibles se cifran con AES-256-GCM (formato `v4`), los archivos se cifran por archivo y por bloques (en disco local o en un bucket S3), cada petición pasa por detección de inyecciones, límites y bloqueos **cuyo estado vive en MySQL**, y las claves se rotan con migración de datos.
 >
-> 📘 **Detalle, operación y límites honestos: [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md)** · bitácora de auditoría y mejoras: [`ReadmeLogsMejoras.md`](ReadmeLogsMejoras.md) · interfaz web: [`web/README.md`](web/README.md) · pruebas: `npm run test:all` (MariaDB; ver `test_helpers/env.js`).
+> 📘 **Detalle, operación y límites honestos: [`docs/SEGURIDAD.md`](docs/SEGURIDAD.md)** · bitácora de auditoría y mejoras: [`ReadmeLogsMejoras.md`](ReadmeLogsMejoras.md) · interfaz web: [`web/README.md`](web/README.md) · pruebas: `npm run test:all` (MariaDB; ver `test/helpers/env.js`).
 
 ## 🧭 Descripción del proyecto
 
@@ -46,7 +46,7 @@ manejador de errores global (4xx del cliente se respetan; el resto → 500 sin d
 
 ### Endpoints
 
-Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints -- --write`; `test_api.js` falla si se desincroniza). «JWT» significa sesión válida; cada ruta de `/api/system` exige además su permiso (`src/security/permissions.js`).
+Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints -- --write`; `test/test_api.js` falla si se desincroniza). «JWT» significa sesión válida; cada ruta de `/api/system` exige además su permiso (`src/security/permissions.js`).
 
 <!-- endpoints:inicio -->
 | Grupo | Método | Ruta | Acceso | Descripción |
@@ -299,7 +299,7 @@ module.exports = router;
 
 **4. Listo.** Reinicia el servidor: en el arranque verás `↳ /api/tasks (protected)`. Ya hereda JWT, rate limiting, detección de anomalías, cifrado y auditoría.
 
-**5. Test** — añade casos a `test_api.js` (usa una BD simulada en memoria, así que no necesita MySQL) y ejecuta `npm run test:api`. Comprueba como mínimo: 401 sin token, validación 400, que otro usuario no ve tus datos y que en BD no queda texto plano.
+**5. Test** — añade casos a `test/test_api.js` (usa una BD simulada en memoria, así que no necesita MySQL) y ejecuta `npm run test:api`. Comprueba como mínimo: 401 sin token, validación 400, que otro usuario no ve tus datos y que en BD no queda texto plano.
 
 ### Checklist de seguridad para cada API nueva
 
@@ -568,7 +568,7 @@ Mantener el servidor cerrado ante la duda es deliberado: reabrirlo a medias de u
 **Probado** (`npm run test:rotation`: 48 pruebas; se omiten si no hay BD, y entonces las suites salen "verdes" con pruebas omitidas: comprueba que `skipped` sea 0):
 - Contra **MariaDB 10.11 y MySQL 8.0.46 reales** (las tres suites: 82/82 en cada motor, 0 omitidas): rotaciones encadenadas, backups por mes, fallos antes/durante/después del commit, `COMMIT` ambiguo, `recover`, migración legacy, restauración, guardián y CLI. Los tests se verificaron con mutaciones deliberadas.
 - **`kill -9` en 44 instantes aleatorios** de la rotación (prueba manual de oct-2026; incluido justo tras el commit y durante la liberación del lock): en todos, tras `recover`, los datos íntegros y legibles, huella coherente, lock liberado y sin temporales sueltos.
-- **En la suite automática** (`test_rotation.js`, proceso hijo real): muerte con la transacción abierta, justo tras el `COMMIT` de la BD (con el journal aún en `PREPARED`) y a mitad de colocar los archivos; rotación parada a la que la BD corta las conexiones; pérdida del cerrojo antes de confirmar; `recover` sin BD. Y el bloqueo de entradas y salidas durante el mantenimiento.
+- **En la suite automática** (`test/test_rotation.js`, proceso hijo real): muerte con la transacción abierta, justo tras el `COMMIT` de la BD (con el journal aún en `PREPARED`) y a mitad de colocar los archivos; rotación parada a la que la BD corta las conexiones; pérdida del cerrojo antes de confirmar; `recover` sin BD. Y el bloqueo de entradas y salidas durante el mantenimiento.
 - **Escrituras concurrentes**: con el servidor real y 8 escritores durante la rotación (≈63 000 peticiones), 0 escrituras confirmadas perdidas o corruptas y 0 respuestas 5xx.
 - **El job programado real** (`executeScheduledRotation`, semanal por defecto) y el servidor real (login, notas, endpoints de administrador).
 

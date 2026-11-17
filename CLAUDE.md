@@ -10,7 +10,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 |---|---|
 | Arrancar API / cluster | `npm start` · `npm run start:cluster` (`npm run dev` se niega en producción) |
 | Lint (puerta del CI, 0 avisos) | `npm run lint:security` |
-| Pruebas del API sin BD | `npm run test:api` (incluye OpenAPI = rutas y README = OpenAPI) · `npm run test:fuzz` · `node --test test_kms.js test_s3.js` |
+| Pruebas del API sin BD | `npm run test:api` (incluye OpenAPI = rutas y README = OpenAPI) · `npm run test:fuzz` · `node --test test/test_kms.js test/test_s3.js` |
 | Todas las del API | `npm run test:all` / `npm run coverage` (**necesitan MariaDB**: sin ella las de BD se omiten, no fallan) |
 | Web | `cd web && npm run typecheck && npm test && npm run build` · e2e: `npm run test:e2e` (MariaDB + Playwright) |
 | Tabla de endpoints del README | `npm run docs:endpoints -- --write` (tras tocar `docs/openapi.json`) |
@@ -25,7 +25,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 - `src/files` (cifrado por bloques, local o S3, antivirus, saneado) · `src/maintenance` (rotación, particiones) ·
   `src/observability` (métricas, trazas, stream SSE, estado del cluster) · `src/tasks/leader.js` (líder por `GET_LOCK`)
 - `database/schema.sql` + `database/migrations/NNN_*.sql` (toda columna nueva va en las dos)
-- `web/` (BFF: `src/lib/{bff,session,sso,stream,client}.ts`; e2e en `web/e2e/`) · `test_*.js` en la raíz · `test_helpers/`
+- `web/` (BFF: `src/lib/{bff,session,sso,stream,client}.ts`; e2e en `web/e2e/`) · `test/` (todas las `test_*.js`) · `test/helpers/`
 - Documentación: `README.md`, `docs/SEGURIDAD.md`, `docs/openapi.json`, `ReadmeLogsMejoras.md` (bitácora maestra),
   `PruebasLinux/ReadmeLogMejoras.md`; histórico en `docs/historico/`.
 
@@ -39,11 +39,11 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   (credenciales) no deben subirse nunca.
 - Bases de datos: fase SQL (MariaDB/MySQL + PostgreSQL/Supabase) con adaptador de dialecto; MongoDB más adelante
   (`docs/BASES-DE-DATOS.md`, sección «Estado»). El motor se elige con `DB_CLIENT` en `src/config/db-drivers/` (el ÚNICO sitio que
-  importa `mysql2`/`pg`; `test_db.js` lo comprueba). Todo driver cumple el contrato documentado allí. SQL nuevo, portable:
+  importa `mysql2`/`pg`; `test/test_db.js` lo comprueba). Todo driver cumple el contrato documentado allí. SQL nuevo, portable:
   `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, nunca `SUM(condición)`. No afirmar soporte de PostgreSQL sin su job del CI en verde.
 - Claves: el `.env` local ya tiene `KEY_EPOCH` (modo estable) y `AUTO_ROTATION_ENABLED=true`. La rotación automática es **semanal**
   (`KEY_ROTATION_CRON`, domingo 02:00): en mantenimiento no entra ni sale nada salvo el aviso de rotación fallida; todo cambio en
-  la rotación debe mantener las pruebas de caídas reales de `test_rotation.js` (proceso hijo `test_helpers/rotation-child.js`).
+  la rotación debe mantener las pruebas de caídas reales de `test/test_rotation.js` (proceso hijo `test/helpers/rotation-child.js`).
 - ClamAV local (1.5.4, servicio `ClamD` en arranque **manual**: `Start-Service ClamD`); instaladores con menú en `instalar.*` e
   `instalador/` (`INSTALL.md`). Linux y macOS sin ejecutar todavía.
 - Archivos en S3 con driver propio (`src/files/s3-store.js`); interfaz web con alcance completo.

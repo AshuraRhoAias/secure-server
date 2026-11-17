@@ -8,9 +8,9 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
-const { resolveClient, loadDriver } = require('./src/config/db-drivers');
+require('./helpers/env');
+const helpers = require('./helpers/app');
+const { resolveClient, loadDriver } = require('../src/config/db-drivers');
 
 // ------------------------------------------------------------------ elección del motor (sin BD)
 
@@ -49,12 +49,12 @@ test('un único punto de entrada: solo el driver importa el cliente de la base d
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) walk(full);
             else if (entry.name.endsWith('.js') && /require\(['"](mysql2|mysql|pg|postgres|mariadb)(\/[^'"]*)?['"]\)/.test(fs.readFileSync(full, 'utf8'))) {
-                offenders.push(path.relative(__dirname, full).replace(/\\/g, '/'));
+                offenders.push(path.relative(path.join(__dirname, '..'), full).replace(/\\/g, '/'));
             }
         }
     };
-    walk(path.join(__dirname, 'src'));
-    walk(path.join(__dirname, 'scripts'));
+    walk(path.join(__dirname, '..', 'src'));
+    walk(path.join(__dirname, '..', 'scripts'));
     assert.deepStrictEqual(offenders, ['src/config/db-drivers/mysql.js']);
 });
 
@@ -67,13 +67,13 @@ test('SQL portable: sin SUM(condición), que en PostgreSQL falla (boolean); se u
             if (entry.isDirectory()) walk(full);
             else if (entry.name.endsWith('.js')) {
                 for (const m of fs.readFileSync(full, 'utf8').matchAll(/SUM\(\s*(?!CASE\b)((?:[^()]|\([^()]*\))*)\)/gi)) {
-                    if (/(<>|<=|>=|[=<>]|\bIN\s*\(|\bIS\b|\bAND\b|\bOR\b)/i.test(m[1])) offenders.push(`${path.relative(__dirname, full)}: ${m[0]}`);
+                    if (/(<>|<=|>=|[=<>]|\bIN\s*\(|\bIS\b|\bAND\b|\bOR\b)/i.test(m[1])) offenders.push(`${path.relative(path.join(__dirname, '..'), full)}: ${m[0]}`);
                 }
             }
         }
     };
-    walk(path.join(__dirname, 'src'));
-    walk(path.join(__dirname, 'scripts'));
+    walk(path.join(__dirname, '..', 'src'));
+    walk(path.join(__dirname, '..', 'scripts'));
     assert.deepStrictEqual(offenders, []);
 });
 
@@ -82,7 +82,7 @@ test('SQL portable: sin SUM(condición), que en PostgreSQL falla (boolean); se u
 let db, enabled = false;
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
-    if (enabled) db = require('./src/config/database');
+    if (enabled) db = require('../src/config/database');
 });
 test.after(async () => { if (db?.pool) await db.pool.end(); });
 const itDb = (name, fn) => test(`contrato: ${name}`, async (t) => { if (!enabled) return t.skip('sin BD'); await fn(t); });

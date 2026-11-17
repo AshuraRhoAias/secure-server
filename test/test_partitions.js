@@ -4,16 +4,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 
 let dbAvailable = false, db, parts, events;
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
-    parts = require('./src/maintenance/events-partitions');
-    events = require('./src/security/security-events.service');
+    db = require('../src/config/database');
+    parts = require('../src/maintenance/events-partitions');
+    events = require('../src/security/security-events.service');
 });
 test.after(async () => { if (db?.pool) await db.close(); });
 const itDb = (name, fn) => test(name, async (t) => { if (!dbAvailable) return t.skip('sin base de datos'); await fn(t); });

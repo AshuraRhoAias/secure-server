@@ -8,10 +8,10 @@ const assert = require('node:assert');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
-const { MockSamlIdp } = require('./test_helpers/mock-saml-idp');
+const { MockSamlIdp } = require('./helpers/mock-saml-idp');
 
 let app, db, idp, ACS, SP_ENTITY, enabled = false;
 
@@ -25,7 +25,7 @@ const configure = (extra = {}) => {
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
     idp = new MockSamlIdp();
     ACS = `${app.base}/api/saml/acs`;
@@ -121,7 +121,7 @@ itDb('login correcto: se crea el usuario, sesión con amr "saml", el email se gu
     assert.strictEqual((await api(app.base, 'GET', '/api/notes', { token: res.body.token, ip: res.ip })).status, 200);
 
     const [[user]] = await db.query("SELECT id, username_encrypted, email_encrypted, role, password_hash FROM users ORDER BY id DESC LIMIT 1");
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     assert.match(enc.decrypt(user.username_encrypted), /^sso_[0-9a-f]{20}$/);
     assert.strictEqual(enc.decrypt(user.email_encrypted), 'persona@ejemplo.com');
     assert.ok(user.email_encrypted.startsWith('v4:') && !user.email_encrypted.includes('ejemplo'));
@@ -368,14 +368,14 @@ itDb('entradas hostiles al ACS: sin cuerpo, no base64, enormes, XML roto, DOCTYP
 itDb('quien insiste con respuestas falsas acaba bloqueado (strikes)', async () => {
     const ip = testIp();
     for (let i = 0; i < 10; i++) await acsPost(Buffer.from(`<x>${i}</x>`).toString('base64'), ip);
-    const anomaly = require('./src/security/anomaly-detection.service');
+    const anomaly = require('../src/security/anomaly-detection.service');
     assert.strictEqual(await anomaly.isIPBlocked(ip), true);
     assert.strictEqual((await acsPost('AAAA', ip)).status, 403);
 });
 
 itDb('la limpieza periódica borra de saml_cache lo caducado', async () => {
     await db.query("INSERT INTO saml_cache (cache_key, cache_value, expires_at) VALUES ('viejo', 'x', DATE_SUB(NOW(), INTERVAL 2 HOUR))");
-    assert.ok(await require('./src/sso/saml.service').purgeExpired() >= 1);
+    assert.ok(await require('../src/sso/saml.service').purgeExpired() >= 1);
     assert.strictEqual((await db.query("SELECT 1 FROM saml_cache WHERE cache_key = 'viejo'"))[0].length, 0);
 });
 

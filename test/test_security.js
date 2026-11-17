@@ -4,7 +4,7 @@
 //   npm run test:security
 //
 // Las pruebas de integración usan MySQL/MariaDB REAL y una aplicación con los mismos middlewares y
-// rutas que producción (ver test_helpers/). Se omiten si no hay base de datos disponible.
+// rutas que producción (ver test/helpers/). Se omiten si no hay base de datos disponible.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -13,8 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, rawRequest, registerAndLogin, uniqueName, testIp, PASSWORD } = helpers;
 
 const withEnv = async (vars, fn) => {
@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ============================================================================ CIFRADO (puro)
 
 test('cifrado v4: AES-256-GCM, IV aleatorio, ida y vuelta (incluye vacío y unicode)', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     for (const text of ['', 'hola', 'ñandú 🔐 日本語', 'x'.repeat(1_000_000)]) {
         const c = enc.encrypt(text);
         assert.ok(c.startsWith('v4:'));
@@ -39,7 +39,7 @@ test('cifrado v4: AES-256-GCM, IV aleatorio, ida y vuelta (incluye vacío y unic
 });
 
 test('cifrado v4: cualquier alteración del texto cifrado se detecta', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     const raw = Buffer.from(enc.encrypt('dato sensible').slice(3), 'base64');
     // 0-11 IV · 12-27 etiqueta · 28.. datos: se voltea un bit en cada zona
     for (const position of [0, 11, 12, 27, 28, raw.length - 1]) {
@@ -53,8 +53,8 @@ test('cifrado v4: cualquier alteración del texto cifrado se detecta', () => {
 });
 
 test('cifrado v4: una clave distinta no descifra, y withKey restaura la clave aunque falle', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
-    const secureEnv = require('./src/config/secure-env');
+    const enc = require('../src/crypto/tripleEncryptor');
+    const secureEnv = require('../src/config/secure-env');
     const c = enc.encrypt('secreto');
     const other = crypto.randomBytes(32).toString('hex');
 
@@ -65,21 +65,21 @@ test('cifrado v4: una clave distinta no descifra, y withKey restaura la clave au
 });
 
 test('cifrado: la clave de campo se deriva (HKDF) y no es la clave maestra', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     assert.notStrictEqual(enc._fieldKey().toString('hex'), enc.getKey());
 });
 
 test('cifrado: los datos del formato triple antiguo siguen siendo legibles', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
-    const [l1, l2, l3] = [require('./src/crypto/level1'), require('./src/crypto/level2'), require('./src/crypto/level3')];
+    const enc = require('../src/crypto/tripleEncryptor');
+    const [l1, l2, l3] = [require('../src/crypto/level1'), require('../src/crypto/level2'), require('../src/crypto/level3')];
     const legacy = l3.encrypt(l2.encrypt(l1.encrypt('dato antiguo')));
     assert.ok(enc.isLegacy(legacy));
     assert.strictEqual(enc.decrypt(legacy), 'dato antiguo');
 });
 
 test('cifrado: no escribe NADA en consola (ni claves, ni IV, ni fragmentos cifrados)', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
-    const l3 = require('./src/crypto/level3');
+    const enc = require('../src/crypto/tripleEncryptor');
+    const l3 = require('../src/crypto/level3');
     const calls = [];
     const saved = {};
     for (const m of ['log', 'info', 'warn', 'error', 'debug']) { saved[m] = console[m]; console[m] = (...a) => calls.push(a); }
@@ -95,13 +95,13 @@ test('cifrado: no escribe NADA en consola (ni claves, ni IV, ni fragmentos cifra
 });
 
 test('cifrado: healthCheck verifica v4, formato antiguo y rechazo de alterados', async () => {
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     assert.deepStrictEqual((await enc.healthCheck()).healthy, true);
 });
 
 // ============================================================================ DETECTOR (puro)
 
-const { scanText, scanObject, scanRequest, normalize } = require('./src/security/injection-detector');
+const { scanText, scanObject, scanRequest, normalize } = require('../src/security/injection-detector');
 const highRules = (text, opts = { location: 'query', field: 'q' }) => scanText(text, opts).filter(f => f.severity === 'high').map(f => f.rule);
 
 const ATTACKS = [
@@ -220,7 +220,7 @@ test('detector: normalize decodifica %xx dos veces, Unicode y comentarios SQL', 
 
 // ============================================================================ IP (puro)
 
-const { normalizeIp, ipSubject, isNeverBlocked } = require('./src/security/ip');
+const { normalizeIp, ipSubject, isNeverBlocked } = require('../src/security/ip');
 
 test('IP: IPv4 dentro de IPv6 se normaliza y IPv6 se agrupa por /64', () => {
     assert.strictEqual(normalizeIp('::ffff:1.2.3.4'), '1.2.3.4');
@@ -269,7 +269,7 @@ test('no hay SQL con interpolación: solo sqlInt()/sqlPlaceholders()/sqlFragment
 });
 
 test('sqlFragment: solo devuelve trozos del registro cerrado; cualquier otro nombre o tipo lanza', () => {
-    const { sqlFragment } = require('./src/config/sql');
+    const { sqlFragment } = require('../src/config/sql');
     assert.match(sqlFragment('liveSession'), /^revoked_at IS NULL AND expires_at > NOW\(\)/);
     for (const bad of ['', 'x', 'liveSession; DROP TABLE users', '__proto__', 'constructor', 'toString', null, undefined, 1, {}, ['liveSession']]) {
         assert.throws(() => sqlFragment(bad), RangeError, String(bad));
@@ -289,10 +289,10 @@ const children = [];
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
-    enc = require('./src/crypto/tripleEncryptor');
-    events = require('./src/security/security-events.service');
-    anomaly = require('./src/security/anomaly-detection.service');
+    db = require('../src/config/database');
+    enc = require('../src/crypto/tripleEncryptor');
+    events = require('../src/security/security-events.service');
+    anomaly = require('../src/security/anomaly-detection.service');
     app = await helpers.startApp();
 });
 
@@ -313,7 +313,7 @@ const eventsOf = async (ip, extra = '') => {
 };
 
 async function startChild(extraEnv = {}) {
-    const child = spawn(process.execPath, [path.join(__dirname, 'test_helpers/serve.js')], {
+    const child = spawn(process.execPath, [path.join(__dirname, 'helpers/serve.js')], {
         env: { ...process.env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe']
     });
     children.push(child);
@@ -480,7 +480,7 @@ const badLogin = (ip, username, password = 'incorrecta') => api(app.base, 'POST'
 itDb('bloqueo de cuenta: 5 fallos y el 6º intento (aunque sea correcto) devuelve 429', async () => {
     const ip = testIp();
     const user = await registerAndLogin(app.base, { ip });
-    const hash = require('./src/security/secure-auth.service').generateUsernameHash(user.username);
+    const hash = require('../src/security/secure-auth.service').generateUsernameHash(user.username);
 
     for (let i = 0; i < 5; i++) {
         const r = await badLogin(ip, user.username);
@@ -702,7 +702,7 @@ itDb("cuerpo con firmas de inyección: en rutas críticas (/api/auth) SÍ se rec
 });
 
 itDb("INJECTION_BLOCK_PATHS cambia qué rutas son críticas; las firmas en query/cabeceras se rechazan siempre", async () => {
-    const protection = require('./src/middleware/protection.middleware');
+    const protection = require('../src/middleware/protection.middleware');
     assert.ok(protection.isCriticalPath('/api/auth/login', ['/api/auth']));
     assert.ok(protection.isCriticalPath('/api/auth', ['/api/auth']));
     assert.ok(!protection.isCriticalPath('/api/authors', ['/api/auth']), 'prefijo con frontera: /api/authors no es /api/auth');
@@ -770,7 +770,7 @@ itDb('exceso de ráfagas 401/403 desde una IP → bloqueo', async () => {
 
 itDb('JWT: alg=none, firma ajena, payload alterado, HS512 y token sin sesión → 401', async () => {
     const jwt = require('jsonwebtoken');
-    const credentialBuilder = require('./src/config/credential-builder');
+    const credentialBuilder = require('../src/config/credential-builder');
     const ip = testIp();
     const user = await registerAndLogin(app.base, { ip });
     const secret = credentialBuilder.generateJWTSecret();
@@ -910,7 +910,7 @@ itDb('eventos: se redactan campos sensibles y se acota el tamaño', async () => 
 });
 
 itDb('limpieza: purga contadores y eventos antiguos y no toca lo reciente', async () => {
-    const housekeeping = require('./src/tasks/securityHousekeeping');
+    const housekeeping = require('../src/tasks/securityHousekeeping');
     await db.query("INSERT INTO rate_limit_counters (scope, subject, window_start, hits) VALUES ('old', 'x', 1000, 5)");
     await db.query("INSERT INTO security_events (event_type, ip_address, created_at) VALUES ('VIEJO', '198.51.100.250', DATE_SUB(NOW(), INTERVAL 400 DAY))");
     await db.query("INSERT INTO security_events (event_type, ip_address) VALUES ('RECIENTE', '198.51.100.251')");

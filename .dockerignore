@@ -18,7 +18,6 @@ logs
 reports
 deploy
 docs
-test_*.js
-test_helpers
+test
 *.md
 *.stackdump

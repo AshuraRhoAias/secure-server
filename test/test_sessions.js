@@ -6,8 +6,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const jwt = require('jsonwebtoken');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp, PASSWORD } = helpers;
 
 let app, db, enabled = false;
@@ -16,7 +16,7 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
 });
 test.after(async () => {
@@ -260,8 +260,8 @@ test('tokens largos anteriores (sin v:2, buscados por hash) siguen valiendo hast
     if (!enabled) return t.skip('sin BD');
     const ip = testIp();
     const user = await registerAndLogin(app.base, { ip });
-    const credentialBuilder = require('./src/config/credential-builder');
-    const secureAuth = require('./src/security/secure-auth.service');
+    const credentialBuilder = require('../src/config/credential-builder');
+    const secureAuth = require('../src/security/secure-auth.service');
 
     const legacy = jwt.sign({ userId: user.userId, username: user.username, sessionId: 'x', riskLevel: 'low', amr: ['pwd'] },
         credentialBuilder.generateJWTSecret(), { algorithm: 'HS256', expiresIn: '5d' });

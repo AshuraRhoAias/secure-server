@@ -12,9 +12,9 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { filesDir } = require('./test_helpers/env');
+const { filesDir } = require('./helpers/env');
 process.env.IMAGE_SANITIZE = 'off';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kms-files-'));
@@ -33,8 +33,8 @@ test.before(async () => {
     if (!dbAvailable) return;
     process.env.KMS_PROVIDER = 'file';
     process.env.KMS_KEK_FILE = kekFile;
-    db = require('./src/config/database');
-    dataKeys = require('./src/crypto/kms-data-keys');
+    db = require('../src/config/database');
+    dataKeys = require('../src/crypto/kms-data-keys');
     app = await helpers.startApp();
     ip = testIp();
     alice = await registerAndLogin(app.base, { ip });
@@ -159,9 +159,9 @@ itDb('la caché de claves respeta KMS_DATA_KEY_CACHE_SECONDS=0 (cada lectura va 
 
 // 4. rotación y snapshot -------------------------------------------------------------------------------------
 itDb('rotación y snapshot dejan intactas las claves kms1: (no dependen de la clave maestra)', async () => {
-    const { isExternal } = require('./src/crypto/encrypted-columns');
-    const { buildSnapshot, restoreSnapshot } = require('./src/backup/snapshot');
-    const enc = require('./src/crypto/tripleEncryptor');
+    const { isExternal } = require('../src/crypto/encrypted-columns');
+    const { buildSnapshot, restoreSnapshot } = require('../src/backup/snapshot');
+    const enc = require('../src/crypto/tripleEncryptor');
     assert.ok(isExternal('kms1:file:abc') && !isExternal('v4:abc') && !isExternal(null));
 
     let id;
@@ -185,15 +185,15 @@ itDb('rotación y snapshot dejan intactas las claves kms1: (no dependen de la cl
     assert.strictEqual((await download(id)).status, 200);
 
     // Rotación: el servicio salta kms1: tanto al re-cifrar como al verificar
-    const Rotation = require('./src/maintenance/rotation.service');
-    const source = fs.readFileSync(require.resolve('./src/maintenance/rotation.service'), 'utf8');
+    const Rotation = require('../src/maintenance/rotation.service');
+    const source = fs.readFileSync(require.resolve('../src/maintenance/rotation.service'), 'utf8');
     assert.ok((source.match(/isExternal\(/g) || []).length >= 2, 'reencryptAll y verifyAll saltan los valores externos');
     assert.ok(Rotation);
 });
 
 // 5. CLI ------------------------------------------------------------------------------------------------------
 const cli = (args, env = {}) => new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(__dirname, 'scripts/kms.js'), ...args], { env: { ...process.env, ENV_FILE: '/nonexistent', ...env } });
+    const child = spawn(process.execPath, [path.join(__dirname, '..', 'scripts/kms.js'), ...args], { env: { ...process.env, ENV_FILE: '/nonexistent', ...env } });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
     child.on('close', status => resolve({ status, out, err }));
@@ -264,7 +264,7 @@ itDb('CLI: una fila ilegible no bloquea las demás: se informa y el comando term
 
 // 6. Vault ----------------------------------------------------------------------------------------------------
 itDb('con Vault Transit: la clave de cada archivo viaja envuelta y el texto claro nunca sale en la petición registrada', async () => {
-    const child = spawn(process.execPath, [path.join(__dirname, 'test_helpers/mock-kms-server.js'), 'vault'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const child = spawn(process.execPath, [path.join(__dirname, 'helpers/mock-kms-server.js'), 'vault'], { stdio: ['ignore', 'pipe', 'inherit'] });
     servers.push(child);
     const port = await new Promise(resolve => child.stdout.on('data', d => { const m = /PORT (\d+)/.exec(String(d)); if (m) resolve(Number(m[1])); }));
     const saved = { p: process.env.KMS_PROVIDER, a: process.env.VAULT_ADDR, t: process.env.VAULT_TOKEN };

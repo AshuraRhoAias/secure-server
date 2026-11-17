@@ -5,17 +5,17 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
-const totp = require('./src/security/totp');
+const totp = require('../src/security/totp');
 
 let app, db, enabled = false;
 
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
 });
 test.after(async () => {
@@ -53,9 +53,9 @@ const REASON = 'Dispositivo perdido, verificado por videollamada con el titular'
 // ============================================================================ permisos (puro)
 
 test('permisos: un permiso desconocido falla al definir la ruta, no deja la ruta abierta', () => {
-    const roleMiddleware = require('./src/middleware/role.middleware');
+    const roleMiddleware = require('../src/middleware/role.middleware');
     assert.throws(() => roleMiddleware.requirePermission('system:redd'), /Permiso desconocido/);
-    const { can, ROLES } = require('./src/security/permissions');
+    const { can, ROLES } = require('../src/security/permissions');
     assert.deepStrictEqual(ROLES, ['user', 'auditor', 'operator', 'admin']);
     assert.strictEqual(can('user', 'system:read'), false);
     assert.strictEqual(can('rol-inventado', 'system:read'), false);
@@ -63,7 +63,7 @@ test('permisos: un permiso desconocido falla al definir la ruta, no deja la ruta
 });
 
 test('permisos: la operación y observabilidad nuevas son SOLO admin', () => {
-    const { PERMISSIONS } = require('./src/security/permissions');
+    const { PERMISSIONS } = require('../src/security/permissions');
     for (const name of ['alerts:read', 'alerts:manage', 'dashboard:read', 'metrics:read', 'privacy:export', 'privacy:erase',
         'sessions:revoke-any', 'approvals:read', 'approvals:decide', 'accounts:mfa-reset', 'system:operate']) {
         assert.deepStrictEqual(PERMISSIONS[name], ['admin'], name);
@@ -105,7 +105,7 @@ itDb('matriz: cada rol solo llega a lo suyo (403 para el resto)', async () => {
 });
 
 itDb('default-deny: TODA ruta de /api/system rechaza al usuario normal (nadie se dejó una ruta sin permiso)', async () => {
-    const router = require('./src/api/routes/system.routes');
+    const router = require('../src/api/routes/system.routes');
     const user = await userWithRole('user');
     const routes = router.stack.filter(layer => layer.route);
     assert.ok(routes.length >= 15);
@@ -127,7 +127,7 @@ itDb('el rol se lee de la BD en cada petición: quitarlo surte efecto al instant
 });
 
 itDb('un rol desconocido que llegara de la BD no concede acceso aunque el permiso lo "permitiera"', async () => {
-    const roleMiddleware = require('./src/middleware/role.middleware');
+    const roleMiddleware = require('../src/middleware/role.middleware');
     const original = db.query;
     db.query = async () => [[{ role: 'superadmin' }]];
     try {

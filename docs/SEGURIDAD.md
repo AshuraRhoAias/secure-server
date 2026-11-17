@@ -382,7 +382,7 @@ pasa a ser la base de datos.
 ### MFA (TOTP + códigos de recuperación)
 
 Compatible con Google Authenticator, Microsoft Authenticator, Authy, 1Password, Bitwarden… (RFC 6238, verificado con los
-vectores del RFC en `test_mfa.js`).
+vectores del RFC en `test/test_mfa.js`).
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -421,7 +421,7 @@ Authorization code + **PKCE**. Funciona con cualquier proveedor que publique `/.
 Flujo: `GET /api/sso/login` (redirige al proveedor; `?format=json` devuelve la URL) → el usuario se autentica →
 `GET /api/sso/callback?code&state` → sesión con `amr=['sso']`.
 
-Lo que se comprueba (cada punto tiene prueba contra un proveedor simulado, `test_sso.js`, 29 pruebas): `state` de un solo
+Lo que se comprueba (cada punto tiene prueba contra un proveedor simulado, `test/test_sso.js`, 29 pruebas): `state` de un solo
 uso y con caducidad guardado **en la BD** (el callback puede caer en otra instancia); `nonce` ligado al `id_token`;
 PKCE; que el documento de descubrimiento declare **el mismo issuer** (defensa contra *mix-up*); firma con las claves del
 proveedor y **solo algoritmos asimétricos** (se rechazan `none` y `HS256` con el secreto del cliente); `iss`, `aud`/`azp`, `exp`, `sub`;
@@ -496,8 +496,8 @@ o hecho a medida pasa. Es una capa más, no una garantía. Mantén `freshclam` a
 > cifrados por archivo (el proveedor no ve el contenido; `S3_SSE` es una capa adicional), una petición `GetObject` con `Range` por descarga y
 > cada bloque autenticado igual. `files:backup` se **niega** en ese modo (copiaría una carpeta vacía que parecería buena): las copias son
 > del bucket (versionado + bloqueo de objetos o replicación a otra cuenta/región). La subida se sigue cifrando en streaming a
-> `FILES_DIR/tmp` y se confirma dentro de la transacción: si el bucket falla, no queda fila. Pruebas: `test_s3.js` (sin BD) y
-> `test_files_s3.js`.
+> `FILES_DIR/tmp` y se confirma dentro de la transacción: si el bucket falla, no queda fila. Pruebas: `test/test_s3.js` (sin BD) y
+> `test/test_files_s3.js`.
 
 Los archivos ya están cifrados con clave propia, así que la copia no vuelve a cifrar nada: el destino solo ve bytes aleatorios
 con nombres UUID y un índice sin nombres reales. Para restaurar hacen falta **las dos cosas**: los archivos (aquí) y la BD (con las claves
@@ -556,7 +556,7 @@ cliente pide un JWT nuevo sin volver a pedir la contraseña.
 | `GET` | `/api/auth/sessions` | Lista de sesiones vivas (IP, navegador, país, cómo se autenticó, última actividad) |
 | `DELETE` | `/api/auth/sessions/{id}` | Cierra una sesión concreta (solo las propias) |
 
-Reglas (cada una con prueba en `test_sessions.js`):
+Reglas (cada una con prueba en `test/test_sessions.js`):
 
 - El refresh token **solo se guarda como hash** (SHA-256) y **rota en cada uso**. Si se presenta uno ya usado (señal de que fue
   copiado), **se revoca la sesión entera** y se registra un evento crítico `REFRESH_TOKEN_REUSE` (el atacante y la víctima quedan fuera;
@@ -615,7 +615,7 @@ Con `WEBAUTHN_RP_ID` (dominio, sin esquema ni puerto) y `WEBAUTHN_ORIGINS` (http
 Retos de **un solo uso** en BD (5 min, ligados a usuario y propósito, consumidos con `DELETE` atómico); origen y RP ID **exactos**
 (una respuesta firmada para otro sitio no vale: anti-phishing); **contador de firmas** con actualización optimista (llave clonada ⇒
 rechazo y evento crítico `WEBAUTHN_CLONE_SUSPECTED`); solo *attestation* `none`. Una sesión robada **no puede añadir su propia llave**
-para quedarse. Máximo 10 llaves por usuario. Probado con un autenticador de software que firma de verdad (`test_webauthn.js`, 24 pruebas).
+para quedarse. Máximo 10 llaves por usuario. Probado con un autenticador de software que firma de verdad (`test/test_webauthn.js`, 24 pruebas).
 
 ### SAML 2.0 (proveedor de servicio)
 
@@ -639,7 +639,7 @@ Para organizaciones cuyo IdP solo habla SAML (Entra ID, Okta, ADFS, Keycloak, Go
 | `SAML_SP_PRIVATE_KEY` + `SAML_SP_CERT` | Firmar nuestras solicitudes (opcional) |
 | `SAML_ALLOW_INSECURE_HTTP` | Solo desarrollo |
 
-Reglas (prueba contra un IdP simulado que **firma XML de verdad**, `test_saml.js`, 22 pruebas): solo *SP-initiated* (la respuesta debe
+Reglas (prueba contra un IdP simulado que **firma XML de verdad**, `test/test_saml.js`, 22 pruebas): solo *SP-initiated* (la respuesta debe
 contestar a una solicitud NUESTRA, guardada en BD y de un solo uso; el inicio *IdP-initiated* no se admite); firma con el certificado
 configurado; **emisor, audiencia, destinatario (ACS), destino y estado** exactos; ventanas `NotBefore/NotOnOrAfter` con tolerancia
 acotada; una aserción no se acepta dos veces; defensa contra *signature wrapping* y manipulación tras firmar. Como en OIDC,
@@ -730,7 +730,7 @@ hasta que caduquen: díselo al usuario.
 `npm run coverage:check` aplica los umbrales de `.c8rc.json`. El CI falla si la cobertura baja de los umbrales y publica el resumen en
 cada ejecución. La cobertura **mide qué código se ejecuta, no si las pruebas comprueban lo correcto**: úsala para encontrar lo no probado, no como nota.
 
-**Fuzzing con propiedades** (`test_fuzz.js`, fast-check): entradas aleatorias, mutadas y patológicas contra lo que procesa datos hostiles.
+**Fuzzing con propiedades** (`test/test_fuzz.js`, fast-check): entradas aleatorias, mutadas y patológicas contra lo que procesa datos hostiles.
 Propiedades comprobadas: el detector de tipos nunca lanza y rechaza SIEMPRE ejecutables; nombres de archivo sin rutas, controles ni bidi y estables;
 cifrado de campos y de archivos (cualquier rango; **cualquier byte alterado o truncado se detecta**); `parseRange` acotado; el detector de
 inyección no tarda (sin ReDoS) ni lanza, aguanta JSON de 5000 niveles y sigue detectando ataques con mayúsculas, comentarios y doble codificación;
@@ -842,17 +842,17 @@ del descifrado: se reparte entre procesos, no se acelera por proceso.
   Con 4 workers y 3 máquinas: 120 conexiones. Baja `DB_POOL_SIZE` o sube `max_connections`.
 - Detrás de un balanceador: `TRUST_PROXY`, sondas a `/health/ready`, drenaje (deregistration delay) ≥ `SHUTDOWN_DRAIN_MS`.
 - **Archivos**: `FILES_DIR` debe ser almacenamiento compartido entre máquinas (NFS/EFS) o todas deben ver el mismo disco.
-- El cuello pasa a ser **MariaDB**. Para aliviarla (opcional, ambos con prueba en `test_partitions.js`):
+- El cuello pasa a ser **MariaDB**. Para aliviarla (opcional, ambos con prueba en `test/test_partitions.js`):
   - **Réplica de lectura** (`DB_READ_HOST`): el panel y los análisis de eventos (`db.readQuery`, solo `SELECT`) van a la réplica; si no
     responde, a la principal. Lo que decide la seguridad (bloqueos, límites, sesiones) va **siempre** a la principal: una réplica va con retraso.
   - **`security_events` por meses** (`npm run events:partition -- enable`, reconstruye la tabla: ventana de mantenimiento si es grande): la
     retención pasa de `DELETE … LIMIT 5000` a `DROP PARTITION` (instantáneo) y la tarea de limpieza del líder crea los meses por delante.
 - **Varias máquinas**: `FILES_STORAGE=s3` (§13) para que cualquier réplica sirva cualquier archivo, `TRUST_PROXY`, sondas a `/health/ready`.
   Montaje de referencia en `deploy/docker-compose.yml` (2 réplicas + nginx + MariaDB + SeaweedFS como S3) y `Dockerfile` (producción, usuario sin
-  privilegios, solo lectura). Lo prueba `test_compose.js` en el CI: reparto entre réplicas, **un solo líder entre todas**, un archivo subido
+  privilegios, solo lectura). Lo prueba `test/test_compose.js` en el CI: reparto entre réplicas, **un solo líder entre todas**, un archivo subido
   a una réplica lo sirve otra, el límite de login es común a todas y el stream en vivo atraviesa nginx sin búfer.
 
-Comprobado en `test_scale.js` (MariaDB real, procesos reales): contador del limitador exacto con 50 golpes simultáneos, una sola sentencia por golpe, caché de bloqueo (TTL, invalidación local), líder único y relevo
+Comprobado en `test/test_scale.js` (MariaDB real, procesos reales): contador del limitador exacto con 50 golpes simultáneos, una sola sentencia por golpe, caché de bloqueo (TTL, invalidación local), líder único y relevo
 al parar o al caerse la conexión, cluster con reparto entre procesos y un solo líder, métricas agregadas **sin multiplicar** los gauges que salen de la BD, relanzamiento de un worker (incluido el líder),
 reinicio en caliente con cuatro clientes martilleando sin una petición fallida, supervisor que se detiene si el arranque está roto, y cierre ordenado sin procesos huérfanos.
 Un `SIGKILL` a un worker (p. ej. el OOM-killer) sí corta las conexiones en vuelo y alguna conexión ya entregada a ese worker puede quedarse colgada hasta el *timeout* del cliente: el cierre ordenado no es evitable ahí.

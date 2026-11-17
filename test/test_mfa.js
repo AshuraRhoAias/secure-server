@@ -6,10 +6,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const jwt = require('jsonwebtoken');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp, PASSWORD } = helpers;
-const totp = require('./src/security/totp');
+const totp = require('../src/security/totp');
 
 const nextStepCode = (secret) => totp.totp(secret, { timeMs: Date.now() + 30_000 }); // el paso siguiente (> último aceptado)
 
@@ -76,7 +76,7 @@ let db;
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
 });
 test.after(async () => {
@@ -226,7 +226,7 @@ itDb('otp y recoveryCode a la vez se rechazan (no se elige uno en silencio) y no
 
 itDb('retos manipulados, de otra clave o caducados → 401 INVALID_MFA_TOKEN', async () => {
     const user = await userWithMfa();
-    const credentialBuilder = require('./src/config/credential-builder');
+    const credentialBuilder = require('../src/config/credential-builder');
     const secret = credentialBuilder.generateJWTSecret();
     const payload = { typ: 'mfa', userId: user.userId, username: user.username, uh: 'x'.repeat(64) };
 
@@ -312,8 +312,8 @@ itDb('admins: con MFA_REQUIRED_FOR_ADMINS solo operan con segundo factor; y un a
 });
 
 itDb('la rotación de claves re-cifra el secreto TOTP y el usuario sigue entrando', async () => {
-    const enc = require('./src/crypto/tripleEncryptor');
-    const secureEnv = require('./src/config/secure-env');
+    const enc = require('../src/crypto/tripleEncryptor');
+    const secureEnv = require('../src/config/secure-env');
     const user = await userWithMfa();
     const [[before]] = await db.query('SELECT mfa_secret_encrypted FROM users WHERE id = ?', [user.userId]);
 

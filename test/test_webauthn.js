@@ -7,19 +7,19 @@ const test = require('node:test');
 const assert = require('node:assert');
 const jwt = require('jsonwebtoken');
 
-require('./test_helpers/env');
+require('./helpers/env');
 process.env.WEBAUTHN_RP_ID = 'localhost';
 process.env.WEBAUTHN_ORIGINS = 'http://localhost:5173';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp, PASSWORD } = helpers;
-const { SoftAuthenticator } = require('./test_helpers/webauthn-authenticator');
-const totp = require('./src/security/totp');
+const { SoftAuthenticator } = require('./helpers/webauthn-authenticator');
+const totp = require('../src/security/totp');
 
 let app, db, enabled = false;
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
 });
 test.after(async () => {
@@ -74,7 +74,7 @@ itDb('sin WEBAUTHN_RP_ID / WEBAUTHN_ORIGINS la función está desactivada (404 c
 });
 
 itDb('configuración inválida: orígenes que no son https (salvo localhost fuera de producción) o ajenos al RP ID se rechazan', async () => {
-    const webauthn = require('./src/security/webauthn.service');
+    const webauthn = require('../src/security/webauthn.service');
     const cfg = (rp, origins, env = {}) => withEnv({ WEBAUTHN_RP_ID: rp, WEBAUTHN_ORIGINS: origins, ...env }, () => webauthn.config());
     assert.ok(await cfg('ejemplo.com', 'https://app.ejemplo.com'));
     await assert.rejects(async () => cfg('ejemplo.com', 'http://app.ejemplo.com'), /https/);
@@ -213,7 +213,7 @@ itDb('un reto de registro caduca a los 5 minutos y los caducados se limpian', as
     assert.strictEqual(res.body.code, 'INVALID_CHALLENGE');
 
     await db.query('UPDATE webauthn_challenges SET expires_at = DATE_SUB(NOW(), INTERVAL 1 HOUR)');
-    assert.ok(await require('./src/security/webauthn.service').purgeExpired() >= 0);
+    assert.ok(await require('../src/security/webauthn.service').purgeExpired() >= 0);
     assert.strictEqual(Number((await db.query('SELECT COUNT(*) AS n FROM webauthn_challenges WHERE expires_at < NOW()'))[0][0].n), 0);
 });
 

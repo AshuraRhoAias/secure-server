@@ -1,4 +1,4 @@
-// Pruebas del SSO por OpenID Connect contra un proveedor SIMULADO (test_helpers/mock-idp.js) y MariaDB real.
+// Pruebas del SSO por OpenID Connect contra un proveedor SIMULADO (test/helpers/mock-idp.js) y MariaDB real.
 //
 //   npm run test:sso
 
@@ -6,10 +6,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 
-require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
-const { createMockIdp } = require('./test_helpers/mock-idp');
+const { createMockIdp } = require('./helpers/mock-idp');
 
 const CLIENT_ID = 'secure-server-test';
 const CLIENT_SECRET = 'secreto-del-cliente-de-pruebas';
@@ -34,8 +34,8 @@ function configureSso() {
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
-    oidc = require('./src/sso/oidc.service');
+    db = require('../src/config/database');
+    oidc = require('../src/sso/oidc.service');
     app = await helpers.startApp();
     idp = await createMockIdp({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
     configureSso();
@@ -100,7 +100,7 @@ itDb('inicio: redirige al proveedor con state, nonce y PKCE S256, y el estado vi
     const [[row]] = await db.query('SELECT * FROM oidc_login_state WHERE state_hash = ?', [stateHash]);
     assert.ok(row && row.nonce === p.get('nonce'));
     assert.ok(row.code_verifier_encrypted.startsWith('v4:'));
-    const verifier = require('./src/crypto/tripleEncryptor').decrypt(row.code_verifier_encrypted);
+    const verifier = require('../src/crypto/tripleEncryptor').decrypt(row.code_verifier_encrypted);
     assert.strictEqual(crypto.createHash('sha256').update(verifier).digest('base64url'), p.get('code_challenge'));
     assert.strictEqual((await db.query('SELECT 1 FROM oidc_login_state WHERE state_hash = ?', [p.get('state')]))[0].length, 0, 'el state en claro no se guarda');
 
@@ -125,7 +125,7 @@ itDb('login completo: aprovisiona el usuario, da sesión con amr=sso y la sesió
 
     // Lo guardado: email cifrado (v4) y en minúsculas, rol user, y solo el HASH de la identidad
     const [[u]] = await db.query('SELECT id, email_encrypted, role, password_hash FROM users WHERE id = ?', [profile.body.user.id]);
-    assert.strictEqual(require('./src/crypto/tripleEncryptor').decrypt(u.email_encrypted), 'ana@acme.com');
+    assert.strictEqual(require('../src/crypto/tripleEncryptor').decrypt(u.email_encrypted), 'ana@acme.com');
     assert.strictEqual(u.role, 'user');
     const [[identity]] = await db.query('SELECT issuer, identity_hash FROM user_identities WHERE user_id = ?', [u.id]);
     assert.strictEqual(identity.identity_hash, crypto.createHash('sha256').update(`${idp.issuer}|${sub}`).digest('hex'));
@@ -324,7 +324,7 @@ itDb('quien insiste con states o tokens falsos termina bloqueado', async () => {
     for (let i = 0; i < 10; i++) {
         await api(app.base, 'GET', `/api/sso/callback?code=x&state=${crypto.randomBytes(16).toString('hex')}`, { ip });
     }
-    const anomaly = require('./src/security/anomaly-detection.service');
+    const anomaly = require('../src/security/anomaly-detection.service');
     assert.ok(await anomaly.isIPBlocked(ip));
 });
 

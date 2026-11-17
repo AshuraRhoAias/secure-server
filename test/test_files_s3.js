@@ -1,4 +1,4 @@
-// API de archivos con FILES_STORAGE=s3: MariaDB real + el servidor de pruebas + un S3 SIMULADO (test_helpers/mock-s3.js).
+// API de archivos con FILES_STORAGE=s3: MariaDB real + el servidor de pruebas + un S3 SIMULADO (test/helpers/mock-s3.js).
 // Comprueba que el modo S3 es un cambio de DÓNDE se guardan los bytes cifrados, no de lo que se garantiza.
 //
 //   npm run test:files-s3
@@ -8,9 +8,9 @@ const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { filesDir } = require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
-const { createMockS3 } = require('./test_helpers/mock-s3');
+const { filesDir } = require('./helpers/env');
+const helpers = require('./helpers/app');
+const { createMockS3 } = require('./helpers/mock-s3');
 const { api, registerAndLogin, testIp } = helpers;
 
 let dbAvailable = false, app, db, s3, user, ip;
@@ -25,7 +25,7 @@ test.before(async () => {
     });
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
     ip = testIp();
     user = await registerAndLogin(app.base, { ip });

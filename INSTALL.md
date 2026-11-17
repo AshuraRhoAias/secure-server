@@ -49,7 +49,7 @@ local**, nunca hacia fuera, y con `StreamMaxLength 25M` (= `CLAMAV_MAX_BYTES`).
   camino que el servidor).
 - **Activarlo en el servidor**: `FILE_SCAN=required` (rechaza la subida si clamd no responde) u `optional`. Ver
   `docs/SEGURIDAD.md` (antivirus) y `scripts/rescanFiles.js` para volver a revisar lo ya guardado con firmas nuevas.
-- Las pruebas `test_av.js` con **clamd real** arrancan su propio clamd con firmas mínimas (no usan el servicio): en Linux/macOS
+- Las pruebas `test/test_av.js` con **clamd real** arrancan su propio clamd con firmas mínimas (no usan el servicio): en Linux/macOS
   por socket Unix, en Windows por TCP en `127.0.0.1` y un puerto libre.
 
 ## Opciones de los instaladores

@@ -12,8 +12,8 @@ const path = require('path');
 const { ROOT, helpers, totp, startApi, startWeb, db, playwright, axe, sleep, filesDir, freePort } = require('../e2e-support/harness.cjs');
 
 const { api, registerAndLogin, uniqueName, testIp, prepareDatabase, PASSWORD } = helpers;
-const { createMockIdp } = require(path.join(ROOT, 'test_helpers/mock-idp'));
-const { SoftAuthenticator } = require(path.join(ROOT, 'test_helpers/webauthn-authenticator'));
+const { createMockIdp } = require(path.join(ROOT, 'test/helpers/mock-idp'));
+const { SoftAuthenticator } = require(path.join(ROOT, 'test/helpers/webauthn-authenticator'));
 
 const CLIENT_ID = 'ops-e2e', CLIENT_SECRET = 'secreto-del-cliente-e2e';
 let dbAvailable = false, apiProc, webProc, pool, idp, pw, chromium;

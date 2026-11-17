@@ -12,7 +12,7 @@ process.env.BASE_SEED ||= 'semilla-de-pruebas-del-api';
 
 // ---------- Dobles de prueba ----------
 function stub(relPath, exports) {
-    const resolved = require.resolve(path.join(__dirname, relPath));
+    const resolved = require.resolve(path.join(__dirname, '..', relPath));
     require.cache[resolved] = { id: resolved, filename: resolved, loaded: true, exports };
 }
 
@@ -149,8 +149,8 @@ stub('src/api/controllers/auth.controller.js', {
 });
 
 const express = require('express');
-const { registerRoutes } = require('./src/api/routes');
-const { createErrorHandler } = require('./src/middleware/error.middleware');
+const { registerRoutes } = require('../src/api/routes');
+const { createErrorHandler } = require('../src/middleware/error.middleware');
 const loggedErrors = [];
 
 let server;
@@ -338,14 +338,14 @@ test('system: logs paginados, IPs bloqueadas y desbloqueo', async () => {
 // ---------- Documentación OpenAPI al día ----------
 test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no exista)', () => {
     const fs = require('fs');
-    const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'docs/openapi.json'), 'utf8'));
+    const spec = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'docs/openapi.json'), 'utf8'));
     const documented = new Set();
     for (const [route, methods] of Object.entries(spec.paths)) {
         for (const method of Object.keys(methods)) documented.add(`${method.toUpperCase()} ${route.replace(/\{(\w+)\}/g, ':$1')}`);
     }
 
     const implemented = new Set(['GET /health', 'GET /health/ready']);
-    const dir = path.join(__dirname, 'src/api/routes');
+    const dir = path.join(__dirname, '..', 'src/api/routes');
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.routes.js'))) {
         const mount = `/api/${file.replace('.routes.js', '')}`;
         const source = fs.readFileSync(path.join(dir, file), 'utf8');
@@ -361,15 +361,15 @@ test('docs/openapi.json documenta TODAS las rutas del código (y ninguna que no 
 // ---------- README: la tabla de endpoints es la generada desde docs/openapi.json ----------
 test('README.md: la tabla de endpoints coincide con docs/openapi.json (npm run docs:endpoints -- --write)', () => {
     const fs = require('fs');
-    const { render, currentBlock } = require('./scripts/openapiTable');
-    const block = currentBlock(fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8'));
+    const { render, currentBlock } = require('../scripts/openapiTable');
+    const block = currentBlock(fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8'));
     assert.ok(block, 'el README tiene los marcadores de la tabla');
     assert.strictEqual(block, render(), 'la tabla del README está desactualizada: npm run docs:endpoints -- --write');
 });
 
 // ---------- MFA: exactamente un factor y de tipo texto ----------
 test('mfa.verify: sin factor, con los dos a la vez o con tipos no textuales → no válido y sin tocar la BD', async () => {
-    const mfa = require('./src/security/mfa.service');
+    const mfa = require('../src/security/mfa.service');
     const originalQuery = fakeDb.query;
     let queries = 0;
     fakeDb.query = async (...args) => { queries++; return originalQuery.apply(fakeDb, args); };
@@ -383,7 +383,7 @@ test('mfa.verify: sin factor, con los dos a la vez o con tipos no textuales → 
 
 // ---------- Bypass de pruebas de carga (DISABLE_IP_BLOCKING) ----------
 test('DISABLE_IP_BLOCKING: nunca en producción (el servidor no arranca y el middleware lo ignora)', async () => {
-    const protection = require('./src/middleware/protection.middleware');
+    const protection = require('../src/middleware/protection.middleware');
     const saved = { NODE_ENV: process.env.NODE_ENV, DISABLE_IP_BLOCKING: process.env.DISABLE_IP_BLOCKING };
     const set = (env) => Object.entries(env).forEach(([k, v]) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; });
     try {
@@ -394,7 +394,7 @@ test('DISABLE_IP_BLOCKING: nunca en producción (el servidor no arranca y el mid
         // Con el bypass ignorado, limit() consulta el limitador: si este falla responde 503 (falla cerrado), no deja pasar
         let passed = false;
         const res = { statusCode: 0, status(c) { this.statusCode = c; return this; }, json() { return this; }, set() { return this; } };
-        const rateLimiter = require('./src/security/rate-limiter.service');
+        const rateLimiter = require('../src/security/rate-limiter.service');
         const originalHit = rateLimiter.hit;
         rateLimiter.hit = async () => { throw new Error('limitador caído'); };
         try {

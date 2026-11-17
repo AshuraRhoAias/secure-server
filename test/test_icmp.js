@@ -10,9 +10,9 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const { IcmpCovertChannelDetector, analyzePayload } = require('./src/security/icmp-covert-channel.service');
-const { TcpdumpParser } = require('./src/security/tcpdump-parser');
-const { getNetworkPosture, hasCapNetRaw, pingGroupRangeMode } = require('./src/security/network-hardening.check');
+const { IcmpCovertChannelDetector, analyzePayload } = require('../src/security/icmp-covert-channel.service');
+const { TcpdumpParser } = require('../src/security/tcpdump-parser');
+const { getNetworkPosture, hasCapNetRaw, pingGroupRangeMode } = require('../src/security/network-hardening.check');
 
 // ---------- Generadores de payloads (replican el relleno de iputils / Windows) ----------
 
@@ -330,7 +330,7 @@ test('el servidor (src/) nunca ejecuta procesos externos: sin child_process', ()
             else if (entry.name.endsWith('.js')) {
                 const source = fs.readFileSync(full, 'utf8');
                 if (!/child_process|\b(?:execSync|spawnSync|execFileSync|execFile)\b/.test(source)) continue;
-                const rel = path.relative(__dirname, full).split(path.sep).join('/');
+                const rel = path.relative(path.join(__dirname, '..'), full).split(path.sep).join('/');
                 const allowed = CHILD_PROCESS_ALLOWED.get(rel);
                 const onlyAllowedUse = allowed
                     && allowed.every(re => re.test(source))
@@ -339,7 +339,7 @@ test('el servidor (src/) nunca ejecuta procesos externos: sin child_process', ()
             }
         }
     };
-    walk(path.join(__dirname, 'src'));
+    walk(path.join(__dirname, '..', 'src'));
     assert.deepStrictEqual(offenders, [], 'src/ no debe lanzar procesos (vector para ejecutar `ping -p`)');
 });
 
@@ -353,7 +353,7 @@ test('scripts/icmpMonitor.js --file --dry-run analiza una captura y avisa', () =
         payload: pingPatternPayload(chunk(i))
     })).join('\n'));
 
-    const out = execFileSync('node', [path.join(__dirname, 'scripts/icmpMonitor.js'), '--file', file, '--dry-run'], { encoding: 'utf8' });
+    const out = execFileSync('node', [path.join(__dirname, '..', 'scripts/icmpMonitor.js'), '--file', file, '--dry-run'], { encoding: 'utf8' });
 
     assert.match(out, /\[HIGH\].*PATTERN_STEPPING/);
     assert.match(out, /\[CRITICAL\].*PATTERN_STEPPING/);
@@ -363,7 +363,7 @@ test('scripts/icmpMonitor.js --file --dry-run analiza una captura y avisa', () =
 
 test('scripts/icmpMonitor.js rechaza nombres de interfaz peligrosos', () => {
     assert.throws(
-        () => execFileSync('node', [path.join(__dirname, 'scripts/icmpMonitor.js'), '--interface', 'eth0; rm -rf /', '--dry-run'], { stdio: 'pipe' }),
+        () => execFileSync('node', [path.join(__dirname, '..', 'scripts/icmpMonitor.js'), '--interface', 'eth0; rm -rf /', '--dry-run'], { stdio: 'pipe' }),
         /Nombre de interfaz inválido/
     );
 });

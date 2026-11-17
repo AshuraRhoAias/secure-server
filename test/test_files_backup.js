@@ -10,10 +10,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { filesDir } = require('./test_helpers/env');
+const { filesDir } = require('./helpers/env');
 // Archivos sintéticos (relleno con cabecera): se prueba la copia, no el saneamiento de imágenes (ver test_sanitize.js)
 process.env.IMAGE_SANITIZE = 'off';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
 const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'files-backup-'));
@@ -29,8 +29,8 @@ let app, db, user, ip, backup;
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
-    backup = require('./src/files/files-backup');
+    db = require('../src/config/database');
+    backup = require('../src/files/files-backup');
     app = await helpers.startApp();
     ip = testIp();
     user = await registerAndLogin(app.base, { ip });
@@ -262,7 +262,7 @@ itDb('archivos huérfanos (sin fila en la BD) se cuentan; la copia en curso no d
 itDb('CLI: backup / verify / restore devuelven códigos de salida útiles para cron', async () => {
     const { spawn } = require('child_process');
     const run = (args) => new Promise((resolve) => {
-        const child = spawn(process.execPath, [path.join(__dirname, 'scripts/filesBackup.js'), ...args], { env: { ...process.env, ENV_FILE: '/nonexistent' } });
+        const child = spawn(process.execPath, [path.join(__dirname, '..', 'scripts/filesBackup.js'), ...args], { env: { ...process.env, ENV_FILE: '/nonexistent' } });
         let out = '';
         child.stdout.on('data', d => { out += d; });
         child.stderr.on('data', d => { out += d; });

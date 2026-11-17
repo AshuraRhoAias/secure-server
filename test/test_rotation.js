@@ -33,11 +33,11 @@ Object.assign(process.env, {
     DISABLE_EMAIL_NOTIFICATIONS: 'true'
 });
 
-const keyProvider = require('./src/crypto/key-provider');
-const archive = require('./src/backup/archive');
-const { buildKeyring, openKeyring } = require('./src/backup/keyring');
-const { ENCRYPTED_COLUMNS, IGNORED } = require('./src/crypto/encrypted-columns');
-const { applyEnvUpdates } = require('./src/maintenance/rotation.service');
+const keyProvider = require('../src/crypto/key-provider');
+const archive = require('../src/backup/archive');
+const { buildKeyring, openKeyring } = require('../src/backup/keyring');
+const { ENCRYPTED_COLUMNS, IGNORED } = require('../src/crypto/encrypted-columns');
+const { applyEnvUpdates } = require('../src/maintenance/rotation.service');
 
 const quietLog = { log() {} };
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'rot-'));
@@ -76,7 +76,7 @@ test('sin semilla no hay claves: nunca se derivan de un valor conocido (revisió
         assert.throws(() => keyProvider.deriveFromEnv(env, { today: '2026-10-20' }), /BASE_SEED/);
     }
     // Antes: getSecret() de un secreto ausente devolvía scrypt('fallback_<tipo>'), una clave pública
-    const secureEnv = require('./src/config/secure-env');
+    const secureEnv = require('../src/config/secure-env');
     const saved = secureEnv.secrets;
     try {
         secureEnv.secrets = { ...saved, email: undefined };
@@ -105,7 +105,7 @@ test('la huella no revela la clave y distingue claves', () => {
 });
 
 test('withKey usa la clave indicada y restaura clave y consola aunque falle', () => {
-    const enc = require('./src/crypto/tripleEncryptor');
+    const enc = require('../src/crypto/tripleEncryptor');
     const keyA = crypto.randomBytes(32).toString('hex');
     const keyB = crypto.randomBytes(32).toString('hex');
 
@@ -126,7 +126,7 @@ test('withKey usa la clave indicada y restaura clave y consola aunque falle', ()
 });
 
 test('credential-builder no vuelca valores de variables a los logs', () => {
-    const credentialBuilder = require('./src/config/credential-builder');
+    const credentialBuilder = require('../src/config/credential-builder');
     const secret = 'valor-super-secreto-123';
     process.env.PRIMARY_EMAIL_PASSWORD = secret;
 
@@ -146,7 +146,7 @@ test('credential-builder no vuelca valores de variables a los logs', () => {
 });
 
 test('registro de columnas cifradas: cubre todas las columnas de texto "encrypted" de schema.sql', () => {
-    const schema = fs.readFileSync(path.join(__dirname, 'database/schema.sql'), 'utf8');
+    const schema = fs.readFileSync(path.join(__dirname, '..', 'database/schema.sql'), 'utf8');
     const found = [];
 
     for (const block of schema.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?`(\w+)` \(([\s\S]*?)\) ENGINE/g)) {
@@ -238,7 +238,7 @@ test('applyEnvUpdates conserva comentarios y orden, reemplaza y añade', () => {
 });
 
 test('lock de mantenimiento: exclusivo, y falla cerrado', () => {
-    const { Maintenance } = require('./src/maintenance/maintenance');
+    const { Maintenance } = require('../src/maintenance/maintenance');
     const dir = tmpDir();
     const m = new Maintenance({ lockFile: path.join(dir, 'x/maintenance.lock') });
 
@@ -272,7 +272,7 @@ test.before(async () => {
             multipleStatements: true, connectTimeout: 3000
         });
         await root.query(`DROP DATABASE IF EXISTS \`${DB_NAME}\`; CREATE DATABASE \`${DB_NAME}\` CHARACTER SET utf8mb4; USE \`${DB_NAME}\`;`);
-        await root.query(fs.readFileSync(path.join(__dirname, 'database/schema.sql'), 'utf8'));
+        await root.query(fs.readFileSync(path.join(__dirname, '..', 'database/schema.sql'), 'utf8'));
         await root.end();
         dbAvailable = true;
     } catch (error) {
@@ -280,13 +280,13 @@ test.before(async () => {
         return;
     }
 
-    db = require('./src/config/database');
-    encryptor = require('./src/crypto/tripleEncryptor');
-    secureEnv = require('./src/config/secure-env');
-    ({ RotationService } = require('./src/maintenance/rotation.service'));
-    ({ getPaths } = require('./src/maintenance/paths'));
-    ({ MaintenanceGuard } = require('./src/maintenance/guard'));
-    ({ Maintenance } = require('./src/maintenance/maintenance'));
+    db = require('../src/config/database');
+    encryptor = require('../src/crypto/tripleEncryptor');
+    secureEnv = require('../src/config/secure-env');
+    ({ RotationService } = require('../src/maintenance/rotation.service'));
+    ({ getPaths } = require('../src/maintenance/paths'));
+    ({ MaintenanceGuard } = require('../src/maintenance/guard'));
+    ({ Maintenance } = require('../src/maintenance/maintenance'));
 });
 
 test.after(async () => {
@@ -416,7 +416,7 @@ const newKeyFromFile = (envFile, base = process.env.BASE_SEED) => {
 
 itDb('auditoría: audit.service guarda los eventos en una BD en modo estricto (regresión de encrypted_timestamp)', async () => {
     await freshWorld();
-    const audit = require('./src/services/audit.service');
+    const audit = require('../src/services/audit.service');
     const [[{ mode }]] = await db.query('SELECT @@sql_mode AS mode');
     assert.match(mode, /STRICT/, 'esta prueba solo tiene sentido en modo estricto');
 
@@ -454,7 +454,7 @@ itDb('migración 003: convierte la columna y deja a NULL los ceros de DATETIME, 
         await conn.query("SET SESSION sql_mode = ''; ALTER TABLE security_logs MODIFY encrypted_timestamp datetime DEFAULT NULL;");
         await conn.query("INSERT INTO security_logs (event_type, encrypted_timestamp) VALUES ('VIEJO', 'texto-invalido')");
 
-        await conn.query(fs.readFileSync(path.join(__dirname, 'database/migrations/003_security_logs_encrypted_timestamp.sql'), 'utf8'));
+        await conn.query(fs.readFileSync(path.join(__dirname, '..', 'database/migrations/003_security_logs_encrypted_timestamp.sql'), 'utf8'));
 
         const [[col]] = await conn.query("SELECT DATA_TYPE AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'security_logs' AND COLUMN_NAME = 'encrypted_timestamp'");
         assert.strictEqual(col.t, 'longtext');
@@ -513,7 +513,7 @@ itDb('rotación: re-cifra todo con la clave nueva, sin perder ni alterar datos',
 });
 
 itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archivos re-envuelven su clave sin tocar sus bytes', async () => {
-    const fileCipher = require('./src/files/file-cipher');
+    const fileCipher = require('../src/files/file-cipher');
     const { pipeline } = require('stream/promises');
     const { Readable } = require('stream');
     const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -521,7 +521,7 @@ itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archi
     const oldKey = currentKey();
 
     // Una nota cifrada con el formato antiguo (tres capas con la misma clave)
-    const [l1, l2, l3] = [require('./src/crypto/level1'), require('./src/crypto/level2'), require('./src/crypto/level3')];
+    const [l1, l2, l3] = [require('../src/crypto/level1'), require('../src/crypto/level2'), require('../src/crypto/level3')];
     const legacy = (text) => encryptor.withKey(oldKey, () => l3.encrypt(l2.encrypt(l1.encrypt(text))));
     const [[{ id: userId }]] = await db.query('SELECT id FROM users ORDER BY id LIMIT 1');
     const [inserted] = await db.query('INSERT INTO user_notes (user_id, title_encrypted, content_encrypted) VALUES (?, ?, ?)',
@@ -577,7 +577,7 @@ itDb('rotación: lo cifrado con el formato triple antiguo pasa a v4, y los archi
 });
 
 itDb('rotación con KMS: las semillas nuevas se escriben ENVUELTAS en el .env, y recargar (otro proceso) las resuelve', async () => {
-    const kms = require('./src/crypto/kms');
+    const kms = require('../src/crypto/kms');
     const kek = path.join(os.tmpdir(), `kek-rot-${crypto.randomBytes(4).toString('hex')}`);
     fs.writeFileSync(kek, crypto.randomBytes(32).toString('hex'), { mode: 0o400 });
     Object.assign(process.env, { KMS_PROVIDER: 'file', KMS_KEK_FILE: kek });
@@ -725,12 +725,12 @@ itDb('rotación dentro del servidor (la del cron mensual): recarga las claves en
     process.env.ROTATION_DATA_DIR = w.paths.dataDir;
     process.env.BACKUP_DIR = w.paths.backupDir;
     try {
-        const { guard } = require('./src/maintenance');
+        const { guard } = require('../src/maintenance');
         await guard.tick();
         assert.ok(guard.isOpen());
         const before = secureEnv.fingerprint;
 
-        const keyRotator = require('./src/crypto/keyRotator');
+        const keyRotator = require('../src/crypto/keyRotator');
         const result = await keyRotator.rotateKeys({ drainSeconds: 0 });
 
         assert.ok(result.cellsReencrypted > 0);
@@ -1203,7 +1203,7 @@ itDb('CLI: rotate exige --confirm; con --confirm rota, y status/backups/verify f
         PORT: 3000, NODE_ENV: 'test', DB_FRAGMENT_1: process.env.DB_FRAGMENT_1, DB_FRAGMENT_2: process.env.DB_FRAGMENT_2, DB_FRAGMENT_3: process.env.DB_FRAGMENT_3,
         BASE_SEED: process.env.BASE_SEED, ENCRYPTION_SEED: 'enc-seed-inicial', JWT_SEED: 'jwt-seed-inicial', KEY_EPOCH: 'T0-inicial'
     });
-    const cli = (...args) => spawnSync('node', [path.join(__dirname, 'scripts/rotateKeys.js'), ...args], { env: cliEnv, encoding: 'utf8', timeout: 60000 });
+    const cli = (...args) => spawnSync('node', [path.join(__dirname, '..', 'scripts/rotateKeys.js'), ...args], { env: cliEnv, encoding: 'utf8', timeout: 60000 });
 
     const sinConfirmar = cli('rotate');
     assert.strictEqual(sinConfirmar.status, 2);
@@ -1235,7 +1235,7 @@ itDb('CLI: rotate exige --confirm; con --confirm rota, y status/backups/verify f
 // ----------------------------------------------------------------------- firewall
 
 test('maintenance-firewall.sh: dry-run, y se niega a aplicar sin IPs de administración', () => {
-    const script = path.join(__dirname, 'scripts/maintenance-firewall.sh');
+    const script = path.join(__dirname, '..', 'scripts/maintenance-firewall.sh');
     const dry = execFileSync('bash', [script], { env: { PATH: process.env.PATH, MAINTENANCE_ADMIN_IPS: '203.0.113.10' }, encoding: 'utf8' });
     assert.match(dry, /Dry-run: no se ha modificado nada/);
     assert.match(dry, /-s 203\.0\.113\.10 -j ACCEPT/);
@@ -1251,12 +1251,12 @@ test('maintenance-firewall.sh: dry-run, y se niega a aplicar sin IPs de administ
 
 // ----------------------------------------------------------------------- caídas y pausas REALES (proceso hijo)
 // Un proceso aparte ejecuta la rotación de verdad y se corta en seco (SIGKILL: ni catch, ni finally) o se queda parado en el
-// punto exacto (test_helpers/rotation-child.js). Comprueba que en ningún caso se pierden datos ni las semillas nuevas.
+// punto exacto (test/helpers/rotation-child.js). Comprueba que en ningún caso se pierden datos ni las semillas nuevas.
 
 function runRotationChild(w, extra) {
     const resultFile = path.join(w.dir, `resultado-${Date.now()}.json`);
     return new Promise((resolve) => {
-        const child = require('child_process').spawn(process.execPath, [path.join(__dirname, 'test_helpers/rotation-child.js')], {
+        const child = require('child_process').spawn(process.execPath, [path.join(__dirname, 'helpers/rotation-child.js')], {
             env: { ...process.env, ROTATION_DATA_DIR: w.paths.dataDir, BACKUP_DIR: w.paths.backupDir, ENV_FILE: w.paths.envFile, ROT_RESULT: resultFile, ...extra },
             stdio: 'ignore'
         });
@@ -1389,11 +1389,11 @@ itDb('mantenimiento = sin entradas ni salidas: corta streams y conexiones abiert
     const w = await freshWorld();
     const http = require('http');
     const express = require('express');
-    const { guard } = require('./src/maintenance'); // el guardián que consultan los servicios
-    const { cutOffOnMaintenance } = require('./src/maintenance/cutoff');
-    const alerts = require('./src/security/alerts.service');
-    const housekeeping = require('./src/tasks/securityHousekeeping');
-    const comms = require('./src/services/secure-communications.service');
+    const { guard } = require('../src/maintenance'); // el guardián que consultan los servicios
+    const { cutOffOnMaintenance } = require('../src/maintenance/cutoff');
+    const alerts = require('../src/security/alerts.service');
+    const housekeeping = require('../src/tasks/securityHousekeeping');
+    const comms = require('../src/services/secure-communications.service');
 
     const saved = { maintenance: guard.maintenance, state: guard.state, dir: comms.notificationsDir, url: process.env.ALERT_WEBHOOK_URL };
     guard.maintenance = w.service.maintenance;
@@ -1467,11 +1467,11 @@ itDb('mantenimiento = sin entradas ni salidas: corta streams y conexiones abiert
 });
 
 test('rotación programada: semanal por defecto; se niega con cron inválido o claves legacy; la alerta de fallo no lleva el error interno', async () => {
-    const instance = require('./src/tasks/scheduleKeyRotation');
+    const instance = require('../src/tasks/scheduleKeyRotation');
     const Scheduler = instance.constructor;
-    const secureEnvModule = require('./src/config/secure-env');
-    const keyRotatorModule = require('./src/crypto/keyRotator');
-    const comms = require('./src/services/secure-communications.service');
+    const secureEnvModule = require('../src/config/secure-env');
+    const keyRotatorModule = require('../src/crypto/keyRotator');
+    const comms = require('../src/services/secure-communications.service');
     const saved = { cron: process.env.KEY_ROTATION_CRON, info: secureEnvModule.getKeyInfo, rotate: keyRotatorModule.rotateKeys, send: comms.sendSecureAlert };
     try {
         delete process.env.KEY_ROTATION_CRON;

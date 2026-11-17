@@ -3,7 +3,7 @@
 //   Admin A:  POST /api/system/accounts/mfa-reset { username, reason }  ->  202, queda PENDIENTE
 //   Admin B:  POST /api/system/approvals/:id/approve                    ->  se ejecuta
 //
-// Reglas (todas con prueba en test_rbac.js):
+// Reglas (todas con prueba en test/test_rbac.js):
 //  - Quien solicita NO puede aprobar su propia solicitud. Otro administrador distinto, siempre.
 //  - La transición pending -> approved es un UPDATE atómico: si dos administradores aprueban a la vez, ejecuta uno.
 //  - La solicitud caduca (ADMIN_APPROVAL_TTL_HOURS, 24 h) y queda todo en admin_approvals: quién, cuándo, por qué, resultado.

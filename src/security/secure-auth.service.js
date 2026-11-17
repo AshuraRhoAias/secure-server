@@ -12,7 +12,7 @@ const metrics = require('../observability/metrics');
 // Autenticación. Todo el estado de seguridad (intentos fallidos, bloqueos, sesiones) está en
 // MySQL (login_attempts, user_sessions, blocked_ips, security_events); no hay Map/Set en memoria.
 //
-// Cambios respecto a la versión anterior (todos verificados en test_security.js):
+// Cambios respecto a la versión anterior (todos verificados en test/test_security.js):
 //  - El bloqueo de cuenta ahora SÍ funciona. Antes los fallos se guardaban con una clave
 //    "usuario_IP" y se consultaban solo por "usuario": nunca coincidían y no se bloqueaba nada.
 //  - El bloqueo se aplica también a usuarios que no existen (mismo mensaje y mismos tiempos),

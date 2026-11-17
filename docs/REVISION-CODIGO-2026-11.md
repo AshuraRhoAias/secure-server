@@ -58,8 +58,8 @@ tipados con mensajes pensados para el cliente), 6 «TODO» (es la palabra españ
 2. **Cambio de código propuesto** (no aplicado): con `NODE_ENV=production`, no arrancar en modo `legacy` (fallar cerrado, como ya se hace
    con `DISABLE_IP_BLOCKING`). El CI, Docker y las pruebas ya definen `KEY_EPOCH`, así que solo afectaría a un `.env` como el local actual.
 
-La corrección del hallazgo 3 destapó que `test_api.js` cargaba las claves **sin `BASE_SEED`** (se derivaban, sin avisar, de la semilla
-conocida): ahora define su propia semilla de pruebas. Pruebas nuevas en `test_rotation.js` («sin semilla no hay claves») fijan las
+La corrección del hallazgo 3 destapó que `test/test_api.js` cargaba las claves **sin `BASE_SEED`** (se derivaban, sin avisar, de la semilla
+conocida): ahora define su propia semilla de pruebas. Pruebas nuevas en `test/test_rotation.js` («sin semilla no hay claves») fijan las
 dos correcciones; la fórmula antigua sin `JWT_SEED` sigue comprobada.
 
 ## 4. Cobertura (`npm run coverage`, 12-nov, local con MariaDB 13.1 y ClamAV)

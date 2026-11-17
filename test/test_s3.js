@@ -1,4 +1,4 @@
-// Almacenamiento de archivos en S3 (FILES_STORAGE=s3) contra un S3 SIMULADO (test_helpers/mock-s3.js). Sin base de datos:
+// Almacenamiento de archivos en S3 (FILES_STORAGE=s3) contra un S3 SIMULADO (test/helpers/mock-s3.js). Sin base de datos:
 // driver, subida del temporal, lectura por rangos con UNA petición, integridad y configuración. La API completa en modo S3,
 // con MariaDB, está en test_files_s3.js.
 //
@@ -12,15 +12,15 @@ const os = require('os');
 const path = require('path');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
-const { createMockS3 } = require('./test_helpers/mock-s3');
+const { createMockS3 } = require('./helpers/mock-s3');
 
 const filesDir = fs.mkdtempSync(path.join(os.tmpdir(), 's3-test-'));
 const ENV = ['FILES_STORAGE', 'FILES_DIR', 'S3_BUCKET', 'S3_ENDPOINT', 'S3_FORCE_PATH_STYLE', 'S3_REGION', 'S3_PREFIX', 'S3_SSE', 'S3_SSE_KMS_KEY_ID', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'NODE_ENV', 'S3_ALLOW_HTTP', 'FILES_BACKUP_DIR'];
 const saved = Object.fromEntries(ENV.map(k => [k, process.env[k]]));
 let s3;
 
-const storage = require('./src/files/storage');
-const cipher = require('./src/files/file-cipher');
+const storage = require('../src/files/storage');
+const cipher = require('../src/files/file-cipher');
 
 test.before(async () => {
     s3 = await createMockS3();
@@ -134,14 +134,14 @@ test('configuración: SSE con KMS, sin SSE, prefijo, https obligatorio en produc
         await stored(Buffer.from('sin sse'));
         assert.strictEqual(s3.log.filter(l => l.method === 'PUT').at(-1).sse, null);
     });
-    await withEnv({ S3_SSE: 'rot13' }, async () => assert.throws(() => require('./src/files/s3-store').config(), /S3_SSE/));
-    await withEnv({ S3_PREFIX: '../otro' }, async () => assert.throws(() => require('./src/files/s3-store').config(), /S3_PREFIX/));
-    await withEnv({ S3_BUCKET: undefined }, async () => assert.throws(() => require('./src/files/s3-store').config(), /S3_BUCKET/));
-    await withEnv({ NODE_ENV: 'production' }, async () => assert.throws(() => require('./src/files/s3-store').config(), /https/));
-    await withEnv({ NODE_ENV: 'production', S3_ALLOW_HTTP: 'true' }, async () => assert.ok(require('./src/files/s3-store').config()));
+    await withEnv({ S3_SSE: 'rot13' }, async () => assert.throws(() => require('../src/files/s3-store').config(), /S3_SSE/));
+    await withEnv({ S3_PREFIX: '../otro' }, async () => assert.throws(() => require('../src/files/s3-store').config(), /S3_PREFIX/));
+    await withEnv({ S3_BUCKET: undefined }, async () => assert.throws(() => require('../src/files/s3-store').config(), /S3_BUCKET/));
+    await withEnv({ NODE_ENV: 'production' }, async () => assert.throws(() => require('../src/files/s3-store').config(), /https/));
+    await withEnv({ NODE_ENV: 'production', S3_ALLOW_HTTP: 'true' }, async () => assert.ok(require('../src/files/s3-store').config()));
 
     assert.throws(() => storage.blob('../../etc/passwd'), /inválido/, 'el nombre sigue siendo un UUID del servidor');
     await withEnv({ FILES_BACKUP_DIR: path.join(os.tmpdir(), 'no-se-usa') }, async () => {
-        await assert.rejects(require('./src/files/files-backup').backup({ db: null }), /FILES_STORAGE=s3/);
+        await assert.rejects(require('../src/files/files-backup').backup({ db: null }), /FILES_STORAGE=s3/);
     });
 });

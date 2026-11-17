@@ -15,10 +15,10 @@ const die = () => process.kill(process.pid, 'SIGKILL'); // corte en seco: ni fin
 const quiet = { log() {} };
 
 async function main() {
-    const db = require('../src/config/database');
-    const encryptor = require('../src/crypto/tripleEncryptor');
-    const { RotationService } = require('../src/maintenance/rotation.service');
-    const { getPaths } = require('../src/maintenance/paths');
+    const db = require('../../src/config/database');
+    const encryptor = require('../../src/crypto/tripleEncryptor');
+    const { RotationService } = require('../../src/maintenance/rotation.service');
+    const { getPaths } = require('../../src/maintenance/paths');
     const paths = getPaths(process.env);
     const service = new RotationService({ db, encryptor, paths, logger: quiet, sleepFn: async () => {} });
 

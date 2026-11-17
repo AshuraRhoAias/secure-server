@@ -11,13 +11,13 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
-const { filesDir } = require('./test_helpers/env');
+const { filesDir } = require('./helpers/env');
 // Esta suite prueba la integración del antivirus con archivos sintéticos (relleno con cabecera): el saneamiento de
 // imágenes los rechazaría. El orden antivirus → saneamiento se prueba con una imagen real más abajo.
 process.env.IMAGE_SANITIZE = 'off';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
-const { startFakeClamd, EICAR } = require('./test_helpers/fake-clamd');
+const { startFakeClamd, EICAR } = require('./helpers/fake-clamd');
 
 const parseResult = (stdout) => JSON.parse(/^\{[\s\S]*?^\}$/m.exec(stdout)[0]); // el JSON del script, ignorando los logs de arranque
 const bytes = (...parts) => Buffer.concat(parts.map(p => (Buffer.isBuffer(p) ? p : Buffer.from(p))));
@@ -38,7 +38,7 @@ const viaFake = (mode, extra = {}) => scanEnv({ FILE_SCAN: mode, CLAMAV_HOST: '1
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
     fake = await startFakeClamd();
     ipA = testIp();
@@ -67,7 +67,7 @@ const event = async (ip, rule) => (await db.query("SELECT severity, action_taken
 // ============================================================================ protocolo (puro)
 
 test('parseReply: OK, FOUND con firma saneada, ERROR y basura', () => {
-    const { parseReply } = require('./src/files/av-scanner');
+    const { parseReply } = require('../src/files/av-scanner');
     assert.deepStrictEqual(parseReply('stream: OK\0'), { status: 'clean' });
     assert.deepStrictEqual(parseReply('stream: Win.Test.EICAR_HDB-1 FOUND\0'), { status: 'found', signature: 'Win.Test.EICAR_HDB-1' });
     assert.strictEqual(parseReply('stream: Evil; DROP TABLE x <script> FOUND\0').signature, 'Evil__DROP_TABLE_x__script_');
@@ -269,7 +269,7 @@ itDb('rescan-files: encuentra malware que se coló antes de activar el antivirus
 
     // spawn ASÍNCRONO: el clamd simulado vive en este proceso y un spawnSync lo dejaría sin atender
     const run = (extra = []) => new Promise((resolve) => {
-        const child = spawn(process.execPath, [path.join(__dirname, 'scripts/rescanFiles.js'), ...extra], {
+        const child = spawn(process.execPath, [path.join(__dirname, '..', 'scripts/rescanFiles.js'), ...extra], {
             env: { ...process.env, FILE_SCAN: 'required', CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(fake.port), ENV_FILE: '/nonexistent' }
         });
         let stdout = '', stderr = '';

@@ -17,22 +17,22 @@ const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const fc = require('fast-check');
 
-const { filesDir } = require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+const { filesDir } = require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
 const RUNS = Number(process.env.FUZZ_RUNS) || 100;
 const SEED = process.env.FUZZ_SEED ? Number(process.env.FUZZ_SEED) : undefined;
 const cfg = (runs = RUNS, extra = {}) => ({ numRuns: Math.max(1, Math.round(runs)), seed: SEED, ...extra }); // numRuns debe ser entero: con fracción fast-check no termina
 
-const types = require('./src/files/file-types');
-const cipher = require('./src/files/file-cipher');
-const sanitize = require('./src/files/sanitize');
-const detector = require('./src/security/injection-detector');
-const { sqlInt, sqlPlaceholders, sqlFragment } = require('./src/config/sql');
-const { can, PERMISSIONS } = require('./src/security/permissions');
-const { UploadError } = require('./src/files/upload');
-const enc = require('./src/crypto/tripleEncryptor');
+const types = require('../src/files/file-types');
+const cipher = require('../src/files/file-cipher');
+const sanitize = require('../src/files/sanitize');
+const detector = require('../src/security/injection-detector');
+const { sqlInt, sqlPlaceholders, sqlFragment } = require('../src/config/sql');
+const { can, PERMISSIONS } = require('../src/security/permissions');
+const { UploadError } = require('../src/files/upload');
+const enc = require('../src/crypto/tripleEncryptor');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fuzz-'));
 test.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); fs.rmSync(filesDir, { recursive: true, force: true }); });
@@ -266,7 +266,7 @@ let dbAvailable = false, app, db;
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
 });
 test.after(async () => {
@@ -276,7 +276,7 @@ test.after(async () => {
 
 const SKIP = new Set(['POST /api/system/rotate-keys', 'POST /api/system/test-communications', 'POST /api/system/integrity-check']); // lanzan trabajo real
 const documented = () => {
-    const spec = require('./docs/openapi.json');
+    const spec = require('../docs/openapi.json');
     const out = [];
     for (const [route, ops] of Object.entries(spec.paths)) {
         for (const method of Object.keys(ops).filter(m => ['get', 'post', 'put', 'patch', 'delete'].includes(m))) {

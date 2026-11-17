@@ -14,15 +14,15 @@ const net = require('net');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 
-const { filesDir } = require('./test_helpers/env');
+const { filesDir } = require('./helpers/env');
 // Esta suite prueba almacenamiento, cifrado, límites y Range con archivos sintéticos (relleno con cabecera): el
 // saneamiento de imágenes los rechazaría con razón. El saneamiento tiene su propia suite con archivos reales: test_sanitize.js
 process.env.IMAGE_SANITIZE = 'off';
-const helpers = require('./test_helpers/app');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
 
-const cipher = require('./src/files/file-cipher');
-const types = require('./src/files/file-types');
+const cipher = require('../src/files/file-cipher');
+const types = require('../src/files/file-types');
 
 // ============================================================================ muestras de archivos reales (mínimos)
 
@@ -259,9 +259,9 @@ let ipB;
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
     if (!dbAvailable) return;
-    db = require('./src/config/database');
-    enc = require('./src/crypto/tripleEncryptor');
-    events = require('./src/security/security-events.service');
+    db = require('../src/config/database');
+    enc = require('../src/crypto/tripleEncryptor');
+    events = require('../src/security/security-events.service');
     app = await helpers.startApp();
     ipA = testIp(); ipB = testIp();
     alice = await registerAndLogin(app.base, { ip: ipA });
@@ -713,7 +713,7 @@ itDb('archivo truncado o ausente en disco: error controlado, sin colgar ni filtr
 // ---------------------------------------------------------------- rotación de claves
 
 itDb('rotación de clave maestra: se re-envuelven las claves de archivo y los archivos siguen descargándose', async () => {
-    const secureEnv = require('./src/config/secure-env');
+    const secureEnv = require('../src/config/secure-env');
     const ip = testIp();
     const user = await registerAndLogin(app.base, { ip });
     const up = await upload(user, ip, SAMPLES.mp4.data, 'rotar.mp4');
@@ -760,7 +760,7 @@ itDb('si el disco no es escribible la subida falla con un 500 genérico y el ser
 });
 
 itDb('limpieza: los temporales viejos se borran y los recientes no', async () => {
-    const storage = require('./src/files/storage');
+    const storage = require('../src/files/storage');
     storage.ensureDirs();
     const oldName = crypto.randomUUID(), freshName = crypto.randomUUID();
     fs.writeFileSync(storage.tmpPath(oldName), 'x');
@@ -775,7 +775,7 @@ itDb('limpieza: los temporales viejos se borran y los recientes no', async () =>
 });
 
 itDb('almacenamiento: ningún nombre que no sea un UUID forma parte de una ruta', () => {
-    const storage = require('./src/files/storage');
+    const storage = require('../src/files/storage');
     for (const bad of ['../../etc/passwd', 'a/b', '', 'x'.repeat(36), '1234', null, undefined, '00000000-0000-0000-0000-00000000000g']) {
         assert.throws(() => storage.finalPath(bad), /inválido/, String(bad));
         assert.throws(() => storage.tmpPath(bad), /inválido/, String(bad));

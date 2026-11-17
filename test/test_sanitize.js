@@ -10,16 +10,16 @@ const fs = require('fs');
 const zlib = require('zlib');
 const sharp = require('sharp');
 
-const { filesDir } = require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+const { filesDir } = require('./helpers/env');
+const helpers = require('./helpers/app');
 const { api, registerAndLogin, testIp } = helpers;
-const sanitize = require('./src/files/sanitize');
+const sanitize = require('../src/files/sanitize');
 
 let app, db, enabled = false, user, ip;
 test.before(async () => {
     enabled = await helpers.prepareDatabase();
     if (!enabled) return;
-    db = require('./src/config/database');
+    db = require('../src/config/database');
     app = await helpers.startApp();
     ip = testIp();
     user = await registerAndLogin(app.base, { ip });

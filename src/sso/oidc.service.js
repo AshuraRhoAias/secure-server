@@ -12,7 +12,7 @@ const { resolveFederatedUser } = require('./federated-users');
 // publique /.well-known/openid-configuration: Microsoft Entra ID (Azure AD), Okta, Auth0, Keycloak,
 // Google Workspace, etc.
 //
-// Lo que se comprueba (cada punto tiene una prueba contra un proveedor simulado en test_sso.js):
+// Lo que se comprueba (cada punto tiene una prueba contra un proveedor simulado en test/test_sso.js):
 //   - state aleatorio de un solo uso (en la BD, 10 min) → defensa contra CSRF de login
 //   - nonce ligado al id_token → defensa contra repetición de tokens
 //   - PKCE (S256) en todos los casos, también con cliente confidencial

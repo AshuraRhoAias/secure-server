@@ -57,7 +57,7 @@ Orden: primero el adaptador **solo con MySQL** y todo en verde (local y CI); des
 
 | Paso | Estado |
 |---|---|
-| 1. Adaptador con el driver MySQL | **Hecho.** `src/config/db-drivers/index.js` (elige el motor con `DB_CLIENT` y documenta el **contrato**) y `db-drivers/mysql.js` (único archivo de `src/` y `scripts/` que importa `mysql2`). `database.js` ya no conoce el driver. `DB_CLIENT=postgres` da un error claro hasta que el paso 4 esté en verde. `test_db.js`: elección del motor, «un único punto de entrada» y el contrato contra la base real (`[filas]`, `insertId`, `affectedRows` de los canjes de un solo uso, transacciones, conexión retenida con `destroy`), que es lo mismo que tendrá que pasar el driver de PostgreSQL. |
+| 1. Adaptador con el driver MySQL | **Hecho.** `src/config/db-drivers/index.js` (elige el motor con `DB_CLIENT` y documenta el **contrato**) y `db-drivers/mysql.js` (único archivo de `src/` y `scripts/` que importa `mysql2`). `database.js` ya no conoce el driver. `DB_CLIENT=postgres` da un error claro hasta que el paso 4 esté en verde. `test/test_db.js`: elección del motor, «un único punto de entrada» y el contrato contra la base real (`[filas]`, `insertId`, `affectedRows` de los canjes de un solo uso, transacciones, conexión retenida con `destroy`), que es lo mismo que tendrá que pasar el driver de PostgreSQL. |
 | 2. SQL portable sin cambiar resultados en MySQL (`SUM(CASE …)`, `COALESCE`, helpers de intervalos/upsert/cerrojos) | Pendiente |
 | 3. Esquema `database/postgres/schema.sql` + prueba de paridad | Pendiente |
 | 4. Driver `postgres` (`pg`, traducción de `?`, `RETURNING id`, `rowCount`) + job del CI con PostgreSQL | Pendiente |

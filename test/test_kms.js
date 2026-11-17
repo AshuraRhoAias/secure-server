@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync, execFileSync } = require('child_process');
 
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kms-test-'));
 test.after(() => { fs.rmSync(tmp, { recursive: true, force: true }); servers.forEach(s => s.kill()); });
 
@@ -21,7 +21,7 @@ function withKms(vars, fn) {
     const saved = Object.fromEntries(KMS_VARS.map(k => [k, process.env[k]]));
     KMS_VARS.forEach(k => delete process.env[k]);
     Object.assign(process.env, vars);
-    const kms = require('./src/crypto/kms');
+    const kms = require('../src/crypto/kms');
     kms.clearCache();
     try { return fn(kms); } finally {
         KMS_VARS.forEach(k => { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; });
@@ -38,7 +38,7 @@ const newKekFile = (name = 'kek', mode = 0o400) => {
 
 const servers = [];
 async function startMock(kind) {
-    const child = spawn(process.execPath, [path.join(ROOT, 'test_helpers/mock-kms-server.js'), kind], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const child = spawn(process.execPath, [path.join(ROOT, 'test/helpers/mock-kms-server.js'), kind], { stdio: ['ignore', 'pipe', 'inherit'] });
     servers.push(child);
     const port = await new Promise(resolve => child.stdout.on('data', d => { const m = /PORT (\d+)/.exec(String(d)); if (m) resolve(Number(m[1])); }));
     return { port, url: `http://127.0.0.1:${port}`, last: async () => (await fetch(`http://127.0.0.1:${port}/__last`)).json() };

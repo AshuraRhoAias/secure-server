@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Tabla de endpoints del README, generada desde docs/openapi.json (que a su vez test_api.js comprueba contra el código).
+// Tabla de endpoints del README, generada desde docs/openapi.json (que a su vez test/test_api.js comprueba contra el código).
 //
 //   npm run docs:endpoints            imprime la tabla
 //   npm run docs:endpoints -- --write la sustituye en README.md entre los marcadores <!-- endpoints:inicio --> / <!-- endpoints:fin -->
 //
-// Así la tabla no puede volver a quedarse atrás: test_api.js falla si la del README no coincide con la generada.
+// Así la tabla no puede volver a quedarse atrás: test/test_api.js falla si la del README no coincide con la generada.
 'use strict';
 const fs = require('fs');
 const path = require('path');

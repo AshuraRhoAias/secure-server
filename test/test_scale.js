@@ -11,8 +11,8 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { filesDir } = require('./test_helpers/env');
-const helpers = require('./test_helpers/app');
+const { filesDir } = require('./helpers/env');
+const helpers = require('./helpers/app');
 
 let dbAvailable = false;
 let db;
@@ -20,7 +20,7 @@ const spawned = [];
 
 test.before(async () => {
     dbAvailable = await helpers.prepareDatabase();
-    if (dbAvailable) db = require('./src/config/database');
+    if (dbAvailable) db = require('../src/config/database');
 });
 
 test.after(async () => {
@@ -44,7 +44,7 @@ const until = async (fn, { timeout = 15000, every = 100, message = 'condición' 
 // ============================================================================ limitador de peticiones
 
 itDb('limitador: una sentencia por golpe, contador exacto bajo concurrencia y ventana anterior ponderada', async () => {
-    const limiter = require('./src/security/rate-limiter.service');
+    const limiter = require('../src/security/rate-limiter.service');
     const subject = `t-${Date.now()}`;
 
     // 50 golpes simultáneos desde "varios procesos": ninguno se pierde ni se cuenta dos veces
@@ -67,7 +67,7 @@ itDb('limitador: una sentencia por golpe, contador exacto bajo concurrencia y ve
 });
 
 itDb('limitador: cuenta con UNA consulta cuando la ventana anterior ya está en memoria', async () => {
-    const limiter = require('./src/security/rate-limiter.service');
+    const limiter = require('../src/security/rate-limiter.service');
     const subject = `q-${Date.now()}`;
     await limiter.hit('test', subject, 60); // la primera vez lee la ventana anterior y la recuerda
     const original = db.query;
@@ -82,7 +82,7 @@ itDb('limitador: cuenta con UNA consulta cuando la ventana anterior ya está en 
 // ============================================================================ caché de bloqueos
 
 itDb('caché de bloqueo: responde sin consultar durante PROTECTION_CACHE_MS y esta instancia lo invalida al bloquear/desbloquear', async () => {
-    const anomaly = require('./src/security/anomaly-detection.service');
+    const anomaly = require('../src/security/anomaly-detection.service');
     const ip = '203.0.113.201';
     const saved = process.env.PROTECTION_CACHE_MS;
     process.env.PROTECTION_CACHE_MS = '60000';
@@ -111,7 +111,7 @@ itDb('caché de bloqueo: responde sin consultar durante PROTECTION_CACHE_MS y es
 });
 
 itDb('caché de bloqueo: caduca y tras el TTL se ve el cambio hecho por otra instancia', async () => {
-    const anomaly = require('./src/security/anomaly-detection.service');
+    const anomaly = require('../src/security/anomaly-detection.service');
     const ip = '203.0.113.202';
     process.env.PROTECTION_CACHE_MS = '150';
     try {
@@ -126,7 +126,7 @@ itDb('caché de bloqueo: caduca y tras el TTL se ve el cambio hecho por otra ins
 // ============================================================================ panel
 
 itDb('panel: peticiones simultáneas idénticas comparten UN cálculo; después vuelve a calcular con datos frescos', async () => {
-    const dashboard = require('./src/security/dashboard.service');
+    const dashboard = require('../src/security/dashboard.service');
     const original = db.query;
     let queries = 0;
     db.query = function (...args) { queries++; return original.apply(this, args); };
@@ -150,7 +150,7 @@ itDb('panel: peticiones simultáneas idénticas comparten UN cálculo; después 
 // ============================================================================ elección de líder
 
 itDb('líder: solo UNA instancia lo es, el relevo ocurre al parar o al perder la conexión, y las tareas se paran con él', async () => {
-    const { LeaderElection } = require('./src/tasks/leader');
+    const { LeaderElection } = require('../src/tasks/leader');
     process.env.LEADER_RETRY_SECONDS = '0.2';
     process.env.LEADER_PING_SECONDS = '0.2';
     const log = [];
@@ -205,7 +205,7 @@ const freePort = () => new Promise((resolve) => { const s = net.createServer(); 
 function startCluster(extraEnv = {}) {
     return freePort().then(async (port) => {
         const logs = [];
-        const child = spawn(process.execPath, [path.join(__dirname, 'src/cluster.js')], {
+        const child = spawn(process.execPath, [path.join(__dirname, '..', 'src/cluster.js')], {
             env: {
                 ...process.env, ENV_FILE: envFile, PORT: String(port), WEB_CONCURRENCY: '2', ALERTS_DISABLED: 'true',
                 LEADER_RETRY_SECONDS: '0.3', LEADER_PING_SECONDS: '0.3', PROTECTION_CACHE_MS: '0', SHUTDOWN_TIMEOUT_MS: '3000',
@@ -346,7 +346,7 @@ itDb('cluster: si el arranque está roto, el supervisor se detiene con error en 
 });
 
 itDb('sondas de preparación: /health/ready no pasa por el límite ni el bloqueo de IP (un balanceador no puede quedarse fuera)', async () => {
-    const protection = require('./src/middleware/protection.middleware');
+    const protection = require('../src/middleware/protection.middleware');
     const res = { setHeader() {}, set() { return this; }, removeHeader() {}, once() {}, status() { throw new Error('no debería responder'); } };
     for (const path of ['/health', '/health/ready']) {
         let passed = false;
@@ -354,7 +354,7 @@ itDb('sondas de preparación: /health/ready no pasa por el límite ni el bloqueo
         assert.ok(passed, path);
     }
     // Con la IP bloqueada de verdad, una ruta normal SÍ se corta y las sondas siguen pasando
-    const anomaly = require('./src/security/anomaly-detection.service');
+    const anomaly = require('../src/security/anomaly-detection.service');
     await anomaly.blockIP('198.51.100.9', 'prueba-sondas');
     try {
         let status = null;
