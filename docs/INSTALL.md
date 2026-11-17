@@ -63,6 +63,17 @@ local**, nunca hacia fuera, y con `StreamMaxLength 25M` (= `CLAMAV_MAX_BYTES`).
 `node instalador/install.js [--os windows|linux|macos] [--yes] [--no-tools] [--production]` es solo el paso de npm/.env (lo llaman los
 tres instaladores). `install.sh` e `install.ps1` se mantienen por compatibilidad y llevan al instalador nuevo.
 
+## TLS hacia MariaDB (producción)
+
+En producción (`NODE_ENV=production`) el API verifica el certificado de MariaDB (`DB_SSL=verify`). Con certificados propios:
+
+1. `npm run db:tls` genera una CA y un certificado de servidor fuera del repositorio (por defecto `%ProgramData%secure-serverdb-tls`; admite `--out`, `--host` y `--force`).
+2. Como administrador: `powershell -ExecutionPolicy Bypass -File instaladormariadb-tls.ps1` (copia de seguridad de `my.ini`, `ssl_ca/ssl_cert/ssl_key` en `[mysqld]`, permisos de las claves y reinicio del servicio; si no arranca, restaura `my.ini`).
+3. En `.env`: `DB_SSL=verify` y `DB_SSL_CA=<ruta absoluta de ca.pem>`.
+4. `npm start`.
+
+`npm run dev` (nodemon fija `NODE_ENV=development` y `DB_SSL=off`) y las pruebas van **sin** TLS: el servidor no exige `require_secure_transport`.
+
 ## Después de instalar
 
 1. Revisa `.env` (credenciales y semillas reales; nunca subas credenciales al repositorio).

@@ -15,6 +15,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 | Web | `cd web && npm run typecheck && npm test && npm run build` · e2e: `npm run test:e2e` (MariaDB + Playwright) |
 | Tabla de endpoints del README | `npm run docs:endpoints -- --write` (tras tocar `docs/openapi.json`) |
 | Varias réplicas (Docker) | `deploy/docker-compose.yml` + `npm run test:compose` (ver `docs/SEGURIDAD.md` §23) |
+| TLS de MariaDB (producción) | `npm run db:tls` + `instalador/mariadb-tls.ps1` (admin); `npm run dev` y pruebas sin TLS |
 | PruebasLinux | `bash PruebasLinux/pruebas.sh --list` (126 opciones; solo contra sistemas propios o autorizados) |
 
 ## Estructura

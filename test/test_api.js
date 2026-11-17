@@ -414,3 +414,32 @@ test('DISABLE_IP_BLOCKING: nunca en producción (el servidor no arranca y el mid
         set(saved);
     }
 });
+
+// TLS hacia la BD: `npm run dev` y las pruebas van sin TLS; `npm start` usa el .env (producción → verify).
+// buildSslConfig no tiene prueba propia en el repositorio, así que estas tres cubren la configuración.
+test('package.json: nodemonConfig.env pone NODE_ENV=development y DB_SSL=off (npm run dev sin TLS)', () => {
+    const pkg = require('../package.json');
+    assert.strictEqual(pkg.nodemonConfig.env.NODE_ENV, 'development');
+    assert.strictEqual(pkg.nodemonConfig.env.DB_SSL, 'off');
+});
+
+test('package.json: el script start no fuerza DB_SSL ni NODE_ENV', () => {
+    const pkg = require('../package.json');
+    assert.ok(!/DB_SSL|NODE_ENV/.test(pkg.scripts.start), pkg.scripts.start);
+    assert.ok(!/DB_SSL|NODE_ENV/.test(pkg.scripts['start:cluster']), pkg.scripts['start:cluster']);
+});
+
+test('scripts/dbTlsCerts.js: se niega a escribir claves dentro del repositorio (sin necesitar openssl)', () => {
+    const fs = require('fs');
+    const { spawnSync } = require('child_process');
+    const repo = path.join(__dirname, '..');
+    const destino = path.join(repo, 'tmp-dentro-repo-tls');
+    try {
+        const r = spawnSync(process.execPath, [path.join(repo, 'scripts', 'dbTlsCerts.js'), '--out', destino], { encoding: 'utf8' });
+        assert.notStrictEqual(r.status, 0);
+        assert.match(r.stderr, /repositorio/);
+        assert.strictEqual(fs.existsSync(destino), false);
+    } finally {
+        fs.rmSync(destino, { recursive: true, force: true });
+    }
+});
