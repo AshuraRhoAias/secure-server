@@ -38,6 +38,7 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
   en uno no prueba el otro. Nunca usar ni leer la contraseña de root (el script lo ejecuta el propietario). No levantar
   contenedores ni descargar imágenes sin permiso (el equipo va justo de memoria). `.env` tiene `skip-worktree`: sus cambios locales
   (credenciales) no deben subirse nunca.
+  La aplicación usa el usuario `secure_app` sobre la base `secure_platform` (`database/setup-app-local.sql`, privilegios mínimos solo sobre esa base), nunca root.
 - Bases de datos: fase SQL (MariaDB/MySQL + PostgreSQL/Supabase) con adaptador de dialecto; MongoDB más adelante
   (`docs/BASES-DE-DATOS.md`, sección «Estado»). El motor se elige con `DB_CLIENT` en `src/config/db-drivers/` (el ÚNICO sitio que
   importa `mysql2`/`pg`; `test/test_db.js` lo comprueba). Todo driver cumple el contrato documentado allí. SQL nuevo, portable:

@@ -74,6 +74,25 @@ En producción (`NODE_ENV=production`) el API verifica el certificado de MariaDB
 
 `npm run dev` (nodemon fija `NODE_ENV=development` y `DB_SSL=off`) y las pruebas van **sin** TLS: el servidor no exige `require_secure_transport`.
 
+## Base de datos de la aplicación (local)
+
+La aplicación nunca se conecta como `root`: usa el usuario `secure_app` con privilegios mínimos solo sobre `secure_platform`.
+
+1. Sustituye `CAMBIA_ESTA_CLAVE` en `database/setup-app-local.sql` (aparece dos veces; no subas la clave elegida) y ejecútalo como administrador:
+   `Get-Content database\setup-app-local.sql | & "C:\Program Files\MariaDB 13.1\bin\mariadb.exe" -uroot -p`
+2. Importa el esquema con el nuevo usuario: `Get-Content database\schema.sql | & "C:\Program Files\MariaDB 13.1\bin\mariadb.exe" -u secure_app -p secure_platform`
+3. En `.env` la URL `mysql://secure_app:<clave>@localhost:3306/secure_platform` se parte así (el constructor une solo los fragmentos 1, 2 y 3;
+   el 4 no entra en la URL):
+
+   ```
+   DB_FRAGMENT_1=mysql://secure_app:<clave>@
+   DB_FRAGMENT_2=localhost:
+   DB_FRAGMENT_3=3306/secure_platform
+   ```
+
+   `credential-builder.js` no codifica nada: si la clave contiene caracteres especiales de URL (`@ : / ? # % ^ &` …), escríbela ya
+   codificada (`encodeURIComponent`) en el fragmento 1. Con una clave solo alfanumérica no hace falta.
+
 ## Después de instalar
 
 1. Revisa `.env` (credenciales y semillas reales; nunca subas credenciales al repositorio).

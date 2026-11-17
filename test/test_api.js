@@ -443,3 +443,20 @@ test('scripts/dbTlsCerts.js: se niega a escribir claves dentro del repositorio (
         fs.rmSync(destino, { recursive: true, force: true });
     }
 });
+
+test('database/setup-app-local.sql: usuario de la app sin privilegios globales ni clave real', () => {
+    const fs = require('fs');
+    const sql = fs.readFileSync(path.join(__dirname, '..', 'database', 'setup-app-local.sql'), 'utf8');
+    // Solo se examinan las sentencias: los comentarios (--) explican qué NO se concede
+    const codigo = sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+    assert.doesNotMatch(codigo, /ON\s+\*\s*\.\s*\*/i, 'no concede privilegios globales');
+    assert.doesNotMatch(codigo, /GRANT\s+OPTION/i);
+    assert.doesNotMatch(codigo, /\b(SUPER|FILE|PROCESS|ALL\s+PRIVILEGES)\b/i);
+    assert.doesNotMatch(codigo, /\broot\b/i);
+    const claves = [...codigo.matchAll(/IDENTIFIED\s+BY\s+'([^']*)'/gi)].map(m => m[1]);
+    assert.ok(claves.length >= 4);
+    for (const c of claves) assert.strictEqual(c, 'CAMBIA_ESTA_CLAVE');
+    const grants = [...codigo.matchAll(/GRANT\s+[^;]*?\s+ON\s+(\S+)/gi)].map(m => m[1]);
+    assert.ok(grants.length >= 2);
+    for (const g of grants) assert.strictEqual(g, 'secure_platform.*');
+});
