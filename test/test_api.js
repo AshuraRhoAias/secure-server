@@ -417,10 +417,22 @@ test('DISABLE_IP_BLOCKING: nunca en producción (el servidor no arranca y el mid
 
 // TLS hacia la BD: `npm run dev` y las pruebas van sin TLS; `npm start` usa el .env (producción → verify).
 // buildSslConfig no tiene prueba propia en el repositorio, así que estas tres cubren la configuración.
-test('package.json: nodemonConfig.env pone NODE_ENV=development y DB_SSL=off (npm run dev sin TLS)', () => {
+test('npm run dev: scripts/devGuard.js arranca node --watch con NODE_ENV=development y DB_SSL=off (sin TLS), y se niega en producción', () => {
+    const { spawnSync } = require('child_process');
     const pkg = require('../package.json');
-    assert.strictEqual(pkg.nodemonConfig.env.NODE_ENV, 'development');
-    assert.strictEqual(pkg.nodemonConfig.env.DB_SSL, 'off');
+    assert.strictEqual(pkg.scripts.dev, 'node scripts/devGuard.js');
+    assert.ok(!pkg.devDependencies?.nodemon && !pkg.dependencies?.nodemon, 'nodemon ya no hace falta (node --watch)');
+
+    const { devEnv, ENTRY } = require('../scripts/devGuard');
+    assert.strictEqual(ENTRY, 'src/index.js');
+    const env = devEnv({ NODE_ENV: 'production', DB_SSL: 'verify', OTRA: 'x' });
+    assert.strictEqual(env.NODE_ENV, 'development');
+    assert.strictEqual(env.DB_SSL, 'off');
+    assert.strictEqual(env.OTRA, 'x');
+
+    const refused = spawnSync(process.execPath, [require.resolve('../scripts/devGuard')], { env: { ...process.env, NODE_ENV: 'production' }, encoding: 'utf8', timeout: 10000 });
+    assert.strictEqual(refused.status, 1);
+    assert.match(refused.stderr, /no se usa en producción/);
 });
 
 test('package.json: el script start no fuerza DB_SSL ni NODE_ENV', () => {

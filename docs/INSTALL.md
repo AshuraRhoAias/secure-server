@@ -72,7 +72,7 @@ En producción (`NODE_ENV=production`) el API verifica el certificado de MariaDB
 3. En `.env`: `DB_SSL=verify` y `DB_SSL_CA=<ruta absoluta de ca.pem>`.
 4. `npm start`.
 
-`npm run dev` (nodemon fija `NODE_ENV=development` y `DB_SSL=off`) y las pruebas van **sin** TLS: el servidor no exige `require_secure_transport`.
+`npm run dev` (`scripts/devGuard.js` arranca `node --watch` con `NODE_ENV=development` y `DB_SSL=off`) y las pruebas van **sin** TLS: el servidor no exige `require_secure_transport`.
 
 ## Base de datos de la aplicación (local)
 

@@ -24,7 +24,7 @@ real); donde algo no se puede garantizar desde el código, se dice.
 - [18. Archivos: imágenes recodificadas, PDF sin contenido activo y claves de archivo en el KMS](#18-archivos-imágenes-recodificadas-pdf-sin-contenido-activo-y-claves-de-archivo-en-el-kms)
 - [19. Operación y observabilidad (solo admin)](#19-operación-y-observabilidad-solo-admin)
 - [20. Pruebas, cobertura y fuzzing](#20-pruebas-cobertura-y-fuzzing)
-- [21. CI y producción (sin nodemon)](#21-ci-y-producción-sin-nodemon)
+- [21. CI y producción (sin herramientas de desarrollo)](#21-ci-y-producción-sin-herramientas-de-desarrollo)
 - [22. Límites y pendientes (sin humo)](#22-límites-y-pendientes-sin-humo)
 - [23. Escalabilidad](#23-escalabilidad)
 - [24. Interfaz web de operación (Next.js)](#24-interfaz-web-de-operación-nextjs)
@@ -747,21 +747,22 @@ Límite honesto: es *property-based testing*, no un fuzzer guiado por cobertura 
 
 ---
 
-## 21. CI y producción (sin nodemon)
+## 21. CI y producción (sin herramientas de desarrollo)
 
 - **`ci.yml`**: lint de seguridad (0 avisos), `check:prod-deps`, MariaDB y ClamAV reales, `npm run coverage` (toda la suite, fuzzing incluido, con
   umbral mínimo y artefacto `coverage`), `npm audit` de producción (alto), trabajo **`production-install`** (`npm ci --omit=dev`,
-  comprueba que no hay nodemon ni herramientas de desarrollo en `node_modules`, que `npm run dev` se niega con `NODE_ENV=production` y que el servidor
+  comprueba que no hay herramientas de desarrollo en `node_modules`, que `npm run dev` se niega con `NODE_ENV=production` y que el servidor
   carga sus módulos) y **`dependency-review`** en los pull requests (rechaza dependencias nuevas con vulnerabilidades altas o licencias GPL/AGPL; **requiere activar «Dependency graph»** —y Advanced Security si el repositorio es privado— en Settings; mientras no lo esté, el job avisa pero no bloquea).
   Permisos `contents: read`, cancelación de ejecuciones obsoletas y *timeouts*.
 - **`security.yml`**: ESLint security, CodeQL, gitleaks, SBOM CycloneDX y **DAST con OWASP ZAP que bloquea** si el informe contiene alertas de riesgo ALTO
   (si ZAP no llega a ejecutarse por infraestructura, no bloquea). **`fuzz.yml`**: fuzzing nocturno largo.
 - **Todas las acciones están fijadas por SHA** de commit (con la versión en un comentario) y Dependabot propone las actualizaciones: una etiqueta como `@v4`
   puede moverse y ejecutar código distinto mañana.
-- **nodemon solo en desarrollo**: está en `devDependencies`; `npm start` ejecuta `node src/index.js`; `npm run dev` pasa por `scripts/devGuard.js` y
-  **se niega con `NODE_ENV=production`**; `install.js --production` (o `NODE_ENV=production`) instala con `--omit=dev`; y `npm run check:prod-deps`
-  falla si una herramienta de desarrollo aparece en `dependencies`, en `start` o en un `require` de `src/`/`scripts/`.
-  En producción: `npm ci --omit=dev` y un gestor de procesos (systemd, PM2, contenedor) en lugar de nodemon.
+- **Recarga solo en desarrollo**: `npm run dev` es `scripts/devGuard.js`, que **se niega con `NODE_ENV=production`** y si no arranca
+  `node --watch src/index.js` (de serie en Node 22; sin nodemon, que arrastraba `picomatch` con una vulnerabilidad alta sin versión corregida);
+  `npm start` ejecuta `node src/index.js`; `install.js --production` (o `NODE_ENV=production`) instala con `--omit=dev`; y `npm run check:prod-deps`
+  falla si una herramienta de desarrollo aparece en `dependencies`, en `start` (también `--watch`) o en un `require` de `src/`/`scripts/`.
+  En producción: `npm ci --omit=dev` y un gestor de procesos (systemd, PM2, contenedor).
 
 ---
 

@@ -47,7 +47,7 @@ jobs:
 
       - run: npm run lint:security
 
-      # Nada de desarrollo (nodemon, eslint, c8…) en dependencies, en "start" ni en el código servido
+      # Nada de desarrollo (eslint, c8…) en dependencies, en "start" ni en el código servido
       - run: npm run check:prod-deps
 
       - name: Preparar bases de datos de prueba
@@ -85,9 +85,9 @@ jobs:
 
   # Interfaz web de operación (web/): tipos, pruebas unitarias del BFF, compilación y extremo a extremo con el API REAL + Chromium
   web:
-    # Fijado a 24.04: `ubuntu-latest` pasa a Ubuntu 26 desde el 19-oct-2026 y Playwright 1.56 no sabe instalar allí las
-    # dependencias de los navegadores (`--with-deps`). Al subir Playwright a una versión que soporte 26, volver a ubuntu-latest.
-    runs-on: ubuntu-24.04
+    # `ubuntu-latest` es Ubuntu 26 desde el 19-oct-2026: Playwright 1.56 no sabía instalar allí las dependencias de los navegadores
+    # (`--with-deps`) y el job se fijó a 24.04 (#38); con Playwright 1.65 vuelve a ubuntu-latest. Si se rompe, fijar ubuntu-24.04.
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       NEXT_TELEMETRY_DISABLED: '1'
@@ -131,7 +131,7 @@ jobs:
       - name: Navegadores de Playwright y axe-core
         run: |
           set -o pipefail
-          { npm install --no-save playwright@1.56.1 @axe-core/playwright@4.10.1 && npx playwright install --with-deps chromium firefox webkit; } 2>&1 | tee "$RUNNER_TEMP/playwright-install.log"
+          { npm install --no-save playwright@1.65.1 @axe-core/playwright@4.14.0 && npx playwright install --with-deps chromium firefox webkit; } 2>&1 | tee "$RUNNER_TEMP/playwright-install.log"
         working-directory: web
       - name: Resumen del fallo al instalar navegadores (anotación)
         if: failure()

@@ -39,7 +39,7 @@ Solo la rama `main`. Las correcciones de seguridad se publican allí.
 - `npm run coverage`: la misma suite medida con c8 (umbral mínimo en CI). `npm run test:fuzz`: fuzzing con propiedades (`FUZZ_RUNS`, `FUZZ_SEED`).
 - `npm run test:scale`: limitador, caché de bloqueos, líder, cluster (reparto, relevo, reinicio en caliente sin errores, cierre ordenado). `npm run bench:scale -- --env <archivo>`: antes/después de rendimiento.
 - `cd web && npm test && npm run build && npm run test:e2e`: interfaz web (BFF, CSP, CSRF, sesión) con el API real y Chromium.
-- `npm run check:prod-deps`: nada de desarrollo (nodemon, eslint, c8…) en producción.
+- `npm run check:prod-deps`: nada de desarrollo (eslint, c8…) en producción.
 - `npm run lint:security`: análisis estático (eslint-plugin-security), debe quedar a cero avisos.
 - `npm audit --omit=dev`: dependencias de producción sin vulnerabilidades altas.
 - `docs/openapi.json`: definición de la API para escáneres (ZAP, Burp); una prueba garantiza que está al día.

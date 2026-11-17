@@ -3,7 +3,7 @@
 #   docker build -t secure-server .
 #   docker run --env-file prod.env -p 3000:3000 secure-server          (la configuración llega SIEMPRE por variables de entorno)
 #
-# - Solo dependencias de PRODUCCIÓN (sin nodemon, eslint, c8…): npm ci --omit=dev en una etapa aparte.
+# - Solo dependencias de PRODUCCIÓN (sin eslint, c8…): npm ci --omit=dev en una etapa aparte.
 # - Usuario sin privilegios (uid 10001), código y dependencias de solo lectura para ese usuario; solo son escribibles
 #   storage/ (temporales de subida y archivos si FILES_STORAGE=local), data/ (estado de rotación) y backups/.
 # - Sin secretos en la imagen: ni .env, ni claves (ver .dockerignore). ENV_FILE apunta a un archivo VACÍO: index.js exige que exista.

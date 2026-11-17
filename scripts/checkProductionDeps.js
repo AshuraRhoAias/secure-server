@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Comprueba que NADA de desarrollo llega a producción (se ejecuta en CI y antes de desplegar: npm run check:prod-deps).
-//   1. nodemon y demás herramientas de desarrollo están solo en devDependencies.
-//   2. "start" arranca con node, no con nodemon, y "dev" pasa por el guardián.
+//   1. Las herramientas de desarrollo están solo en devDependencies.
+//   2. "start" arranca con node, sin modo vigilancia (--watch) ni nodemon, y "dev" pasa por el guardián (scripts/devGuard.js).
 //   3. El código de src/ y scripts/ no hace require de ninguna dependencia de desarrollo.
 //   4. Con --installed: en node_modules NO hay herramientas de desarrollo (tras `npm ci --omit=dev`).
 
@@ -16,10 +16,10 @@ const problems = [];
 for (const name of DEV_ONLY) {
     if (pkg.dependencies?.[name]) problems.push(`${name} está en dependencies: debe estar en devDependencies`);
 }
-if (/nodemon/.test(pkg.scripts?.start || '')) problems.push('"start" usa nodemon');
-if (!/devGuard\.js/.test(pkg.scripts?.dev || '')) problems.push('"dev" debe pasar por scripts/devGuard.js antes de nodemon');
+if (/nodemon|--watch/.test(pkg.scripts?.start || '')) problems.push('"start" usa nodemon o --watch (modo desarrollo)');
+if (!/devGuard\.js/.test(pkg.scripts?.dev || '')) problems.push('"dev" debe arrancar con scripts/devGuard.js (se niega en producción)');
 for (const [name, command] of Object.entries(pkg.scripts || {})) {
-    if (/^(start|prestart|poststart|postinstall|install|preinstall|prepare)$/.test(name) && /nodemon/.test(command)) problems.push(`el script "${name}" usa nodemon`);
+    if (/^(start|prestart|poststart|postinstall|install|preinstall|prepare)$/.test(name) && /nodemon|--watch/.test(command)) problems.push(`el script "${name}" usa nodemon o --watch`);
 }
 
 const walk = (dir, out = []) => {
@@ -51,4 +51,4 @@ if (problems.length) {
     console.error('❌ Dependencias de desarrollo en producción:\n  - ' + problems.join('\n  - '));
     process.exit(1);
 }
-console.log('✅ Producción limpia: nada de desarrollo (nodemon, eslint, c8…) en dependencies, start ni en el código servido');
+console.log('✅ Producción limpia: nada de desarrollo (eslint, c8…) en dependencies, start ni en el código servido');

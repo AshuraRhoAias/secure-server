@@ -13,7 +13,7 @@
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "web:start": "npm --prefix web start",
-    "dev": "node scripts/devGuard.js && nodemon src/index.js",
+    "dev": "node scripts/devGuard.js",
     "db:tls": "node scripts/dbTlsCerts.js",
     "test": "node test/test_system.js",
     "test:api": "node --test test/test_api.js",
@@ -77,12 +77,6 @@
   "author": "Security Team",
   "license": "MIT",
   "type": "commonjs",
-  "nodemonConfig": {
-    "env": {
-      "NODE_ENV": "development",
-      "DB_SSL": "off"
-    }
-  },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1165.0",
     "@aws-sdk/client-s3": "^3.1165.0",
@@ -121,7 +115,12 @@
     "eslint-plugin-security": "^4.2.1",
     "fast-check": "^4.10.2",
     "globals": "^17.14.0",
-    "nodemon": "^3.1.10",
     "xml-crypto": "^6.4.0"
+  },
+  "overrides": {
+    "test-exclude": {
+      "glob": "^14.0.6",
+      "minimatch": "^11.0.9"
+    }
   }
 }
