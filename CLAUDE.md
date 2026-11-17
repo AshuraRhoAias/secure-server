@@ -51,14 +51,16 @@ BFF) solo para administradores, y un entorno independiente de pruebas de segurid
 ## Flujo de git (obligatorio)
 
 - **Ramas (decisión del propietario, 15-nov-2026):** solo existe **`main`**, la rama oficial. Cada tarea usa una **rama corta**
-  que sale de `main` actualizada (p. ej. `deps/…`, `fix/…`, `docs/…`) y **se borra, local y remota, al terminar la tarea**.
+  que sale de `main` actualizada (p. ej. `deps/…`, `fix/…`, `docs/…`, `orden/…`).
   `pruebas`, `postproduccion`, `cierre/*`, `instalador` y `revision-codigo` se borraron (todo estaba fusionado en `main`); el único
   commit suelto que había (rama `claude/project-thread-qjkfd0`) se conserva en la etiqueta `archivo/project-thread-qjkfd0`.
-- **`main` siempre tiene todo**: **tras cada commit**, push de la rama corta y **también a `main`** por avance rápido
-  (`git push origin HEAD:<rama> HEAD:main`). Si `main` avanzó por su cuenta (PR fusionados, correcciones automáticas de GitHub),
-  primero `git fetch` + `git merge origin/main` en la rama, y después push de las dos.
+- **El propietario valida antes de `main` (decisión del 15-nov-2026):** tras cada commit se sube **solo la rama corta**
+  (`git push origin HEAD:<rama>`); **no** se avanza `main` ni se borra la rama hasta que el propietario la revise y dé el visto
+  bueno. Con su validación: avance rápido de `main` (`git push origin <rama>:main`) y borrar la rama, local y remota.
+- Si `main` avanzó mientras tanto (PR fusionados, correcciones automáticas de GitHub), primero `git fetch` + `git merge origin/main`
+  en la rama y volver a subirla (nunca rebase).
 - Nunca acumular commits solo en local. **Nunca** rebase de ramas publicadas ni `push --force` (tampoco a `main`).
-- Comprobar tras cada subida: `git merge-base --is-ancestor origin/main HEAD` y que local = remoto en la rama y en `main`.
+- Comprobar tras cada subida que local = remoto en la rama; al pasar a `main`, `git merge-base --is-ancestor origin/main <rama>`.
 - Historial: las fases `cierre/0-base` … `cierre/8-bd` ya están fusionadas en `main` (PR #26, #33–#35).
 - Credencial: el Git Credential Manager tiene varias cuentas; este repositorio fija `credential.https://github.com.username=AshuraRhoAias`
   en su config local. Con eso `GCM_INTERACTIVE=never git push` no abre ventanas. Si vuelve a pedir usuario, revisar esa clave.
@@ -149,7 +151,7 @@ decisiones del propietario), **manda este archivo**.
 | Pruebas e2e (Playwright) | skill `ecc:e2e-testing` · agente `ecc:e2e-runner` |
 | Cobertura y calidad antes de commit | `/ecc:test-coverage` · `/ecc:quality-gate` · skill `ecc:verification-loop` |
 | Seguridad del repositorio y la configuración | `/ecc:security-scan` · skill `ecc:security-review` |
-| Commit y PR | `/ecc:prp-commit` · `/ecc:pr` (respetando el **Flujo de git** de arriba: rama + `main` por avance rápido, sin force) |
+| Commit y PR | `/ecc:prp-commit` · `/ecc:pr` (respetando el **Flujo de git** de arriba: se sube la rama, el propietario la valida y después `main` por avance rápido, sin force) |
 | Documentación | `/ecc:update-docs` (además de las reglas de `docs/ReadmeLogsMejoras.md` y OpenAPI → README) |
 | Dudas sobre qué usar de ECC | `/ecc:ecc-guide` |
 
