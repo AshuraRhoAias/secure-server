@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { apiCall, beginLeave } from '@/lib/client';
+import { applyStoredMotion, storeMotion, type MotionPref } from './Backdrop3D';
 import { dateTime } from '@/lib/format';
 import type { Dashboard } from '@/lib/types';
 import { useApi } from '@/hooks/useApi';
@@ -45,6 +46,14 @@ function useTheme() {
   return [theme, () => setTheme(t => (t === 'auto' ? 'dark' : t === 'dark' ? 'light' : 'auto'))] as const;
 }
 
+// Movimiento: auto (sigue al sistema; el fondo 3D va lento si pide reducir) → activado (todo animado) → reducido (sin animaciones)
+function useMotion() {
+  const [motion, setMotion] = useState<MotionPref>('auto');
+  useEffect(() => { setMotion(applyStoredMotion()); }, []);
+  const cycle = () => setMotion(m => { const next: MotionPref = m === 'auto' ? 'on' : m === 'on' ? 'off' : 'auto'; storeMotion(next); return next; });
+  return [motion, cycle] as const;
+}
+
 export function Shell({ user, children }: { user: string; children: ReactNode }) {
   return (
     <ToastProvider>
@@ -60,6 +69,7 @@ function ShellFrame({ user, children }: { user: string; children: ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [theme, cycleTheme] = useTheme();
+  const [motion, cycleMotion] = useMotion();
   const [session, setSession] = useState<string | null>(null);
   // Contadores del menú: se actualizan al momento con el canal en vivo; el sondeo queda como respaldo
   const summary = useApi<{ dashboard: Dashboard }>('/api/system/dashboard?hours=1', { refreshMs: 120_000 });
@@ -104,6 +114,7 @@ function ShellFrame({ user, children }: { user: string; children: ReactNode }) {
             <button type="button" className="menu-button" onClick={() => setOpen(o => !o)} aria-label="Abrir menú" aria-expanded={open}>☰</button>
             <span className="spacer" />
             <LiveIndicator />
+            <button type="button" className="ghost" onClick={cycleMotion} title="Cambiar animaciones">{motion === 'auto' ? 'Movimiento: auto' : motion === 'on' ? 'Movimiento: activado' : 'Movimiento: reducido'}</button>
             <button type="button" className="ghost" onClick={cycleTheme} title="Cambiar tema">{theme === 'auto' ? 'Tema: auto' : theme === 'dark' ? 'Tema: oscuro' : 'Tema: claro'}</button>
             <button type="button" onClick={logout}>Cerrar sesión</button>
           </div>
