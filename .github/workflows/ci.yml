@@ -85,7 +85,9 @@ jobs:
 
   # Interfaz web de operación (web/): tipos, pruebas unitarias del BFF, compilación y extremo a extremo con el API REAL + Chromium
   web:
-    runs-on: ubuntu-latest
+    # Fijado a 24.04: `ubuntu-latest` pasa a Ubuntu 26 desde el 19-oct-2026 y Playwright 1.56 no sabe instalar allí las
+    # dependencias de los navegadores (`--with-deps`). Al subir Playwright a una versión que soporte 26, volver a ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       NEXT_TELEMETRY_DISABLED: '1'
@@ -128,9 +130,14 @@ jobs:
       # Navegadores reales (Chromium, Firefox y WebKit) y axe-core para la prueba de accesibilidad: con --no-save, no son dependencias del paquete
       - name: Navegadores de Playwright y axe-core
         run: |
-          npm install --no-save playwright@1.56.1 @axe-core/playwright@4.10.1
-          npx playwright install --with-deps chromium firefox webkit
+          set -o pipefail
+          { npm install --no-save playwright@1.56.1 @axe-core/playwright@4.10.1 && npx playwright install --with-deps chromium firefox webkit; } 2>&1 | tee "$RUNNER_TEMP/playwright-install.log"
         working-directory: web
+      - name: Resumen del fallo al instalar navegadores (anotación)
+        if: failure()
+        run: |
+          [ -f "$RUNNER_TEMP/playwright-install.log" ] && bash .github/scripts/annotate-log.sh "$RUNNER_TEMP/playwright-install.log" "playwright install" 40
+          true
       - name: Base de datos de pruebas
         run: |
           mysql -h127.0.0.1 -uroot -proot -e "
