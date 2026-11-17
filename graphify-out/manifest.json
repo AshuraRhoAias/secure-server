@@ -1232,110 +1232,110 @@
   },
   "database/migrations/001_roles_and_notes.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "62c143fcc0aa7c8a85c9ea1e6edf773f",
     "semantic_hash": ""
   },
   "database/migrations/002_crypto_meta.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "d06d88184a2434bee19ccfaaca8b9226",
     "semantic_hash": ""
   },
   "database/migrations/003_security_logs_encrypted_timestamp.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "09ce9af4d368c04aa216e08ea06be96b",
     "semantic_hash": ""
   },
   "database/migrations/004_security_analysis_tables.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "3a7c4c71d3a1396bcbc5afb318f2ab00",
     "semantic_hash": ""
   },
   "database/migrations/005_user_files.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "60e806c2711b13bf9b9ea22d28da3a9b",
     "semantic_hash": ""
   },
   "database/migrations/006_users_username_hash_unique.sql": {
     "mtime": 1794232004.58921,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "f93073cc45baf8ae16acf6d26a309e06",
     "semantic_hash": ""
   },
   "database/migrations/007_login_attempts_ip_subject.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "dea094e25081a3f013c37eeca19fe842",
     "semantic_hash": ""
   },
   "database/migrations/008_mfa.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "ef4cb16972334bdde6d60711322ed593",
     "semantic_hash": ""
   },
   "database/migrations/009_sso.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "f8ebe94c685491f0bf30a8e38a6818ec",
     "semantic_hash": ""
   },
   "database/migrations/010_file_scan_status.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "86f082e5e39e147240db2b91e6387819",
     "semantic_hash": ""
   },
   "database/migrations/011_sessions_refresh.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "fff2695234b1b2d3e85119bf6c3f6d28",
     "semantic_hash": ""
   },
   "database/migrations/012_roles_approvals.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "085f706adbbf37012067ad7535fb4a75",
     "semantic_hash": ""
   },
   "database/migrations/013_file_sanitize_status.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "12c0eb6338c39240875106f99f7922a3",
     "semantic_hash": ""
   },
   "database/migrations/014_security_alerts.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "3c58e831ec75ec76a980ff3c355ffd27",
     "semantic_hash": ""
   },
   "database/migrations/015_webauthn.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "e66e4bce501964ce0846a813a904fd14",
     "semantic_hash": ""
   },
   "database/migrations/016_saml_cache.sql": {
     "mtime": 1794232004.5932183,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "9065b8c9f71551c9291faa0fe8279c84",
     "semantic_hash": ""
   },
   "database/migrations/017_sso_handoff.sql": {
     "mtime": 1794261437.868205,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "d815a2b908266ec5bf2ad7cfd6147c1b",
     "semantic_hash": ""
   },
   "database/schema.sql": {
     "mtime": 1794261476.8993645,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "seen": 1794941040.66457,
+    "ast_hash": "6c0a7fb2b3d32f692e4c3496583d8320",
     "semantic_hash": ""
   },
   ".claude/CLAUDE.md": {
@@ -1417,9 +1417,9 @@
     "semantic_hash": "0d251a390c082f1cedcd9b8b91ff3c43"
   },
   "database/setup-local.sql": {
-    "mtime": 1794810085.231578,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "mtime": 1794939406.67153,
+    "seen": 1794941040.66457,
+    "ast_hash": "7eb7fd3bb0e8a021bb24a2c4899c97c3",
     "semantic_hash": ""
   },
   "instalador/comun.sh": {
@@ -1675,10 +1675,10 @@
     "semantic_hash": "b4dad8bb8afe6335d83c4c15a127c8d8"
   },
   "test/test_sessions.js": {
-    "mtime": 1794939406.7654839,
-    "seen": 1794941008.6824913,
-    "ast_hash": "fe5dd54a60eff3516bb47b9656b66aaa",
-    "semantic_hash": "fe5dd54a60eff3516bb47b9656b66aaa"
+    "mtime": 1794941705.3331294,
+    "seen": 1794942008.292264,
+    "ast_hash": "6077c92c2977779c78479488f6c6eb3f",
+    "semantic_hash": ""
   },
   "test/test_sso.js": {
     "mtime": 1794939406.7665248,
@@ -1717,9 +1717,9 @@
     "semantic_hash": ""
   },
   "docs/ReadmeLogsMejoras.md": {
-    "mtime": 1794939406.6804945,
-    "seen": 1794941008.6994593,
-    "ast_hash": "9a7f81cf4497bea5d79ac6c127e6204c",
+    "mtime": 1794941995.4539769,
+    "seen": 1794942008.2932646,
+    "ast_hash": "da14a26a431ddd1e5ca0099e94f8e8bf",
     "semantic_hash": ""
   },
   "instalador/install.js": {
@@ -1741,9 +1741,9 @@
     "semantic_hash": "fb529e98bd3894515f82cbdb2bc10b01"
   },
   "database/setup-app-local.sql": {
-    "mtime": 1794929206.015767,
-    "seen": 1794936461.626448,
-    "ast_hash": "",
+    "mtime": 1794939406.6705334,
+    "seen": 1794941040.66457,
+    "ast_hash": "0bad09fb4fc7ac5c0693343244a6d4d5",
     "semantic_hash": ""
   },
   "package-lock.json": {

@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P, #37–#39)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -52,7 +52,11 @@
 - **CI de nuevo en verde 2026-11-17 (#38, §P):** los jobs no arrancaban por la facturación de la cuenta (repositorio privado); con el
   repositorio público vuelven a correr. El job `web` fallaba al instalar los navegadores porque `ubuntu-latest` ya es Ubuntu 26 y
   Playwright 1.56 no lo soporta: queda fijado a `ubuntu-24.04`. Resultado en GitHub (`a248917`): `test` (MariaDB 10.11, cobertura y fuzz),
-  `web` (e2e en Chromium, Firefox y WebKit + axe), `compose`, `pruebaslinux` y `production-install` **en verde**. `Security`, pendiente del PR.
+  `web` (e2e en Chromium, Firefox y WebKit + axe), `compose`, `pruebaslinux` y `production-install` **en verde**; en `main` también `Security`.
+- **Dependencias y avisos 2026-11-17 (#39, §P):** raíz con **0 vulnerabilidades**: `nodemon` (arrastraba `picomatch`, alta y sin parche)
+  sustituido por `node --watch` en `scripts/devGuard.js`; `overrides` de `glob`/`minimatch` para `c8`. Next sin aviso de raíz, Playwright
+  1.65 con `web` de nuevo en `ubuntu-latest` y una prueba inestable de sesiones corregida. Queda `picomatch` en `web/` (solo desarrollo, sin
+  parche publicado) y pasar el `.env` local a `secure_app` (propietario).
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -266,6 +270,9 @@ evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha compr
 con la ruta `test/`), sin cambiar notas. La media sigue en **≈ 8,1/10**. `Security` (CodeQL, gitleaks, SBOM, DAST) no se ha ejecutado aún:
 solo corre en PR o en push a `main`.
 
+**Actualización 2026-11-17 (#39, dependencias):** sin cambios de nota. `Security` ya pasó en `main` (`fd6d5f4`), la raíz queda con 0
+vulnerabilidades (también de desarrollo) y el job `web` vuelve a `ubuntu-latest`. La media sigue en **≈ 8,1/10**.
+
 ---
 
 ## D. Registro de problemas y tareas pendientes (por prioridad)
@@ -285,12 +292,15 @@ solo corre en PR o en push a `main`.
 | Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
 | Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
 | Media | `test_fuzz.js` no terminaba en local; `test:all` y `coverage` se colgaban. Causa: el fuzz HTTP abría `GET /api/system/stream` (SSE, sin fin) como admin y el helper `api()` esperaba el cuerpo entero | Ejecución local (#35); causa confirmada en #37 (128 usuarios creados = 64 rutas de `user` + 64 de `admin`, la última es el stream) | Sin `test:all` ni cobertura completos en local | `api()` corta el cuerpo de las respuestas `text/event-stream` (#37) | **Cerrado (#37, solo local)** |
-| Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4) | `npm audit` tras #35; GitHub avisó de 2 moderadas en `main` (no se pudo ver la página; probablemente los dos advisories de minimatch/glob) | Solo herramientas de desarrollo, no producción | Exige versión mayor (minimatch 11 / glob >14.0.1) o volver a `c8` 9.1.0; posible `overrides` | Abierto (decisión del propietario) |
+| Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4); el 17-nov se sumó una **alta**, `picomatch` ≤4.0.7 vía `nodemon`→`chokidar` (GHSA-fc5q-39xc-vjpf), sin versión corregida publicada | `npm audit` (#35, #39) | Solo herramientas de desarrollo, no producción | `nodemon` sustituido por `node --watch` (`scripts/devGuard.js`); `overrides` de `glob` ^14.0.6 y `minimatch` ^11.0.9 para `test-exclude` | **Cerrado (#39): 0 vulnerabilidades en la raíz** |
 | Baja | 3 actualizaciones aparcadas: `mariadb` 10.11→13.0 en `deploy/`, imagen `node` 22→26-bookworm-slim, `actions/upload-artifact` 4→7 | Dependabot (#35) | El CI usa MariaDB 10.11 a propósito | Decidir cada una | Abierto (decisión del propietario) |
 | Baja | Commit `5ee29e5` sin fusionar (token de cliente diario, `capacity.js`, optimización de `level3.js`) | Etiqueta `archivo/project-thread-qjkfd0` (#35) | Trabajo conservado pero fuera de `main` | Decidir si se rescata o se descarta | Abierto (decisión del propietario) |
 | Alta | CI de GitHub caído por la cuenta: los jobs no llegaban a arrancar («recent account payments have failed or your spending limit needs to be increased»; el repositorio era privado) | Anotaciones de los check-runs (#38) | Nada del CI verificado desde #35 | El propietario hizo público el repositorio; además el job `web` se fijó a `ubuntu-24.04` (Playwright 1.56 no instala dependencias en Ubuntu 26) | **Cerrado (#38): CI en verde en `a248917`** |
-| Media | `Security` (CodeQL, gitleaks, SBOM, DAST) sin ejecutar desde que volvió el CI | Solo corre en PR o en push a `main` (#38) | Análisis de seguridad sin evidencia reciente | Abrir el PR de `ci/revision` y revisar su resultado | Abierto |
-| Baja | Playwright fijado en 1.56.1 obliga a usar `ubuntu-24.04` en el job `web` | #38 | Al retirar 24.04 de los runners, el job fallaría | Subir Playwright a una versión que soporte Ubuntu 26 y volver a `ubuntu-latest` | Abierto |
+| Media | `Security` (CodeQL, gitleaks, SBOM, DAST) sin ejecutar desde que volvió el CI | Solo corre en PR o en push a `main` (#38) | Análisis de seguridad sin evidencia reciente | Push de `ci/revision` a `main` (`fd6d5f4`) | **Cerrado (#39): los 5 jobs de `Security` en verde en `main`** |
+| Baja | Playwright fijado en 1.56.1 obliga a usar `ubuntu-24.04` en el job `web` | #38 | Al retirar 24.04 de los runners, el job fallaría | Playwright 1.65.1 + axe 4.14.0 y vuelta a `ubuntu-latest` | **Cerrado (#39): `web` en verde en Ubuntu 26** |
+| Media | `picomatch` ≤4.0.7 (alta, GHSA-fc5q-39xc-vjpf) en `web/` vía `vitest`→`vite`→`tinyglobby`/`fdir`: no hay versión corregida | `npm audit` en `web/` (#39) | Solo desarrollo (`web/` en producción: 0); ReDoS solo con patrones glob controlados por un atacante, y aquí son del propio proyecto | Esperar la versión corregida (Dependabot la propondrá); la alternativa de npm es bajar `vitest` a 3.1.4 (versión mayor) | Aceptado (temporal) |
+| Media | `npm run dev` no conecta a la BD en el equipo del propietario: `AUTH_SWITCH_PLUGIN_ERROR` | `.env` local (skip-worktree) aún con el usuario root de MariaDB, que usa un plugin de autenticación que `mysql2` no soporta (#39) | Desarrollo local sin servidor | Ejecutar `database/setup-app-local.sql` con una clave real y pasar el `.env` a `secure_app` (solo el propietario: exige root) | Abierto (propietario) |
+| Baja | `test_sessions.js` «el JWT de acceso caduca solo…» fallaba a veces en el CI (401 en vez de 200) | CI de `2e7158a` (#39) | Falso rojo | Token de 3 s en vez de 1,2 s y espera calculada desde el `exp` real | **Cerrado (#39)** |
 | Baja | `install.sh`, `install.ps1` (atajos que solo redirigen) y `security.config.js` (sin importadores; objeto estático de 2025) siguen en la raíz | Raíz tras #36 | Ruido y código muerto | Borrarlos o mantenerlos | Abierto (decisión del propietario) |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
 | Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
@@ -376,7 +386,14 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 |---|---|---|---|---|---|
 | #38 · `14a4cbf` | — | `.github/workflows/ci.yml` (comentario de `production-install` en su job) | — | Comentario mal colocado | CI: todo en verde salvo `web` (instalación de Playwright en Ubuntu 26) |
 | #38 · `a248917` | — | `.github/workflows/ci.yml` (`web` en `ubuntu-24.04`; anotación si falla la instalación de navegadores) | — | `ubuntu-latest` es Ubuntu 26 y Playwright 1.56 no instala allí | CI: `test`, `web`, `compose`, `pruebaslinux`, `production-install` en verde |
-| #38 · (este commit) | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora de la entrega | — |
+| #38 · `fd6d5f4` | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora de la entrega | En `main`: `CI` y `Security` en verde |
+
+### Intervención 13 (17-nov, dependencias y cierre de avisos, rama `deps/cierre-alertas`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #39 · `2e7158a` | — | `scripts/devGuard.js` (lanza `node --watch`), `scripts/checkProductionDeps.js`, `package.json`/`package-lock.json` (sin `nodemon`; `overrides`), `test/test_api.js`, `web/next.config.ts`, `ci.yml` (Playwright 1.65, `ubuntu-latest`), `Dockerfile`, `docs/{SEGURIDAD,INSTALL,CONTROLES}.md`, `.github/SECURITY.md`, `instalador/install.js` | dependencia `nodemon` | `picomatch` alta sin parche; moderadas de `c8`; aviso de Next; `ubuntu-24.04` fijado | Local: lint 0, `test:api` 20/20, `coverage` 614/615 y `check-coverage` OK, `npm audit` 0, web typecheck + 57/57 + build. CI: todo verde salvo 1 prueba inestable de `test_sessions.js` |
+| #39 · (este commit) | — | `test/test_sessions.js`, `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Carrera de tiempo en la prueba de caducidad del JWT; bitácora | Local: `test_sessions.js` 15/15 tres veces seguidas |
 
 ---
 
@@ -394,7 +411,7 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
   cambios de comportamiento; verificada **solo en local** (#36).
 - ✅ Cuelgue de `test_fuzz.js` resuelto: `test:all` termina en local con 614/615 (#37, **solo local**).
 - ✅ CI de GitHub de nuevo en verde (`test`, `web`, `compose`, `pruebaslinux`, `production-install`) tras hacer público el repositorio y
-  fijar `web` a `ubuntu-24.04` (#38).
+  fijar `web` a `ubuntu-24.04` (#38). ✅ `Security` en verde en `main` (#39). ✅ 0 vulnerabilidades en la raíz, sin `nodemon` (#39).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -410,11 +427,11 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 8. **ASVS pendientes**: HIBP, límite de sesiones, versionado de API, multi-organización · media.
 9. `.env` fuera del repositorio cuando deje de ser de pruebas · alta antes de producción.
 10. **Instaladores de Linux y macOS ejecutados** en equipos reales o en el CI · media · `linux.sh --si` termina con EICAR detectado.
-11. ~~**Comprobar el CI tras #35**~~ · hecho en #38: todo el CI en verde en `a248917`. Queda ejecutar `Security` (al abrir el PR) y subir
-    Playwright para volver a `ubuntu-latest` · media.
+11. ~~**Comprobar el CI tras #35**~~ · hecho en #38 y #39: `CI` y `Security` en verde; `web` de nuevo en `ubuntu-latest` con Playwright 1.65.
 12. ~~**Investigar el cuelgue de `test_fuzz.js`**~~ · hecho en #37 (solo local): `test:all` y `coverage` terminan con 614/615 (1 omitida por SIGHUP); `check-coverage` pasa.
-13. **Decidir las 5 moderadas de desarrollo** (`overrides` de minimatch/glob o `c8` 9.1.0), **las 3 actualizaciones aparcadas** y **el
-    commit archivado** · baja · decisión del propietario anotada.
+13. ~~Las 5 moderadas de desarrollo~~ (hecho en #39). Quedan **las 3 actualizaciones aparcadas** y **el commit archivado** · baja ·
+    decisión del propietario anotada. 14. **`picomatch` en `web/`** cuando salga la versión corregida · media. 15. **`.env` local a
+    `secure_app`** (propietario) · media · `npm run dev` conecta.
 14. **Desbloquear el CI de Actions** (cuenta/facturación) y comprobar `compose` y `ci.yml` con las rutas nuevas de `test/` (#36) · alta ·
     todos los jobs en verde o fallos anotados.
 15. **Decidir `install.sh`, `install.ps1` y `security.config.js`** (borrar o mantener; #36) · baja · decisión del propietario anotada.
@@ -921,7 +938,7 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
 
 ---
 
-## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código y CI de GitHub (#37–#38)
+## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código, CI de GitHub y dependencias (#37–#39)
 
 Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusionado).
 
@@ -960,8 +977,8 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
   **Siguiente mejora:** comprobar el CI de `main` (jobs `test`, `web`, `compose`) y ejecutar los e2e de `web/` en local. *(Alta.)*
 
 ### #38 — CI de GitHub de nuevo en verde (verificado en GitHub)
-- **Estado:** completado. Todos los jobs de `CI` pasan en `a248917` (rama `ci/revision`); `Security` aún sin ejecutar (solo en PR o en
-  push a `main`).
+- **Estado:** completado. Todos los jobs de `CI` pasan en `a248917` (rama `ci/revision`); tras pasar a `main` (`fd6d5f4`), `CI` y
+  `Security` (CodeQL, gitleaks, SBOM, DAST, ESLint security) también en verde (ver #39).
 - **Archivos y módulos revisados:** `.github/workflows/ci.yml`, `fuzz.yml`, `security.yml` (YAML válido, acciones fijadas por SHA,
   permisos mínimos, `timeout-minutes` en todos los jobs), `.github/scripts/annotate-log.sh`, `.github/dependabot.yml`; anotaciones de los
   check-runs de las ejecuciones fallidas desde #35.
@@ -986,3 +1003,37 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
   Dependabot en `main` (según el aviso de `git push`; en local, las 5 moderadas de desarrollo ya conocidas); decidir `install.sh`,
   `install.ps1` y `security.config.js`.
   **Siguiente mejora:** abrir el PR de `ci/revision` para que corra `Security` y revisar su resultado; luego subir Playwright. *(Alta.)*
+
+### #39 — 0 vulnerabilidades en la raíz, sin avisos de build y CI en `ubuntu-latest` (verificado en local y en GitHub)
+- **Estado:** completado salvo lo que depende de terceros o del propietario (ver «Problemas restantes»).
+- **Archivos y módulos revisados:** `package.json`/`package-lock.json` (raíz y `web/`), `scripts/devGuard.js`,
+  `scripts/checkProductionDeps.js`, `test/test_api.js`, `test/test_sessions.js`, `web/next.config.ts`, `.github/workflows/ci.yml`,
+  `Dockerfile`, `docs/SEGURIDAD.md` §21, `docs/INSTALL.md`, `docs/CONTROLES.md`, `.github/SECURITY.md`, `instalador/install.js`; ejecución de
+  `Security` en `main`.
+- **Problema detectado:** (1) el 17-nov apareció `picomatch` ≤4.0.7 (GHSA-fc5q-39xc-vjpf, **alta**) sin versión corregida publicada (la
+  última es 4.0.7): en la raíz llegaba solo por `nodemon`→`chokidar`, y en `web/` por `vitest`→`vite`. (2) Seguían las 4 moderadas de
+  `c8`→`test-exclude` (`glob` 13, `minimatch` 10). (3) `next build` avisaba de que infería mal la raíz del workspace (dos `package-lock.json`).
+  (4) `web` seguía fijado a `ubuntu-24.04` por Playwright 1.56. (5) En el CI de la rama falló una vez «el JWT de acceso caduca solo y se
+  recupera con el refresh» (401 en vez de 200): el token de prueba duraba 1,2 s con `iat` truncado al segundo, así que en el peor caso
+  quedaban ~0,2 s hasta la primera comprobación. (6) `npm run dev` no conecta en el equipo del propietario (`AUTH_SWITCH_PLUGIN_ERROR`):
+  el `.env` local usa el usuario root de MariaDB, cuyo plugin de autenticación no soporta `mysql2`.
+- **Acciones realizadas:** (1) fuera `nodemon`: `npm run dev` = `node scripts/devGuard.js`, que se niega con `NODE_ENV=production` y si no
+  lanza `node --watch src/index.js` con `NODE_ENV=development` y `DB_SSL=off` (lo mismo que hacía `nodemonConfig`); `check:prod-deps`
+  rechaza también `--watch` en `start`; documentación actualizada. (2) `overrides` para `test-exclude`: `glob` ^14.0.6 y `minimatch` ^11.0.9
+  (misma API: `{ glob }`, `{ minimatch }`). (3) `web/next.config.ts`: `turbopack.root` y `outputFileTracingRoot` = `web/` (nada de `web/`
+  importa fuera de su carpeta; `standalone/server.js` queda en la raíz de `standalone`, que nadie consume aún). (4) Playwright 1.65.1 +
+  axe 4.14.0 y `web` en `ubuntu-latest`. (5) La prueba usa un token de 3 s (al menos 2 s de margen) y espera a partir del `exp` real.
+  (6) No se toca el `.env` (decisión del propietario y la clave de root no se usa): queda como tarea suya.
+- **Pruebas ejecutadas:** en local (Windows, MariaDB 13.1): `lint:security` 0 avisos; `check:prod-deps` limpio; `test:api` 20/20 (incluye la
+  prueba nueva de `devGuard`: entorno de desarrollo y negativa en producción); `npm run coverage` 614/615 (1 omitida por SIGHUP) en 783 s y
+  `check-coverage` OK; `test_sessions.js` 15/15 tres veces seguidas tras la corrección; `npm audit` raíz **0**; `npm run dev` arranca con
+  `node --watch` (y se para en la conexión a la BD por el `.env`, ver arriba) y se niega con `NODE_ENV=production`; `web/`: typecheck,
+  57/57 y build **sin avisos**. En GitHub, ejecución de `2e7158a`: `web` (e2e en 3 navegadores en **Ubuntu 26**), `compose`,
+  `pruebaslinux` y `production-install` en verde; `test` con 614/615 por la prueba inestable (5), ya corregida. `Security` en `main`
+  (`fd6d5f4`): ESLint security, gitleaks, SBOM, CodeQL y DAST en verde.
+- **Puntuación:** 9/10 — sin vulnerabilidades en la raíz ni avisos de build y con el CI completo; no llega a 10 por `picomatch` en `web/`
+  (sin parche) y el `.env` local pendiente.
+- **Problemas restantes:** `picomatch` alta en `web/` (solo desarrollo, sin versión corregida; riesgo aceptado temporalmente); `.env`
+  local a `secure_app` (propietario); 3 actualizaciones aparcadas y commit archivado (decisión del propietario); instaladores de Linux y
+  macOS sin ejecutar; `actions/upload-artifact` v4 corre forzado en Node 24 (aviso de GitHub, entre las actualizaciones aparcadas).
+  **Siguiente mejora:** pasar el `.env` local a `secure_app` y, en cuanto exista, la versión corregida de `picomatch`. *(Media.)*

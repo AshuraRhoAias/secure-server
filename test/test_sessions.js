@@ -72,12 +72,15 @@ test('refresh: da un token nuevo y rota el refresh; el cliente no tiene que volv
 
 test('el JWT de acceso caduca solo y se recupera con el refresh', async (t) => {
     if (!enabled) return t.skip('sin BD');
-    process.env.ACCESS_TOKEN_MINUTES = '0.02'; // 1,2 s ≈ 1 s
+    // 3 s: `iat` va truncado al segundo, así que el token vale entre 2 y 3 s desde que se emite. Con 1,2 s (antes) quedaban
+    // ~0,2 s en el peor caso y en un runner lento caducaba ANTES de la primera comprobación (401 en vez de 200; pasó en el CI).
+    process.env.ACCESS_TOKEN_MINUTES = '0.05';
     try {
         const ip = testIp();
         const user = await registerAndLogin(app.base, { ip });
         assert.strictEqual((await me(user.token, ip)).status, 200);
-        await wait(2500);
+        // Se espera a que pase el `exp` real del token (más 1,1 s de margen), sin suponer cuánto tardó la emisión
+        await wait(Math.max(0, jwt.decode(user.token).exp * 1000 - Date.now()) + 1100);
         assert.strictEqual((await me(user.token, ip)).status, 401, 'caducó');
         // El token renovado, con la duración normal: con 1,2 s (y `exp` contado desde `iat` truncado) podía caducar antes
         // de comprobarlo en un runner lento
