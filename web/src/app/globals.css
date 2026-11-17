@@ -226,7 +226,7 @@ h2, h3 { letter-spacing: -0.01em; }
 
 /* Transición entre páginas: el contenido nuevo entra deslizándose (cada página es DOM nuevo) */
 main#contenido > * { animation: page-in 0.45s var(--ease-out) backwards; }
-@keyframes page-in { from { transform: translateY(8px); filter: blur(2px); } to { transform: none; filter: none; } }
+@keyframes page-in { from { transform: translateY(8px); } to { transform: none; } }
 
 .table-wrap { border-radius: 14px; transition: background-color 0.4s var(--ease-out), border-color 0.4s; }
 th { background: color-mix(in srgb, var(--surface-2) 88%, transparent); }

@@ -19,7 +19,10 @@ function readPalette(): Palette {
 function webglAvailable(): boolean {
   try {
     const probe = document.createElement('canvas');
-    return Boolean(probe.getContext('webgl2') || probe.getContext('webgl'));
+    const gl = probe.getContext('webgl2') || probe.getContext('webgl');
+    // Se libera el contexto de la sonda: los navegadores limitan los contextos WebGL vivos (~16) y avisan al pasarse
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return Boolean(gl);
   } catch {
     return false;
   }
@@ -98,11 +101,16 @@ export function Backdrop3D() {
 
       const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
       const onPointer = (e: PointerEvent) => { pointer.tx = (e.clientX / window.innerWidth - 0.5) * 2; pointer.ty = (e.clientY / window.innerHeight - 0.5) * 2; };
+      let resizeFrame = 0;
       const onResize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        if (reduced.matches) renderer.render(scene, camera);
+        if (resizeFrame) return; // un ajuste por fotograma como mucho
+        resizeFrame = window.requestAnimationFrame(() => {
+          resizeFrame = 0;
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          if (!frame) renderer.render(scene, camera);
+        });
       };
 
       // Tiempo propio (THREE.Clock está obsoleto y getElapsedTime() reinicia el delta)
@@ -137,18 +145,10 @@ export function Backdrop3D() {
       const scheme = window.matchMedia('(prefers-color-scheme: dark)');
       const onScheme = () => { applyPalette(); if (!frame) renderer.render(scene, camera); };
 
-      window.addEventListener('pointermove', onPointer, { passive: true });
-      window.addEventListener('resize', onResize);
-      document.addEventListener('visibilitychange', onVisibility);
-      reduced.addEventListener('change', onMotion);
-      scheme.addEventListener('change', onScheme);
-
-      renderer.render(scene, camera);
-      start();
-      container.dataset.ready = 'true';
-
       cleanup = () => {
         stop();
+        if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+        delete container.dataset.ready;
         themeObserver.disconnect();
         window.removeEventListener('pointermove', onPointer);
         window.removeEventListener('resize', onResize);
@@ -158,8 +158,25 @@ export function Backdrop3D() {
         for (const s of shapes) { s.solid.dispose(); s.wire.dispose(); }
         for (const g of geometries) g.dispose();
         renderer.dispose();
+        renderer.forceContextLoss(); // dispose() no suelta el contexto WebGL
         renderer.domElement.remove();
       };
+
+      // La limpieza queda asignada ANTES de registrar nada: si el primer render falla, no quedan listeners ni canvas colgando
+      try {
+        window.addEventListener('pointermove', onPointer, { passive: true });
+        window.addEventListener('resize', onResize);
+        document.addEventListener('visibilitychange', onVisibility);
+        reduced.addEventListener('change', onMotion);
+        scheme.addEventListener('change', onScheme);
+
+        renderer.render(scene, camera);
+        start();
+        container.dataset.ready = 'true';
+      } catch {
+        cleanup?.();
+        cleanup = null;
+      }
     }).catch(() => { /* sin fondo 3D: el velo y el degradado CSS siguen ahí */ });
 
     return () => { disposed = true; cleanup?.(); };

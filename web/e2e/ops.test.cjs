@@ -57,6 +57,16 @@ test.after(async () => {
 
 const itE2e = (name, fn) => test(name, async (t) => { if (!dbAvailable) return t.skip('sin base de datos'); await fn(t); });
 
+// Los tokens de `before` duran 36 s (ACCESS_TOKEN_MINUTES=0.6, para que la interfaz tenga que renovarlos): una prueba que llama al
+// API con ellos más tarde podía recibir 401 por pura caducidad, según lo que tardara la suite. Se renuevan justo antes de usarlos.
+async function freshToken(user) {
+  const renewed = await api(apiProc.base, 'POST', '/api/auth/refresh', { ip: testIp(), json: { refreshToken: user.refreshToken } });
+  assert.strictEqual(renewed.status, 200, renewed.text);
+  user.token = renewed.body.token;
+  user.refreshToken = renewed.body.refreshToken;
+  return user.token;
+}
+
 async function newPage() {
   context = await browser.newContext({ baseURL: webProc.base, locale: 'es-ES' });
   await context.addInitScript(() => {
@@ -202,7 +212,7 @@ itE2e('alertas: se ven, se detallan, se reconocen y se resuelven desde la interf
 
 itE2e('aprobaciones: no se puede aprobar la propia solicitud; otro admin aprueba y se ejecuta (reset de MFA)', async () => {
   const request = await api(apiProc.base, 'POST', '/api/system/accounts/mfa-reset', {
-    token: users.admin.token, ip: testIp(), json: { username: users.mfa.username, reason: 'Pérdida de dispositivo verificada por teléfono' }
+    token: await freshToken(users.admin), ip: testIp(), json: { username: users.mfa.username, reason: 'Pérdida de dispositivo verificada por teléfono' }
   });
   assert.strictEqual(request.status, 202, request.text);
 
@@ -266,6 +276,8 @@ itE2e('IP bloqueadas: se listan y se desbloquean', async () => {
 });
 
 itE2e('usuarios: cerrar las sesiones de un usuario exige motivo y deja su token inservible', async () => {
+  // Con un token recién renovado, el 401 de después prueba la revocación y no una simple caducidad
+  await freshToken(users.target);
   const before = await api(apiProc.base, 'GET', '/api/files/quota', { token: users.target.token, ip: testIp() });
   assert.strictEqual(before.status, 200);
 
