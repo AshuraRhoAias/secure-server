@@ -69,6 +69,14 @@ async function api(base, method, route, { token, ip, json, form, headers = {}, r
     if (raw) init.body = raw;
 
     const res = await fetch(base + route, init);
+    // Un stream SSE (GET /api/system/stream) no termina nunca por diseño: se devuelven estado y cabeceras y se corta el cuerpo,
+    // lo que cierra la conexión (el servidor libera al cliente y server.close() no espera). Sin esto, test_fuzz.js abría el stream
+    // como admin y `arrayBuffer()` esperaba hasta que caducara el token: test:all y coverage se colgaban (bitácora #35/#36).
+    // Para leer eventos SSE se usa fetch directo (openStream en test_ops.js).
+    if ((res.headers.get('content-type') || '').startsWith('text/event-stream')) {
+        await res.body?.cancel();
+        return { status: res.status, headers: res.headers, body: null, buffer: Buffer.alloc(0), text: '' };
+    }
     const buffer = Buffer.from(await res.arrayBuffer());
     const text = buffer.toString('utf8');
     let body = null;
