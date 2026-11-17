@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N y §O)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -45,6 +45,10 @@
   comportamiento. Verificado **solo en local** (lint 0 avisos, `test:api` 16/16, suite sin `test_fuzz.js` 592/593 igual que `main`); el CI
   de GitHub está caído por un problema de cuenta de Actions y `compose` no se probó con la ruta `test/`. Pendiente de decisión del
   propietario: `install.sh`, `install.ps1` y `security.config.js`. Las rutas de las entradas anteriores son las de su fecha.
+- **Cuelgue del fuzz resuelto 2026-11-17 (#37, §P):** `test_fuzz.js` no fallaba por el servidor: su fuzz HTTP abría el stream SSE
+  `GET /api/system/stream` como admin y el cliente de pruebas esperaba un cuerpo que no termina nunca. El helper `api()` ahora corta las
+  respuestas `text/event-stream`. Resultado **solo en local**: `test:all` 614/615 (1 omitida por SIGHUP) en 699 s; `web/` typecheck,
+  57/57 y build. Revisados también los commits de TLS de MariaDB y del usuario `secure_app` (PR #42), sin defectos.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -228,7 +232,7 @@ qué); «No evaluado» = sin evidencia. **Ninguna puntuación es 10**: sin pente
 | Secretos y configuración | Evaluado | 7 | 5 | 7 | 7 | — | 7 | 8 | **6,8** | Credencial real en el historial (rotación pendiente), `.env` versionado y, en local, claves `legacy` sin `KEY_EPOCH` (#33) |
 | Observabilidad y operación | Evaluado (CI, también a través de nginx) | 9 | 8 | 8 | 8 | 7 | 8 | 9 | **8,1** | Alertas, métricas, trazas, SSE con revalidación |
 | Rendimiento y escalabilidad | Evaluado (CI: 2 réplicas en una máquina) | 8 | 7 | 8 | 8 | 7 | 7 | 9 | **7,7** | Medido en 1 máquina; réplicas solo en contenedores de una máquina |
-| Pruebas automatizadas | Parcial (local; CI sin comprobar tras #35) | 9 | 8 | 8 | 8 | — | 7 | 8 | **8,0** | ~590 API + 57 web + e2e; en local 592/593 sin `test_fuzz.js`, que no termina en este equipo (#35); `web/` sin ejecutar en #35 |
+| Pruebas automatizadas | Parcial (local; CI sin comprobar tras #35) | 9 | 8 | 8 | 8 | — | 8 | 8 | **8,2** | 615 API + 57 web + e2e; en local `test:all` completo 614/615 (1 omitida: SIGHUP en Windows) con `test_fuzz.js` 18/18 (#37); `web/` typecheck, 57/57 y build en local (#37); e2e sin ejecutar |
 | Interfaz web | Evaluado (CI: e2e en 3 navegadores + axe) | 9 | 9 | 8 | 8 | 8 | 8 | 9 | **8,4** | BFF, passkey, SSO sin tokens, SSE, axe, 3 navegadores |
 | Infraestructura / Docker | Parcial (CI hasta #34; imágenes nuevas de #35 sin probar) | 8 | 8 | 8 | 7 | 7 | 8 | 8 | **7,7** | Imagen sin root ni dev; TLS a la BD desactivado en el compose de prueba |
 | PruebasLinux | Evaluado (local y CI) | 8 | 8 | 8 | 8 | — | 7 | 9 | **8,0** | 126 opciones; trivy/hadolint sin instalar en CI |
@@ -249,6 +253,10 @@ sube nada porque la evidencia es solo local (lint 0 avisos, `test:api` 16/16, su
 de GitHub sigue sin poder comprobarse. Los componentes «Parcial» de #35 (Pruebas automatizadas, Infraestructura / Docker) siguen así;
 Docker/compose no se probó con la nueva ruta `test/`.
 
+**Actualización 2026-11-17 (#37, cuelgue de `test_fuzz.js`):** Pruebas automatizadas sube de T 7 a 8 (8,0 → **8,2**) porque `test:all`
+vuelve a terminar en local (614/615, 1 omitida por SIGHUP en Windows) y `web/` pasa typecheck, 57/57 y build. Sigue en «Parcial»: la
+evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha comprobado. La media no cambia (**≈ 8,1/10**).
+
 ---
 
 ## D. Registro de problemas y tareas pendientes (por prioridad)
@@ -267,7 +275,7 @@ Docker/compose no se probó con la nueva ruta `test/`.
 | Media | El servidor local no conecta a la MariaDB local con el `.env` actual | TLS verificado con certificado autofirmado + usuario de BD inexistente (#34) | No se puede probar `npm start` de punta a punta en local | Credenciales de prueba válidas o `NODE_ENV=development` en local | Abierto |
 | Media | SQL acoplado a MySQL/MariaDB (`DATE_SUB … INTERVAL`, `ON DUPLICATE KEY`, `GET_LOCK`, esquema con `ENUM`/`AUTO_INCREMENT`) | `docs/BASES-DE-DATOS.md` §2 | Sin PostgreSQL/Supabase | Adaptador por pasos: paso 1 hecho (#32) | En curso |
 | Media | Instaladores de Linux y macOS sin ejecutar | Solo hay Windows en este entorno (#31) | Un fallo de distribución no se vería hasta usarlo | Ejecutarlos en equipos reales o en un job del CI | Abierto |
-| Media | `test_fuzz.js` no termina en local: 16/17 pasan, la 17.ª cae por timeout de 120 s y el proceso queda colgado (también con `--test-force-exit`); `test:all` y `coverage` se cuelgan | Ejecución local (#35); se reproduce en `main` con las dependencias anteriores | Sin `test:all` ni cobertura completos en local | Investigar; sospecha (no confirmada): handle abierto tras «fuzz HTTP: subida de archivos con multipart malformado» | Abierto |
+| Media | `test_fuzz.js` no terminaba en local; `test:all` y `coverage` se colgaban. Causa: el fuzz HTTP abría `GET /api/system/stream` (SSE, sin fin) como admin y el helper `api()` esperaba el cuerpo entero | Ejecución local (#35); causa confirmada en #37 (128 usuarios creados = 64 rutas de `user` + 64 de `admin`, la última es el stream) | Sin `test:all` ni cobertura completos en local | `api()` corta el cuerpo de las respuestas `text/event-stream` (#37) | **Cerrado (#37, solo local)** |
 | Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4) | `npm audit` tras #35; GitHub avisó de 2 moderadas en `main` (no se pudo ver la página; probablemente los dos advisories de minimatch/glob) | Solo herramientas de desarrollo, no producción | Exige versión mayor (minimatch 11 / glob >14.0.1) o volver a `c8` 9.1.0; posible `overrides` | Abierto (decisión del propietario) |
 | Baja | 3 actualizaciones aparcadas: `mariadb` 10.11→13.0 en `deploy/`, imagen `node` 22→26-bookworm-slim, `actions/upload-artifact` 4→7 | Dependabot (#35) | El CI usa MariaDB 10.11 a propósito | Decidir cada una | Abierto (decisión del propietario) |
 | Baja | Commit `5ee29e5` sin fusionar (token de cliente diario, `capacity.js`, optimización de `level3.js`) | Etiqueta `archivo/project-thread-qjkfd0` (#35) | Trabajo conservado pero fuera de `main` | Decidir si se rescata o se descarta | Abierto (decisión del propietario) |
@@ -345,6 +353,12 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 | #36 · `d0c283f` | — | `CLAUDE.md` | — | Flujo de git: se sube solo la rama corta; `main` avanza al validarla el propietario | — |
 | #36 · (este commit) | — | `docs/ReadmeLogsMejoras.md` | — | Bitácora de la entrega | — |
 
+### Intervención 11 (17-nov, cuelgue del fuzz y revisión, rama `fix/fuzz-sse`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #37 · (este commit) | — | `test/helpers/app.js` (`api()` corta respuestas SSE), `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | `test_fuzz.js` se colgaba al abrir `GET /api/system/stream` como admin | Local: `test_fuzz.js` 18/18 (105 s), `test:all` 614/615, lint 0, `test:api` 20/20, `web/` typecheck + 57/57 + build |
+
 ---
 
 ## F. Plan de mejora continua
@@ -359,6 +373,7 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
   `npm audit fix` aplicados, verificados **solo en local** (#35). ✅ Grafo de graphify regenerado (#35).
 - ✅ Raíz ordenada: de 49 a 20 archivos versionados (pruebas en `test/`, documentación en `docs/`, instalador en `instalador/`), sin
   cambios de comportamiento; verificada **solo en local** (#36).
+- ✅ Cuelgue de `test_fuzz.js` resuelto: `test:all` termina en local con 614/615 (#37, **solo local**).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -376,7 +391,7 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 10. **Instaladores de Linux y macOS ejecutados** en equipos reales o en el CI · media · `linux.sh --si` termina con EICAR detectado.
 11. **Comprobar el CI de `main` tras #35** (jobs `test`, `web`, `compose`, `pruebaslinux`, `production-install`, `dependency-review` v5) y
     `web/` en local (typecheck, build, e2e) · alta · todo en verde o fallos anotados.
-12. **Investigar el cuelgue de `test_fuzz.js`** en local · media · `npm run test:all` y `npm run coverage` terminan.
+12. ~~**Investigar el cuelgue de `test_fuzz.js`**~~ · hecho en #37 (solo local): `test:all` y `coverage` terminan con 614/615 (1 omitida por SIGHUP); `check-coverage` pasa.
 13. **Decidir las 5 moderadas de desarrollo** (`overrides` de minimatch/glob o `c8` 9.1.0), **las 3 actualizaciones aparcadas** y **el
     commit archivado** · baja · decisión del propietario anotada.
 14. **Desbloquear el CI de Actions** (cuenta/facturación) y comprobar `compose` y `ci.yml` con las rutas nuevas de `test/` (#36) · alta ·
@@ -882,3 +897,43 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
   decidir `install.sh`, `install.ps1` y `security.config.js`.
   **Siguiente mejora:** desbloquear el CI de Actions y comprobar `compose` con las rutas nuevas; luego el cuelgue de `test_fuzz.js`.
   *(Alta.)*
+
+---
+
+## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js` y revisión del código (#37)
+
+Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusionado).
+
+### #37 — `test_fuzz.js` ya no se cuelga: `test:all` completo en local (verificación solo local)
+- **Estado:** completado en local (17-nov); **CI de GitHub sin comprobar** (la API pública de Actions no fue accesible desde este equipo
+  y el problema de cuenta de #36 sigue sin confirmarse como resuelto).
+- **Archivos y módulos revisados:** `test/test_fuzz.js` (fuzz HTTP de rutas y de subidas), `test/helpers/app.js` (`api()`, `startApp()`),
+  `src/files/upload.js` (`receiveUpload`, `SniffGate`), `src/api/controllers/files.controller.js` (`upload`),
+  `src/observability/live-stream.js` (SSE), `test/test_ops.js` (usos del stream); commits del PR #42: `scripts/dbTlsCerts.js`,
+  `src/config/database.js` (`DB_SSL`), `package.json` (`db:tls`, `nodemonConfig`), `database/setup-app-local.sql`,
+  `instalador/mariadb-tls.ps1`.
+- **Problema detectado:** `test_fuzz.js` pasaba 16 pruebas y se quedaba colgado para siempre, así que `test:all` y `coverage` no
+  terminaban (#35, #36). La sospecha anterior (multipart malformado) era falsa: 300 subidas malformadas contra `receiveUpload` aislado
+  responden todas. La causa real: el fuzz HTTP recorre todas las rutas de `docs/openapi.json` con tres roles, incluida
+  `GET /api/system/stream` (SSE, que solo se cierra al caducar el token). Con rol admin el stream se abre y `api()` hacía
+  `await res.arrayBuffer()`, que no vuelve nunca. Evidencia: al colgarse se habían creado exactamente 128 usuarios = 64 rutas del rol
+  `user` + 64 del rol `admin`, y el stream es la ruta 64 de 64.
+- **Acciones realizadas:** `api()` en `test/helpers/app.js` detecta `Content-Type: text/event-stream`, cancela el cuerpo (cierra la
+  conexión, así el servidor libera al cliente y `server.close()` no espera) y devuelve estado y cabeceras con texto vacío. El
+  servidor no cambia. Los demás usos del stream no se ven afectados: `test_ops.js` lee eventos con `fetch` directo (`openStream`) y sus
+  llamadas con `api()` esperan 401/403/429 en JSON. Revisión de los commits del PR #42: `openssl` con `execFileSync` y argumentos en array,
+  claves privadas fuera del repositorio (comprobado antes de buscar `openssl`) y con permisos `0600`, `DB_SSL=verify` por defecto en
+  producción, `off` solo en `nodemon`; `secure_app` sin privilegios globales. Sin defectos.
+- **Pruebas ejecutadas (solo local: Windows, Node 26, MariaDB 13.1.1; el CI usa 10.11):** `lint:security` 0 errores y 0 avisos;
+  `test:api` 20/20; `test/test_fuzz.js` solo **18/18 en 105 s** y el proceso termina; `npm run test:all` **615 pruebas, 614 pasadas,
+  0 fallidas, 1 omitida** (SIGHUP no existe en Windows) en 699 s; `web/`: `typecheck` sin errores, `npm test` 57/57, `npm run build`
+  correcto (solo el aviso de Next sobre la raíz del workspace por los dos `package-lock.json`).
+  `npm run coverage`: misma suite 614/615 en 763 s; líneas 79,1 %, ramas 84,0 %, funciones 91,3 %; `c8 check-coverage` **pasa**.
+  **No verificado:** CI de GitHub, e2e de `web/` (Playwright), `compose`, ClamAV real (el servicio `ClamD` estaba parado; las pruebas de
+  antivirus usan su simulador).
+- **Puntuación:** 8/10 — se cierra el único fallo conocido que impedía ejecutar la suite completa, con la causa demostrada y un cambio
+  mínimo solo en pruebas; no llega a más por falta de CI. Pruebas automatizadas 8,0 → 8,2 (§C).
+- **Problemas restantes:** CI sin comprobar; 5 moderadas de `npm audit` (desarrollo); instaladores de Linux y macOS sin ejecutar;
+  decidir `install.sh`, `install.ps1` y `security.config.js`; aviso de Next sobre `turbopack.root` (inocuo); la rama `fix/db-tls` tiene
+  un commit solo del grafo (`550227a`) sin pasar a `main`.
+  **Siguiente mejora:** comprobar el CI de `main` (jobs `test`, `web`, `compose`) y ejecutar los e2e de `web/` en local. *(Alta.)*
