@@ -139,7 +139,9 @@ CREATE TABLE `users` (
   `role` enum('user','auditor','operator','admin') NOT NULL DEFAULT 'user',
   `mfa_secret_encrypted` longtext DEFAULT NULL,
   `mfa_enabled` tinyint(1) NOT NULL DEFAULT 0,
-  `mfa_last_step` bigint(20) unsigned DEFAULT NULL
+  `mfa_last_step` bigint(20) unsigned DEFAULT NULL,
+  `must_change_password` tinyint(1) NOT NULL DEFAULT 0,
+  `created_by` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------

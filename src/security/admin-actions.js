@@ -30,4 +30,26 @@ approvals.registerAction('user_erase', {
     }
 });
 
+// Dar el rol admin (o cualquier cambio de rol que se haya abierto como aprobación). Cambia el rol, cierra TODAS las
+// sesiones del usuario y deja evento de seguridad `high` (USER_ROLE_CHANGED). El rol viaja en params: { role }.
+approvals.registerAction('user_set_role', {
+    // Dar admin a una cuenta que aún tiene la contraseña temporal permitiría a quien la creó (que la conoce) entrar como
+    // ese admin: la segunda firma quedaría puenteada. Se espera a que el titular la cambie; la solicitud sigue pendiente.
+    async precheck({ targetUserId, params }) {
+        if (params.role !== 'admin') return;
+        const db = require('../config/database');
+        const [rows] = await db.query('SELECT must_change_password FROM users WHERE id = ?', [targetUserId]);
+        if (rows[0] && Number(rows[0].must_change_password) === 1) {
+            throw new approvals.ApprovalError('TARGET_NOT_READY',
+                'El usuario aún tiene la contraseña temporal (quien creó la cuenta la conoce): apruébalo cuando la haya cambiado', 409);
+        }
+    },
+    async execute({ targetUserId, params, requestedBy, approvedBy }) {
+        const result = await require('./user-admin.service').applyRole(targetUserId, params.role, {
+            actor: requestedBy, approvedBy, source: 'approval'
+        });
+        return { role: result.to, previousRole: result.from, sessionsClosed: result.sessionsClosed };
+    }
+});
+
 module.exports = approvals;

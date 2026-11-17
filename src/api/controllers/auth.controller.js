@@ -7,6 +7,7 @@ const webauthn = require('../../security/webauthn.service');
 const events = require('../../security/security-events.service');
 const tripleEncryptor = require('../../crypto/tripleEncryptor');
 const bcrypt = require('bcryptjs');
+const userAdmin = require('../../security/user-admin.service');
 
 class AuthController {
     constructor() {
@@ -283,6 +284,7 @@ class AuthController {
             'UPDATE users SET risk_level_encrypted = ?, updated_at = NOW() WHERE id = ?',
             [tripleEncryptor.encrypt(authResult.riskLevel), authResult.userId]
         );
+        const [flags] = await db.query('SELECT must_change_password FROM users WHERE id = ?', [authResult.userId]);
 
         await this.logUserAction('USER_LOGIN_SUCCESS', {
             userId: authResult.userId, usernameHash, ipAddress: ip, riskLevel: authResult.riskLevel,
@@ -295,7 +297,8 @@ class AuthController {
             ...this.tokenFields(authResult),
             riskLevel: authResult.riskLevel,
             authMethods: authResult.amr,
-            encryptionVersion: this.getCurrentEncryptionVersion()
+            encryptionVersion: this.getCurrentEncryptionVersion(),
+            passwordChangeRequired: Number(flags[0]?.must_change_password) === 1
         });
     }
 
@@ -324,6 +327,27 @@ class AuthController {
                 return res.status(error.status).json({ success: false, message: error.message, code: error.code });
             }
             console.error('❌ Error renovando sesión:', error.code || error.message);
+            res.status(500).json({ success: false, message: 'Error interno del servidor' });
+        }
+    }
+
+    // Cambio de contraseña propio. Decisión: responde 200 SIN tokens nuevos. El JWT no lleva el indicador de "cambio obligatorio"
+    // (se lee de la BD con la sesión en cada petición), así que la sesión actual y su refresh siguen valiendo; solo se cierran
+    // las DEMÁS sesiones del usuario.
+    async changePassword(req, res) {
+        try {
+            const result = await userAdmin.changePassword(req.user.id, {
+                currentSessionId: req.user.sessionId,
+                currentPassword: req.body.currentPassword,
+                newPassword: req.body.newPassword
+            });
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, message: 'Contraseña cambiada', sessionsClosed: result.sessionsClosed });
+        } catch (error) {
+            if (error instanceof userAdmin.UserAdminError) {
+                return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+            }
+            console.error('❌ Error cambiando la contraseña:', error.code || error.message);
             res.status(500).json({ success: false, message: 'Error interno del servidor' });
         }
     }

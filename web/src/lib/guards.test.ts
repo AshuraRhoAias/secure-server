@@ -15,6 +15,18 @@ describe('allowlist del BFF', () => {
     expect(upstreamPath('PUT', ['api', 'system', 'alerts'])).toBeNull();
   });
 
+  it('gestión de usuarios: listar, crear y cambiar rol, solo con su método y con id numérico', () => {
+    expect(upstreamPath('GET', ['api', 'system', 'users'])).toBe('/api/system/users');
+    expect(upstreamPath('POST', ['api', 'system', 'users'])).toBe('/api/system/users');
+    expect(upstreamPath('POST', ['api', 'system', 'users', '5', 'role'])).toBe('/api/system/users/5/role');
+    expect(upstreamPath('GET', ['api', 'system', 'users', '5', 'role'])).toBeNull();
+    expect(upstreamPath('POST', ['api', 'system', 'users', '0', 'role'])).toBeNull();
+    expect(upstreamPath('POST', ['api', 'system', 'users', 'x', 'role'])).toBeNull();
+    expect(upstreamPath('DELETE', ['api', 'system', 'users'])).toBeNull();
+    // el cambio de contraseña NO pasa por el proxy genérico (un 401 por clave mala cerraría la sesión): va por /session/password
+    expect(upstreamPath('POST', ['api', 'auth', 'password'])).toBeNull();
+  });
+
   it('no es un proxy abierto: rutas no listadas, rotar claves y otras APIs', () => {
     for (const path of [['api', 'system', 'rotate-keys'], ['api', 'auth', 'profile'], ['api', 'notes'], ['api', 'files'], ['health'], ['api'], []]) {
       expect(upstreamPath('POST', path)).toBeNull();

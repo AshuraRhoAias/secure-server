@@ -62,6 +62,7 @@ Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints
 | Autenticación | POST | `/api/auth/logout-all` | JWT | Cierra todas las sesiones del usuario (opcionalmente menos la actual) |
 | Autenticación | GET | `/api/auth/sessions` | JWT | Sesiones abiertas del usuario |
 | Autenticación | DELETE | `/api/auth/sessions/{id}` | JWT | Cierra una sesión concreta del usuario |
+| Autenticación | POST | `/api/auth/password` | JWT | Cambia la propia contraseña (cierra las demás sesiones; quita el cambio obligatorio) |
 | MFA | GET | `/api/auth/mfa` | JWT | Estado del MFA |
 | MFA | POST | `/api/auth/mfa/setup` | JWT | Inicia el alta de MFA (secreto + QR) |
 | MFA | POST | `/api/auth/mfa/enable` | JWT | Activa MFA con un código válido; entrega los códigos de recuperación |
@@ -117,6 +118,9 @@ Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints
 | Administración | POST | `/api/system/users/{id}/revoke-sessions` | JWT | Cierra todas las sesiones de un usuario (solo admin) |
 | Administración | POST | `/api/system/sessions/revoke-all` | JWT | Interruptor de emergencia: cierra TODAS las sesiones de TODOS (solo admin) |
 | Administración | GET | `/api/system/stream` | JWT | Novedades en vivo (Server-Sent Events): eventos de seguridad, alertas nuevas y resumen de alertas (solo admin). Reconecta con Last-Event-ID |
+| Administración | GET | `/api/system/users` | JWT | Lista paginada de usuarios (sin hashes ni secretos) |
+| Administración | POST | `/api/system/users` | JWT | Crea un usuario con contraseña temporal (rol admin: aprobación de otro administrador) |
+| Administración | POST | `/api/system/users/{id}/role` | JWT | Cambia el rol de un usuario y cierra sus sesiones (subir a admin: aprobación de otro administrador) |
 | Observabilidad | GET | `/api/metrics` | JWT | Métricas Prometheus (solo admin; opcionalmente un token de servicio METRICS_TOKEN) |
 <!-- endpoints:fin -->
 

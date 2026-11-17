@@ -111,9 +111,13 @@ export type Established = { ok: true; session: Session } | { ok: false; status: 
 
 // Tokens del API → comprueba que el usuario es ADMINISTRADOR (la interfaz es solo para ellos). Si no lo es, cierra esa sesión en el API.
 // La usan el login con contraseña, el segundo factor (código o passkey) y el SSO.
-export async function establishSession(request: Request, body: Record<string, unknown>): Promise<Established> {
+const sessionOf = (body: Record<string, unknown>): Session | null => {
   const claims = typeof body.token === 'string' ? decodeAccessToken(body.token) : null;
-  const session = claims ? sessionFromTokens(body, { u: claims.username, uid: claims.userId }) : null;
+  return claims ? sessionFromTokens(body, { u: claims.username, uid: claims.userId }) : null;
+};
+
+export async function establishSession(request: Request, body: Record<string, unknown>): Promise<Established> {
+  const session = sessionOf(body);
   if (!session) return { ok: false, status: 502, code: 'BAD_UPSTREAM', message: 'Respuesta inesperada del API' };
 
   // dashboard:read es solo de admin: si lo permite, es admin (y si exige MFA y no se usó, lo dirá el API con 403 MFA_REQUIRED)
@@ -131,6 +135,14 @@ export async function establishSession(request: Request, body: Record<string, un
 
 // Versión JSON (login con contraseña, segundo factor): cookie de sesión y fuera el reto de MFA
 export async function completeLogin(request: Request, body: Record<string, unknown>): Promise<Response> {
+  // Contraseña temporal (la puso un administrador): el API solo deja cambiarla. Se guarda la sesión SIN comprobar todavía si es
+  // administrador (esa comprobación, /api/system/dashboard, daría 403 PASSWORD_CHANGE_REQUIRED) y se pide la contraseña nueva en
+  // /session/password, que comprueba el rol justo después de cambiarla. Los tokens siguen sin llegar al navegador.
+  if (body.passwordChangeRequired === true) {
+    const pending = sessionOf(body);
+    if (!pending) return json(502, { success: false, message: 'Respuesta inesperada del API', code: 'BAD_UPSTREAM' }, [clearMfaCookie()]);
+    return json(200, { success: true, passwordChangeRequired: true, user: pending.u }, [sessionCookie(pending), clearMfaCookie()]);
+  }
   const outcome = await establishSession(request, body);
   if (!outcome.ok) return json(outcome.status, { success: false, message: outcome.message, code: outcome.code }, [clearMfaCookie()]);
   const { session } = outcome;
@@ -190,6 +202,56 @@ export async function loginMfa(request: Request): Promise<Response> {
   const body = parseJson(result.body);
   if (result.status !== 200 || !body) return upstreamError(result);
   return completeLogin(request, body);
+}
+
+// Cambio de contraseña (obligatorio tras crear la cuenta un administrador, o voluntario). No pasa por proxyData: un 401 por
+// "contraseña actual incorrecta" no debe borrar la sesión. Al terminar comprueba que el usuario es administrador (si no, cierra la sesión).
+export async function changePassword(request: Request): Promise<Response> {
+  if (!csrfOk('POST', request.headers)) return forbidden();
+  let session = sessionFrom(request);
+  if (!session) return noSession([clearSessionCookie()]);
+
+  const input = parseJson(await request.text().catch(() => ''));
+  const currentPassword = input?.currentPassword, newPassword = input?.newPassword;
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword || currentPassword.length > 128 || newPassword.length < 10 || newPassword.length > 128) {
+    return json(400, { success: false, message: 'Escribe la contraseña actual y una nueva de al menos 10 caracteres', code: 'VALIDATION_ERROR' });
+  }
+
+  const cookies: CookieSpec[] = [];
+  if (session.ae - Date.now() < 20_000) {
+    const outcome = await refreshSession(session, request.headers);
+    if (!outcome.ok) {
+      if (outcome.status === 409) return json(409, { success: false, message: 'La sesión se está renovando: reintenta', code: 'REFRESH_CONFLICT' });
+      return noSession([clearSessionCookie()]);
+    }
+    session = outcome.session;
+    cookies.push(sessionCookie(session));
+  }
+
+  let result: UpstreamResult;
+  try { result = await callApi('/api/auth/password', { method: 'POST', token: session.at, json: { currentPassword, newPassword }, headers: request.headers }); }
+  catch { return json(502, { success: false, message: 'El API no responde', code: 'UPSTREAM_UNAVAILABLE' }, cookies); }
+
+  const body = parseJson(result.body);
+  if (result.status !== 200) {
+    const code = typeof body?.code === 'string' ? body.code : 'PASSWORD_CHANGE_FAILED';
+    // 401 con INVALID_CREDENTIALS = la contraseña actual está mal (la sesión sigue); cualquier otro 401 = la sesión murió
+    if (result.status === 401 && code !== 'INVALID_CREDENTIALS') return noSession([clearSessionCookie()]);
+    return json(result.status >= 400 && result.status < 600 ? result.status : 502, {
+      success: false, message: typeof body?.message === 'string' ? body.message : 'No se pudo cambiar la contraseña', code
+    }, cookies);
+  }
+
+  const probe = await callApi('/api/system/dashboard', { method: 'GET', token: session.at, query: 'hours=1', headers: request.headers }).catch(() => null);
+  if (!probe || probe.status !== 200) {
+    await callApi('/api/auth/logout', { method: 'POST', token: session.at, text: '{}', headers: request.headers }).catch(() => undefined);
+    const mfa = probe?.status === 403 && parseJson(probe.body)?.code === 'MFA_REQUIRED';
+    return json(403, {
+      success: false, passwordChanged: true, code: mfa ? 'MFA_REQUIRED' : 'NOT_ADMIN',
+      message: mfa ? 'Contraseña cambiada. Los administradores necesitan autenticación en dos pasos: activa TOTP o una passkey' : 'Contraseña cambiada, pero esta interfaz es solo para administradores'
+    }, [clearSessionCookie()]);
+  }
+  return json(200, { success: true, user: session.u, sessionExpiresAt: new Date(session.se).toISOString() }, [sessionCookie(session)]);
 }
 
 export async function logout(request: Request): Promise<Response> {

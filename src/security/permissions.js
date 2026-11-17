@@ -26,7 +26,10 @@ const PERMISSIONS = Object.freeze({
     'metrics:read': ['admin'],
     'privacy:export': ['admin'],
     'privacy:erase': ['admin'],                             // además exige aprobación de otro admin
-    'sessions:revoke-any': ['admin']
+    'sessions:revoke-any': ['admin'],
+    'users:read': ['admin'],                                // listar usuarios
+    'users:create': ['admin'],                              // crear cuentas (rol admin: además aprobación de otro admin)
+    'users:manage': ['admin']                               // cambiar rol (subir a admin: además aprobación de otro admin)
 });
 
 function can(role, permission) {

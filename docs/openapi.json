@@ -2911,6 +2911,291 @@
           }
         ]
       }
+    },
+    "/api/system/users": {
+      "get": {
+        "summary": "Lista paginada de usuarios (sin hashes ni secretos)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "Nombre de usuario exacto"
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "auditor",
+                "operator",
+                "admin"
+              ]
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Cursor: último id recibido (nextBefore)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usuarios y nextBefore"
+          },
+          "400": {
+            "description": "Parámetros no válidos"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Crea un usuario con contraseña temporal (rol admin: aprobación de otro administrador)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Creado; la contraseña temporal se devuelve una sola vez"
+          },
+          "202": {
+            "description": "Creado como user; el rol admin queda pendiente de aprobación"
+          },
+          "400": {
+            "description": "Datos no válidos o motivo corto"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "409": {
+            "description": "El usuario ya existe"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "role",
+                  "reason"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 64
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "auditor",
+                      "operator",
+                      "admin"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/users/{id}/role": {
+      "post": {
+        "summary": "Cambia el rol de un usuario y cierra sus sesiones (subir a admin: aprobación de otro administrador)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rol cambiado"
+          },
+          "202": {
+            "description": "Pendiente de aprobación de otro administrador"
+          },
+          "400": {
+            "description": "Datos no válidos"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso o intento de cambiar el propio rol"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          },
+          "409": {
+            "description": "Mismo rol o último administrador"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "reason"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "auditor",
+                      "operator",
+                      "admin"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password": {
+      "post": {
+        "summary": "Cambia la propia contraseña (cierra las demás sesiones; quita el cambio obligatorio)",
+        "tags": [
+          "Autenticación"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Contraseña cambiada"
+          },
+          "400": {
+            "description": "Política incumplida o contraseña igual"
+          },
+          "401": {
+            "description": "Contraseña actual incorrecta o sin sesión"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ],
+                "properties": {
+                  "currentPassword": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 128
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

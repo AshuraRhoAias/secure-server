@@ -139,6 +139,7 @@ stub('src/api/controllers/auth.controller.js', {
     webauthnRegister: (req, res) => res.json({ success: true }),
     webauthnRemove: (req, res) => res.json({ success: true }),
     logoutAll: (req, res) => res.json({ success: true }),
+    changePassword: (req, res) => res.json({ success: true }),
     listSessions: (req, res) => res.json({ success: true, sessions: [] }),
     revokeSession: (req, res) => res.json({ success: true }),
     mfaStatus: (req, res) => res.json({ success: true }),
