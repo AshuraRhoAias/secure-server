@@ -873,7 +873,7 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
 - **Pruebas ejecutadas (solo local: Windows, Node 26, MariaDB 13.1.1; el CI usa 10.11):** tras el nivel 1, `lint:security` 0
   errores y 0 avisos; `test:api` 16/16; suite completa **sin `test_fuzz.js`**: 593 pruebas, 592 pasadas, 0 fallidas, 1 omitida,
   idéntico a la línea base de `main`. Tras los niveles 2 y 3: lint 0 avisos, `test:api` 16/16 (incluye README = OpenAPI),
-  `npm run debug-env` encuentra el `.env` de la raíz y `node instalador/install.js --help` funciona. `test/test_fuzz.js`: ver nota.
+  `npm run debug-env` encuentra el `.env` de la raíz y `node instalador/install.js --help` funciona. `test/test_fuzz.js` (solo, `timeout 300`): 16 pruebas pasan y el proceso queda colgado hasta el límite, igual que en `main` antes del cambio (problema previo, ver #35).
   **No verificado:** CI de GitHub, Docker/compose con la nueva ruta `test/`, instaladores en Linux y macOS (nunca ejecutados);
   `web/` no se tocó.
 - **Puntuación:** 7/10 — orden útil y sin regresiones medidas, pero con evidencia solo local y sin CI. No cambia ninguna nota de §C.
