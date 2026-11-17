@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-15 (ver §A, §L, §M y §N)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N y §O)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -40,6 +40,11 @@
   `npm audit fix` sin `--force` (quedan 5 moderadas, solo de desarrollo); grafo de graphify regenerado. **Verificado solo en local**
   (Windows, MariaDB 13.1): el CI real de GitHub, el job `compose` con las imágenes nuevas y `web/` **no** se han comprobado. Problema
   nuevo: `test_fuzz.js` no termina en este equipo, así que `test:all` y `coverage` se cuelgan en local.
+- **Orden de la raíz 2026-11-17 (#36, §O):** a petición del propietario, la raíz pasa de 49 a 20 archivos versionados (pruebas en `test/`,
+  documentación en `docs/`, `SECURITY.md` en `.github/`, instalador en `instalador/`, `debug-env.js` en `scripts/`), sin cambios de
+  comportamiento. Verificado **solo en local** (lint 0 avisos, `test:api` 16/16, suite sin `test_fuzz.js` 592/593 igual que `main`); el CI
+  de GitHub está caído por un problema de cuenta de Actions y `compose` no se probó con la ruta `test/`. Pendiente de decisión del
+  propietario: `install.sh`, `install.ps1` y `security.config.js`. Las rutas de las entradas anteriores son las de su fecha.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -238,6 +243,12 @@ moderadas de desarrollo abiertas; pasa a «Parcial») y Pruebas automatizadas (T
 Infraestructura / Docker pasa a «Parcial» porque nginx, SeaweedFS y aws-cli cambiaron de versión y el job `compose` no se ha ejecutado.
 La media sigue en **≈ 8,1/10**. Lo ejecutado en #35 es solo local; el CI real de GitHub no se ha podido comprobar.
 
+**Actualización 2026-11-17 (#36, orden de la raíz):** no cambia ninguna nota ni la media (**≈ 8,1/10**). La entrega solo mueve archivos y
+actualiza referencias, sin cambios de comportamiento: mejora la mantenibilidad y la claridad de la documentación (Q y D), pero no se
+sube nada porque la evidencia es solo local (lint 0 avisos, `test:api` 16/16, suite sin `test_fuzz.js` 592/593 igual que `main`) y el CI
+de GitHub sigue sin poder comprobarse. Los componentes «Parcial» de #35 (Pruebas automatizadas, Infraestructura / Docker) siguen así;
+Docker/compose no se probó con la nueva ruta `test/`.
+
 ---
 
 ## D. Registro de problemas y tareas pendientes (por prioridad)
@@ -260,6 +271,8 @@ La media sigue en **≈ 8,1/10**. Lo ejecutado en #35 es solo local; el CI real 
 | Media | 5 moderadas de `npm audit` en la raíz (solo desarrollo): minimatch <11.0.1 vía `nodemon` y `c8`→`test-exclude`→`glob` 13 (GHSA-3g3m-2fjr-6pw4) | `npm audit` tras #35; GitHub avisó de 2 moderadas en `main` (no se pudo ver la página; probablemente los dos advisories de minimatch/glob) | Solo herramientas de desarrollo, no producción | Exige versión mayor (minimatch 11 / glob >14.0.1) o volver a `c8` 9.1.0; posible `overrides` | Abierto (decisión del propietario) |
 | Baja | 3 actualizaciones aparcadas: `mariadb` 10.11→13.0 en `deploy/`, imagen `node` 22→26-bookworm-slim, `actions/upload-artifact` 4→7 | Dependabot (#35) | El CI usa MariaDB 10.11 a propósito | Decidir cada una | Abierto (decisión del propietario) |
 | Baja | Commit `5ee29e5` sin fusionar (token de cliente diario, `capacity.js`, optimización de `level3.js`) | Etiqueta `archivo/project-thread-qjkfd0` (#35) | Trabajo conservado pero fuera de `main` | Decidir si se rescata o se descarta | Abierto (decisión del propietario) |
+| Alta | CI de GitHub caído por la cuenta: los jobs fallan en 1–2 s (también `Security`, que no cambió) y `compose` no se ha probado con la ruta `test/` | Ejecuciones de Actions tras #36 | Nada del CI está verificado desde #35 | Resolver cuenta/facturación de Actions y relanzar | Abierto (propietario) |
+| Baja | `install.sh`, `install.ps1` (atajos que solo redirigen) y `security.config.js` (sin importadores; objeto estático de 2025) siguen en la raíz | Raíz tras #36 | Ruido y código muerto | Borrarlos o mantenerlos | Abierto (decisión del propietario) |
 | Baja | `dependency-review` en rojo en los PR | «Dependency review is not supported on this repository» | Ruido (no bloquea: `continue-on-error`) | Activar «Dependency graph» en Settings | Abierto (propietario) |
 | Baja | trivy y hadolint no se instalan en CI | Opciones 88, 89 y 125 omitidas | Menos cobertura de imagen/Dockerfile | Fijar binarios con suma de verificación | Propuesto |
 | Baja | Saneado solo de imágenes y PDF | `docs/SEGURIDAD.md` §22 | Metadatos en audio/vídeo/texto | Recodificar o despojar metadatos | Propuesto |
@@ -320,6 +333,18 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 | #35 · `42da76d` | — | `graphify-out/`, `.gitignore` | — | Grafo regenerado; copias por fecha ignoradas | 3337 nodos, 6101 aristas, 203 comunidades |
 | #35 · (este commit) | — | `ReadmeLogsMejoras.md` | — | Bitácora de la entrega | — |
 
+### Intervención 10 (17-nov, orden de la raíz, rama `orden/raiz-limpia`)
+
+Las rutas de la columna «Modificado» son las de después de cada commit; las entradas anteriores citan las de su fecha.
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #36 · `45ea6ee` | `test/`, `test/helpers/` (movidos) | `package.json`, `.c8rc.json`, `.dockerignore`, `eslint.config.js`, `ci.yml`, `deploy/docker-compose.yml`, `database/setup-local.sql`, `README.md`, `CLAUDE.md`, `docs/*`, `scripts/openapiTable.js`, comentarios de `src/` | 26 `test_*.js` y `test_helpers/` de la raíz (movidos) | Menos archivos sueltos en la raíz | Local: lint 0, `test:api` 16/16, suite sin fuzz 592/593 (= `main`) |
+| #36 · `44357c4` | `scripts/debug-env.js`, `docs/INSTALL.md`, `.github/SECURITY.md`, `docs/ReadmeLogsMejoras.md` (movidos) | enlace a `PruebasLinux` | los mismos 4 archivos de la raíz (movidos) | Idem | Local: lint 0, `test:api` 16/16, `npm run debug-env` |
+| #36 · `59349b7` | `instalador/install.js` (movido) | `instalador/comun.sh`, `instalador/windows.ps1`, `docs/INSTALL.md` | `install.js` de la raíz (movido) | Idem | Local: `node instalador/install.js --help` |
+| #36 · `d0c283f` | — | `CLAUDE.md` | — | Flujo de git: se sube solo la rama corta; `main` avanza al validarla el propietario | — |
+| #36 · (este commit) | — | `docs/ReadmeLogsMejoras.md` | — | Bitácora de la entrega | — |
+
 ---
 
 ## F. Plan de mejora continua
@@ -332,6 +357,8 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
   probado en Windows (#31). ✅ Adaptador de base de datos, paso 1 (#32). ✅ Revisión del código y trampas de claves cerradas (#33). ✅ Rotación semanal sin entradas ni salidas, caídas y pausas reales probadas (#34).
 - ✅ Solo `main` en el remoto, con el commit sin fusionar archivado en una etiqueta (#35). ✅ 9 actualizaciones de Dependabot y
   `npm audit fix` aplicados, verificados **solo en local** (#35). ✅ Grafo de graphify regenerado (#35).
+- ✅ Raíz ordenada: de 49 a 20 archivos versionados (pruebas en `test/`, documentación en `docs/`, instalador en `instalador/`), sin
+  cambios de comportamiento; verificada **solo en local** (#36).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -352,6 +379,9 @@ Ver secciones G–J y los commits `64920de`…`5943aa8` (`git log e7b6597^..b36a
 12. **Investigar el cuelgue de `test_fuzz.js`** en local · media · `npm run test:all` y `npm run coverage` terminan.
 13. **Decidir las 5 moderadas de desarrollo** (`overrides` de minimatch/glob o `c8` 9.1.0), **las 3 actualizaciones aparcadas** y **el
     commit archivado** · baja · decisión del propietario anotada.
+14. **Desbloquear el CI de Actions** (cuenta/facturación) y comprobar `compose` y `ci.yml` con las rutas nuevas de `test/` (#36) · alta ·
+    todos los jobs en verde o fallos anotados.
+15. **Decidir `install.sh`, `install.ps1` y `security.config.js`** (borrar o mantener; #36) · baja · decisión del propietario anotada.
 
 ---
 
@@ -809,3 +839,46 @@ Rama `fix/audit-bitacora-2026-11-15` (rama corta por tarea, desde `main`).
   tras «fuzz HTTP: subida de archivos con multipart malformado»); 5 moderadas de desarrollo; contraseña de la BD remota del historial de
   `test.js` (la rota el propietario); decidir el commit archivado y las 3 actualizaciones aparcadas.
   **Siguiente mejora:** comprobar el CI de `main` y `web/`, y encontrar el handle abierto de `test_fuzz.js`. *(Alta.)*
+
+## O. Intervención 2026-11-17: orden de la raíz (#36)
+
+Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
+
+### #36 — Raíz ordenada en carpetas (sin cambios de comportamiento; verificación solo local)
+- **Estado:** completado en lo que se pudo ejecutar en local (17-nov); **CI real de GitHub sin comprobar** (los jobs fallan en 1–2 s por
+  un problema de cuenta o facturación de Actions, no de código: también cae el workflow `Security`, que no cambió).
+- **Archivos y módulos revisados:** raíz del repositorio (49 archivos versionados); los 26 `test_*.js` y `test_helpers/`;
+  `package.json` (scripts), `.c8rc.json`, `.dockerignore`, `eslint.config.js`, `.github/workflows/ci.yml`, `deploy/docker-compose.yml`,
+  `database/setup-local.sql`, `README.md`, `CLAUDE.md`, `docs/*` (incluida la descripción de `docs/openapi.json`),
+  `scripts/openapiTable.js`, comentarios de `src/`, `debug-env.js`, `INSTALL.md`, `SECURITY.md`, `install.js`, `instalador/comun.sh` e
+  `instalador/windows.ps1`.
+- **Problema detectado:** el propietario pidió menos archivos sueltos en la raíz: había 49 versionados (26 pruebas, ayudantes,
+  instalador, documentación y política mezclados con la configuración).
+- **Acciones realizadas:** la raíz pasa de **49 a 20 archivos versionados**, en tres niveles sin cambios de comportamiento.
+  (1) `45ea6ee`: los 26 `test_*.js` → `test/` y `test_helpers/` → `test/helpers/` (rutas internas `../../src`, `../../database`);
+  referencias actualizadas en `package.json` (scripts), `.c8rc.json`, `.dockerignore`, `eslint.config.js`, `ci.yml`,
+  `deploy/docker-compose.yml`, `database/setup-local.sql`, `README.md`, `CLAUDE.md`, `docs/*` (incl. la descripción de
+  `docs/openapi.json`), `scripts/openapiTable.js` y comentarios de `src/` (solo comentarios). (2) `44357c4`: `debug-env.js` →
+  `scripts/debug-env.js` (busca el `.env` en la carpeta superior); `INSTALL.md` → `docs/INSTALL.md`; `SECURITY.md` →
+  `.github/SECURITY.md` (GitHub la sigue reconociendo); `ReadmeLogsMejoras.md` → `docs/ReadmeLogsMejoras.md` (enlace a
+  `PruebasLinux` ajustado; las entradas históricas **no** se reescriben, así que citan las rutas de entonces). (3) `59349b7`:
+  `install.js` → `instalador/install.js` (`ROOT` = carpeta superior); `instalador/comun.sh` e `instalador/windows.ps1` llaman a
+  `node instalador/install.js`; `docs/INSTALL.md` actualizado. Además `d0c283f` (`CLAUDE.md`): nuevo flujo de git, se sube solo la rama
+  corta y `main` avanza (avance rápido) y la rama se borra cuando el propietario la valida. **Quedan en la raíz a propósito:**
+  `package.json`, `package-lock.json`, `.env`, `.env.example`, `.gitattributes`, `.gitignore`, `.gitleaksignore`, `.dockerignore`,
+  `Dockerfile`, `eslint.config.js`, `.c8rc.json`, `README.md`, `CLAUDE.md` e `instalar.cmd/.command/.sh` (lanzadores de doble clic).
+  **Pendientes de decisión del propietario:** `install.sh` e `install.ps1` (atajos de compatibilidad que solo redirigen a
+  `instalar.sh` / `instalador\windows.ps1`) y `security.config.js` (no lo importa ningún archivo; objeto estático de 2025, código
+  muerto): borrar o mantener.
+- **Pruebas ejecutadas (solo local: Windows, Node 26, MariaDB 13.1.1; el CI usa 10.11):** tras el nivel 1, `lint:security` 0
+  errores y 0 avisos; `test:api` 16/16; suite completa **sin `test_fuzz.js`**: 593 pruebas, 592 pasadas, 0 fallidas, 1 omitida,
+  idéntico a la línea base de `main`. Tras los niveles 2 y 3: lint 0 avisos, `test:api` 16/16 (incluye README = OpenAPI),
+  `npm run debug-env` encuentra el `.env` de la raíz y `node instalador/install.js --help` funciona. `test/test_fuzz.js`: ver nota.
+  **No verificado:** CI de GitHub, Docker/compose con la nueva ruta `test/`, instaladores en Linux y macOS (nunca ejecutados);
+  `web/` no se tocó.
+- **Puntuación:** 7/10 — orden útil y sin regresiones medidas, pero con evidencia solo local y sin CI. No cambia ninguna nota de §C.
+- **Problemas restantes:** CI bloqueado por la cuenta de Actions (y rutas nuevas de `test/` sin probar en el job `compose`);
+  `test_fuzz.js` colgado en local; 5 moderadas de `npm audit` (desarrollo); 3 actualizaciones aparcadas; commit archivado;
+  decidir `install.sh`, `install.ps1` y `security.config.js`.
+  **Siguiente mejora:** desbloquear el CI de Actions y comprobar `compose` con las rutas nuevas; luego el cuelgue de `test_fuzz.js`.
+  *(Alta.)*
