@@ -132,12 +132,11 @@ pre.json { background: var(--surface-2); border: 1px solid var(--border); border
 .chart svg { display: block; width: 100%; height: auto; }
 .chart .axis { fill: var(--muted); font-size: 11px; }
 .chart .grid-line { stroke: var(--chart-grid); stroke-width: 1; }
-.chart .bar { fill: var(--chart-1); }
+.chart .bar { cursor: default; } /* relleno: degradado por atributo (Charts.tsx) */
 .chart .bar:hover { opacity: 0.8; }
 .hbar { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr auto; gap: 10px; align-items: center; font-size: 13.5px; padding: 3px 0; }
 .hbar svg { width: 100%; height: 10px; }
 .hbar .track { fill: var(--surface-2); }
-.hbar .fill { fill: var(--chart-1); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* ---------- login ---------- */
@@ -165,3 +164,119 @@ main:focus { outline: none; }
 .live[data-state='offline'] .live-dot { background: var(--critical); }
 .login-divider { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 12px 0; }
 .login-divider::before, .login-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+
+/* =====================================================================================================================
+   Diseño: fondo 3D (Three.js) tras un velo opaco, cristal, movimiento y transiciones de tema.
+   Reglas: sin estilos en línea (CSP); las entradas animan solo transform (no opacity: axe mide el contraste en mitad de la
+   animación); todo se apaga con prefers-reduced-motion (regla global de arriba).
+   ===================================================================================================================== */
+:root {
+  --font-ui: var(--font-sans, system-ui), system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --veil: color-mix(in srgb, var(--bg) 80%, transparent);
+  --glass: color-mix(in srgb, var(--surface) 84%, transparent);
+  --glass-strong: color-mix(in srgb, var(--surface) 92%, transparent);
+  --glass-border: color-mix(in srgb, var(--border) 75%, transparent);
+  --glow: color-mix(in srgb, var(--accent) 32%, transparent);
+  --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  --mono: var(--font-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---------- fondo ---------- */
+body {
+  font-family: var(--font-ui);
+  background: radial-gradient(1200px 700px at 12% -10%, color-mix(in srgb, var(--accent) 16%, var(--bg)), transparent 60%),
+              radial-gradient(900px 600px at 110% 110%, color-mix(in srgb, var(--chart-2) 12%, var(--bg)), transparent 60%), var(--bg);
+  background-attachment: fixed;
+  transition: background-color 0.4s var(--ease-out), color 0.4s var(--ease-out);
+}
+.backdrop-3d { position: fixed; inset: 0; z-index: -2; pointer-events: none; }
+.backdrop-3d canvas { display: block; width: 100%; height: 100%; }
+.backdrop-3d[data-ready='true'] { animation: backdrop-in 1.2s var(--ease-out) both; }
+.backdrop-veil { position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--veil); backdrop-filter: blur(3px) saturate(120%); -webkit-backdrop-filter: blur(3px) saturate(120%); transition: background-color 0.4s var(--ease-out); }
+@keyframes backdrop-in { from { transform: scale(1.04); filter: blur(6px); } to { transform: none; filter: none; } }
+
+/* ---------- texto ---------- */
+h1 { font-weight: 720; letter-spacing: -0.025em; background: linear-gradient(100deg, var(--text) 30%, var(--accent) 85%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: title-sheen 9s ease-in-out infinite alternate; }
+h2, h3 { letter-spacing: -0.01em; }
+@keyframes title-sheen { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+@media (forced-colors: active) { h1 { background: none; color: CanvasText; } }
+.stat .value { font-variant-numeric: tabular-nums; transition: color 0.4s var(--ease-out); }
+
+/* ---------- contenedores de cristal ---------- */
+.sidebar { background: var(--glass-strong); border-right-color: var(--glass-border); backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%); transition: transform 0.25s var(--ease-out), background-color 0.4s var(--ease-out), border-color 0.4s; }
+.card, .table-wrap, .login-card, dialog, .toast {
+  background: var(--glass); border-color: var(--glass-border);
+  backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%);
+}
+.card {
+  border-radius: 14px;
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 7%, transparent) inset, 0 8px 24px -16px rgb(0 0 0 / 35%);
+  transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out), border-color 0.3s, background-color 0.4s var(--ease-out);
+  animation: rise 0.55s var(--ease-out) backwards;
+}
+.card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 1px 0 color-mix(in srgb, #fff 9%, transparent) inset, 0 16px 36px -14px var(--glow); }
+.grid > .card:nth-child(2), .stack > .card:nth-child(2) { animation-delay: 0.05s; }
+.grid > .card:nth-child(3), .stack > .card:nth-child(3) { animation-delay: 0.1s; }
+.grid > .card:nth-child(4), .stack > .card:nth-child(4) { animation-delay: 0.15s; }
+.grid > .card:nth-child(5), .stack > .card:nth-child(5) { animation-delay: 0.2s; }
+.grid > .card:nth-child(6), .stack > .card:nth-child(6) { animation-delay: 0.25s; }
+.grid > .card:nth-child(n + 7), .stack > .card:nth-child(n + 7) { animation-delay: 0.3s; }
+@keyframes rise { from { transform: translateY(14px) scale(0.985); } to { transform: none; } }
+
+/* Transición entre páginas: el contenido nuevo entra deslizándose (cada página es DOM nuevo) */
+main#contenido > * { animation: page-in 0.45s var(--ease-out) backwards; }
+@keyframes page-in { from { transform: translateY(8px); } to { transform: none; } }
+
+.table-wrap { border-radius: 14px; transition: background-color 0.4s var(--ease-out), border-color 0.4s; }
+th { background: color-mix(in srgb, var(--surface-2) 88%, transparent); }
+tbody tr { transition: background-color 0.2s; }
+
+/* ---------- navegación y botones ---------- */
+.brand-mark { background: linear-gradient(135deg, var(--accent), var(--chart-2)); box-shadow: 0 6px 16px -6px var(--glow); animation: mark-float 5s ease-in-out infinite; }
+@keyframes mark-float { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-2px) rotate(-4deg); } }
+.nav a { position: relative; transition: background-color 0.2s, color 0.2s, transform 0.2s var(--ease-out), box-shadow 0.25s; }
+.nav a:hover { transform: translateX(3px); background: color-mix(in srgb, var(--surface-2) 85%, transparent); }
+.nav a[aria-current='page'] { background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--chart-2))); box-shadow: 0 8px 20px -10px var(--glow); }
+.nav .count { animation: pop 0.4s var(--ease-spring) backwards; }
+@keyframes pop { from { transform: scale(0.4); } to { transform: none; } }
+
+button, .button { transition: background-color 0.2s, border-color 0.2s, color 0.2s, transform 0.15s var(--ease-out), box-shadow 0.25s, filter 0.2s; }
+button:active:not(:disabled) { transform: scale(0.97); }
+button.primary { background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 75%, var(--chart-2))); box-shadow: 0 6px 18px -10px var(--glow); }
+button.primary:hover:not(:disabled) { background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 75%, var(--chart-2))); box-shadow: 0 10px 24px -10px var(--glow); }
+input, select, textarea { background: var(--glass-strong); transition: border-color 0.2s, box-shadow 0.2s, background-color 0.4s; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); outline: none; }
+.badge { transition: background-color 0.4s, color 0.4s; }
+.segmented button[aria-pressed='true'] { box-shadow: 0 4px 12px -6px var(--glow); }
+
+/* ---------- gráficas ---------- */
+.chart .stop-strong, .hbar .stop-strong { stop-color: var(--chart-1); }
+.chart .stop-soft { stop-color: color-mix(in srgb, var(--chart-1) 45%, var(--chart-2)); }
+.hbar .stop-soft { stop-color: color-mix(in srgb, var(--chart-1) 55%, var(--chart-2)); }
+.chart .bar { transform-box: fill-box; transform-origin: 50% 100%; animation: bar-grow 0.7s var(--ease-out) backwards; transition: opacity 0.2s, filter 0.2s; }
+.chart .bar:hover { opacity: 1; filter: brightness(1.15) drop-shadow(0 0 4px var(--glow)); }
+.chart g:nth-child(4n + 1) .bar { animation-delay: 0.02s; }
+.chart g:nth-child(4n + 2) .bar { animation-delay: 0.08s; }
+.chart g:nth-child(4n + 3) .bar { animation-delay: 0.14s; }
+.chart g:nth-child(4n) .bar { animation-delay: 0.2s; }
+@keyframes bar-grow { from { transform: scaleY(0); } to { transform: none; } }
+.hbar .fill { transform-box: fill-box; transform-origin: 0 50%; animation: bar-grow-x 0.8s var(--ease-out) backwards; }
+.hbar:nth-child(2) .fill { animation-delay: 0.06s; }
+.hbar:nth-child(3) .fill { animation-delay: 0.12s; }
+.hbar:nth-child(n + 4) .fill { animation-delay: 0.18s; }
+@keyframes bar-grow-x { from { transform: scaleX(0); } to { transform: none; } }
+.hbar .track { fill: color-mix(in srgb, var(--surface-2) 80%, transparent); }
+
+/* ---------- avisos, diálogos y estado en vivo ---------- */
+.toast { animation: toast-in 0.4s var(--ease-spring) backwards; }
+@keyframes toast-in { from { transform: translateX(24px) scale(0.96); } to { transform: none; } }
+dialog[open] { animation: dialog-in 0.3s var(--ease-spring) backwards; box-shadow: 0 24px 60px -20px rgb(0 0 0 / 45%); }
+dialog::backdrop { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+@keyframes dialog-in { from { transform: translateY(10px) scale(0.97); } to { transform: none; } }
+.live[data-state='live'] .live-dot { animation: live-pulse 2s ease-out infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 var(--ok-bg); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.banner { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+
+/* ---------- login ---------- */
+.login-card { border-radius: 18px; padding: 24px; box-shadow: 0 30px 80px -30px var(--glow); animation: rise 0.6s var(--ease-out) backwards; }

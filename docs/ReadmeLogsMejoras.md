@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P, #37–#39)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P, #37–#40)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -57,6 +57,9 @@
   sustituido por `node --watch` en `scripts/devGuard.js`; `overrides` de `glob`/`minimatch` para `c8`. Next sin aviso de raíz, Playwright
   1.65 con `web` de nuevo en `ubuntu-latest` y una prueba inestable de sesiones corregida. Queda `picomatch` en `web/` (solo desarrollo, sin
   parche publicado) y pasar el `.env` local a `secure_app` (propietario).
+- **Interfaz web con fondo 3D 2026-11-17 (#40, §P):** fondo con Three.js (formas que flotan con los colores del tema) tras un velo
+  opaco; tarjetas, menú, tablas y diálogos de cristal; entradas escalonadas, gráficas con degradado que crecen, tipografía Inter y
+  transiciones de página y de tema. Respeta `prefers-reduced-motion`, la CSP y `axe`: CI en verde (e2e en 3 navegadores).
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -270,6 +273,9 @@ evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha compr
 con la ruta `test/`), sin cambiar notas. La media sigue en **≈ 8,1/10**. `Security` (CodeQL, gitleaks, SBOM, DAST) no se ha ejecutado aún:
 solo corre en PR o en push a `main`.
 
+**Actualización 2026-11-17 (#40, diseño de la web):** Interfaz web sin cambio de nota (8,4): el diseño nuevo pasa los e2e en
+3 navegadores y `axe`; se añade `three` como dependencia de producción de `web/` (0 vulnerabilidades en producción).
+
 **Actualización 2026-11-17 (#39, dependencias):** sin cambios de nota. `Security` ya pasó en `main` (`fd6d5f4`), la raíz queda con 0
 vulnerabilidades (también de desarrollo) y el job `web` vuelve a `ubuntu-latest`. La media sigue en **≈ 8,1/10**.
 
@@ -393,7 +399,15 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 | Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
 |---|---|---|---|---|---|
 | #39 · `2e7158a` | — | `scripts/devGuard.js` (lanza `node --watch`), `scripts/checkProductionDeps.js`, `package.json`/`package-lock.json` (sin `nodemon`; `overrides`), `test/test_api.js`, `web/next.config.ts`, `ci.yml` (Playwright 1.65, `ubuntu-latest`), `Dockerfile`, `docs/{SEGURIDAD,INSTALL,CONTROLES}.md`, `.github/SECURITY.md`, `instalador/install.js` | dependencia `nodemon` | `picomatch` alta sin parche; moderadas de `c8`; aviso de Next; `ubuntu-24.04` fijado | Local: lint 0, `test:api` 20/20, `coverage` 614/615 y `check-coverage` OK, `npm audit` 0, web typecheck + 57/57 + build. CI: todo verde salvo 1 prueba inestable de `test_sessions.js` |
-| #39 · (este commit) | — | `test/test_sessions.js`, `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Carrera de tiempo en la prueba de caducidad del JWT; bitácora | Local: `test_sessions.js` 15/15 tres veces seguidas |
+| #39 · `d28e14f` | — | `test/test_sessions.js`, `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Carrera de tiempo en la prueba de caducidad del JWT; bitácora | Local: `test_sessions.js` 15/15 tres veces seguidas |
+
+### Intervención 14 (17-nov, diseño de la web, rama `ui/fondo-3d-animaciones`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #40 · `b0503e4` | `web/src/components/Backdrop3D.tsx` | `web/src/app/layout.tsx` (fondo y fuentes), `web/src/app/globals.css` (sección «Diseño»), `web/src/components/Charts.tsx` (degradados), `web/package*.json` (`three`, `@types/three`) | — | Petición del propietario: animaciones, cristal y fondo 3D según el tema | Local: typecheck, 57/57, build; navegador: login y panel en oscuro y claro. CI: `web` falló por una carrera de tokens en el e2e |
+| #40 · `b42d12a` | — | `Backdrop3D.tsx` (revisión `ecc:react-reviewer`), `globals.css`, `layout.tsx`, `web/e2e/ops.test.cjs` (`freshToken`) | — | Contextos WebGL liberados, limpieza ante fallos, `resize` por fotograma; tokens de 36 s del e2e renovados antes de usarlos | CI: todo en verde (e2e en 3 navegadores + axe) |
+| #40 · (este commit) | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora | — |
 
 ---
 
@@ -411,7 +425,7 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
   cambios de comportamiento; verificada **solo en local** (#36).
 - ✅ Cuelgue de `test_fuzz.js` resuelto: `test:all` termina en local con 614/615 (#37, **solo local**).
 - ✅ CI de GitHub de nuevo en verde (`test`, `web`, `compose`, `pruebaslinux`, `production-install`) tras hacer público el repositorio y
-  fijar `web` a `ubuntu-24.04` (#38). ✅ `Security` en verde en `main` (#39). ✅ 0 vulnerabilidades en la raíz, sin `nodemon` (#39).
+  fijar `web` a `ubuntu-24.04` (#38). ✅ `Security` en verde en `main` (#39). ✅ 0 vulnerabilidades en la raíz, sin `nodemon` (#39). ✅ Interfaz con fondo 3D, cristal y animaciones ligadas al tema (#40).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -938,7 +952,7 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
 
 ---
 
-## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código, CI de GitHub y dependencias (#37–#39)
+## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código, CI de GitHub, dependencias y diseño de la web (#37–#40)
 
 Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusionado).
 
@@ -1037,3 +1051,27 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
   local a `secure_app` (propietario); 3 actualizaciones aparcadas y commit archivado (decisión del propietario); instaladores de Linux y
   macOS sin ejecutar; `actions/upload-artifact` v4 corre forzado en Node 24 (aviso de GitHub, entre las actualizaciones aparcadas).
   **Siguiente mejora:** pasar el `.env` local a `secure_app` y, en cuanto exista, la versión corregida de `picomatch`. *(Media.)*
+
+### #40 — Interfaz web con fondo 3D (Three.js), cristal, animaciones y transiciones según el tema (verificado en GitHub)
+- **Estado:** completado en la rama `ui/fondo-3d-animaciones`; CI en verde en `b42d12a`; pendiente de validación del propietario para `main`.
+- **Archivos y módulos revisados:** `web/src/app/layout.tsx`, `web/src/app/globals.css`, `web/src/components/{Shell,Charts}.tsx`,
+  `web/src/proxy.ts` (CSP: `style-src-attr 'none'`, `font-src 'self'`), `web/e2e/ops.test.cjs`, `web/e2e-support/harness.cjs`.
+- **Problema detectado:** el propietario pidió animaciones, efectos y transiciones en tarjetas, textos, gráficas y contenedores, con un
+  diseño según el tema y un fondo opaco con formas de Three.js detrás. Al probarlo en el CI salió una carrera latente del e2e: los tokens
+  del `before()` duran 36 s y dos pruebas los usaban más tarde (401 por caducidad cuando la suite tarda algo más).
+- **Acciones realizadas:** `Backdrop3D` (Three.js 0.187, carga diferida): poliedros, toros y nudos en alambre y sólidos translúcidos que
+  flotan y giran, con paralaje suave del puntero y los colores de los tokens del tema (se recalculan al cambiar `data-theme` o la
+  preferencia del sistema); sin WebGL no crea nada ni escribe errores; `prefers-reduced-motion` = un fotograma fijo; se para con la
+  pestaña oculta; libera contextos WebGL. Velo opaco con desenfoque. Cristal (`backdrop-filter`) en tarjetas, menú, tablas, diálogos y
+  avisos; entradas escalonadas (solo `transform`, para que `axe` mida el contraste final), elevación y brillo al pasar; barras con
+  degradado (`useId`) que crecen; títulos con degradado (con alternativa en `forced-colors`); Inter y JetBrains Mono con `next/font`
+  (autoalojadas: cumplen `font-src 'self'`); transiciones de página y de tema. Nada de estilos en línea en el marcado. Revisión de
+  `ecc:react-reviewer` (aprobado; se aplicaron sus avisos). E2E: `freshToken()` renueva el token justo antes de llamar al API.
+- **Pruebas ejecutadas:** local: typecheck, `npm test` 57/57, `npm run build` sin avisos; navegador (Chrome con DevTools): login y panel
+  en tema oscuro y claro, formas recoloreadas al cambiar de tema, Inter cargada, sin errores de la aplicación en consola. **GitHub
+  (`b42d12a`): `web` (e2e en Chromium, Firefox y WebKit + axe), `test`, `compose`, `pruebaslinux`, `production-install` en verde.**
+  `npm audit --omit=dev` en `web/`: 0.
+- **Puntuación:** 9/10 — diseño completo, accesible y con CI en verde; sin medir el rendimiento en equipos modestos.
+- **Problemas restantes:** medir FPS/consumo del fondo en equipos modestos (el número de formas baja en pantallas estrechas); el chunk
+  de Three.js pesa ~740 KB sin comprimir (se carga aparte, después de la página).
+  **Siguiente mejora:** validación del propietario y paso a `main`. *(Media.)*
