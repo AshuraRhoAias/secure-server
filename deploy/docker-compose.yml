@@ -64,7 +64,7 @@ services:
   # Almacenamiento S3 de referencia: SeaweedFS (las imágenes de MinIO dejaron de publicarse en Docker Hub en 2025).
   # Las credenciales se escriben al arrancar en un archivo temporal del contenedor (no en la imagen ni en el repositorio).
   s3:
-    image: chrislusf/seaweedfs:4.52
+    image: chrislusf/seaweedfs:4.53
     entrypoint: ['/bin/sh', '-c']
     command:
       - |
