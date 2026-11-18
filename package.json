@@ -83,7 +83,7 @@
     "@node-saml/node-saml": "^5.2.0",
     "@prometheus-io/client": "^0.16.1",
     "@simplewebauthn/server": "^14.0.3",
-    "@xmldom/xmldom": "^0.8.15",
+    "@xmldom/xmldom": "^0.9.12",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "busboy": "^1.6.0",
