@@ -148,7 +148,7 @@ itE2e('credenciales incorrectas: mensaje claro y ninguna cookie de sesión', asy
   await page.getByLabel('Usuario').fill(users.admin.username);
   await page.getByLabel('Contraseña').fill('contraseña-equivocada');
   await page.getByRole('button', { name: 'Entrar' }).click();
-  await page.getByRole('alert').waitFor();
+  await page.locator('.banner[role="alert"]').waitFor(); // el aviso de la página, no el anunciador de rutas de Next (también role=alert)
   assert.strictEqual((await context.cookies()).length, 0);
   await context.close();
 });
@@ -367,7 +367,7 @@ itE2e('administrador con MFA: código incorrecto, TOTP correcto y código de rec
 
   let page = await newPage();
   await login(page, users.mfa, { code: '000000' });
-  await page.getByRole('alert').waitFor();
+  await page.locator('.banner[role="alert"]').waitFor(); // el aviso de la página, no el anunciador de rutas de Next (también role=alert)
   assert.match(page.url(), /\/login$/);
   assert.ok(!(await context.cookies()).some(c => c.name === 'ops_session'));
 

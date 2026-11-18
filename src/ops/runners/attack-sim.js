@@ -93,9 +93,15 @@ async function run(ctx) {
     const touched = new Set(); // IP de origen realmente usadas (para limpiar su estado)
     const send = makeClient(ctx, touched);
     const trusted = Boolean(ctx.trustsForwardedFor);
-    const offset = 100 + ((ctx.runId * 2) % 100);
-    const ipA = trusted ? `203.0.113.${offset}` : '127.0.0.1'; // registro, inyecciones, JWT, subidas (sin confianza no se usa: no hay pasos)
+    const offset = 100 + ((ctx.runId * 4) % 100);
+    const ipA = trusted ? `203.0.113.${offset}` : '127.0.0.1'; // registro, inyecciones, JWT, payload (sin confianza no se usa: no hay pasos)
     const ipB = trusted ? `203.0.113.${offset + 1}` : null;   // fuerza bruta (solo si se puede aislar su origen)
+    // Subidas desde IP propias: las inyecciones de antes BLOQUEAN ipA, y un rechazo por IP_BLOCKED no probaría el filtro de
+    // archivos (antes pasaba: «rechazado 403 IP_BLOCKED» se contaba como acierto del filtro)
+    const ipUpload = trusted ? `203.0.113.${offset + 2}` : null;
+    const ipEicar = trusted ? `203.0.113.${offset + 3}` : null;
+    // ¿Lo rechazó la protección por IP (no el control que se quería probar)?
+    const byIpBlock = (r) => r.code === 'IP_BLOCKED' || r.code === 'RATE_LIMITED' || r.status === 429;
     // Sin IP de prueba utilizables (el servidor no confía en X-Forwarded-For) no se ejecuta ningún paso de ataque
     const step = (name, announce, fn) => ctx.step(name, announce, trusted
         ? fn
@@ -253,10 +259,13 @@ async function run(ctx) {
         await step('subida-ejecutable', 'Subida de un ejecutable (MZ) disfrazado de foto.jpg', async () => {
             if (!token) return { level: 'warn', message: 'Omitido: no hay sesión temporal' };
             const { body, contentType } = multipart(Buffer.concat([Buffer.from('MZ'), crypto.randomBytes(500)]), 'foto.jpg');
-            const r = await send({ method: 'POST', path: '/api/files', ip: ipA, token, body, contentType });
+            const r = await send({ method: 'POST', path: '/api/files', ip: ipUpload, token, body, contentType });
             const fileId = r.json?.file?.id;
             if (fileId) created.fileIds.push(fileId);
-            const recorded = await recordedFor(ipA);
+            const recorded = await recordedFor(ipUpload);
+            if (byIpBlock(r)) {
+                return { level: 'warn', message: `Rechazado por la protección por IP (HTTP ${r.status} ${r.code || ''}), no por el filtro de archivos: este paso no lo prueba`, data: { status: r.status, code: r.code } };
+            }
             record('Subida de ejecutable', r.status >= 400, recorded);
             const data = { sent: 'POST /api/files (MZ + bytes, nombre foto.jpg)', status: r.status, code: r.code, recorded };
             if (r.status < 400) return { level: 'fail', message: `SE ACEPTÓ UN EJECUTABLE DISFRAZADO (HTTP ${r.status})`, data };
@@ -266,13 +275,16 @@ async function run(ctx) {
         await step('subida-eicar', 'Subida del fichero de prueba EICAR (antivirus)', async () => {
             if (!token) return { level: 'warn', message: 'Omitido: no hay sesión temporal' };
             const { body, contentType } = multipart(Buffer.from(EICAR), 'eicar.txt');
-            const r = await send({ method: 'POST', path: '/api/files', ip: ipA, token, body, contentType });
+            const r = await send({ method: 'POST', path: '/api/files', ip: ipEicar, token, body, contentType });
             const fileId = r.json?.file?.id;
             if (fileId) created.fileIds.push(fileId);
             const av = require('../../files/av-scanner');
             const data = { sent: 'POST /api/files (EICAR como eicar.txt)', status: r.status, code: r.code };
+            if (byIpBlock(r)) {
+                return { level: 'warn', message: `Rechazado por la protección por IP (HTTP ${r.status} ${r.code || ''}), no por el antivirus: este paso no lo prueba`, data };
+            }
             if (r.status >= 400) {
-                record('Subida de EICAR', true, await recordedFor(ipA));
+                record('Subida de EICAR', true, await recordedFor(ipEicar));
                 return { message: `Rechazado (HTTP ${r.status}${r.code ? ` ${r.code}` : ''})`, data };
             }
             if (!av.enabled()) {
@@ -300,7 +312,7 @@ async function run(ctx) {
         const usedIps = [...touched];
         try {
             for (const id of created.fileIds) {
-                const r = await send({ method: 'DELETE', path: `/api/files/${id}`, ip: ipA, token }).catch(() => ({ status: 0 }));
+                const r = await send({ method: 'DELETE', path: `/api/files/${id}`, ip: ipUpload || ipA, token }).catch(() => ({ status: 0 }));
                 if (r.status >= 400 || r.status === 0) problems.push(`archivo ${id}`);
             }
             if (created.userId) {
