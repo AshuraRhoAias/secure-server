@@ -619,7 +619,7 @@ class SystemController {
     async runsCatalog(req, res) {
         try {
             res.set('Cache-Control', 'no-store');
-            res.json({ success: true, ...opsRuns.catalog() });
+            res.json({ success: true, ...(await opsRuns.catalog()) });
         } catch (error) {
             this.runsFailure(res, error, 'Error leyendo el catálogo de pruebas');
         }

@@ -5,8 +5,10 @@
 //     UNA ejecución activa por tipo en todo el cluster, de forma atómica y sin cerrojos (el INSERT del segundo choca → 409).
 //   - ops_run_events: el registro en vivo. El navegador sondea GET /runs/:id?afterSeq=N (no usa el stream SSE: ese tiene su propio
 //     cursor de eventos de seguridad y mezclar líneas de ejecución lo complicaría sin ganar nada).
-//   - La ejecución corre en segundo plano en el proceso que atendió la petición; `host` guarda `<máquina>:<pid>`.
-//   - Cancelar escribe `cancelled` en la BD; el ejecutor lo comprueba entre pasos (y el runner de suites mata a su hijo), de modo
+//   - diagnostic y attack_sim corren en segundo plano en el proceso que atendió la petición; `host` guarda `<máquina>:<pid>`.
+//     test_suite NO: el servidor solo la deja en `queued` y la ejecuta un trabajador independiente (scripts/ops-test-runner.js,
+//     `npm run ops:test-runner`) que la reclama de forma atómica y late en ops_workers. El servidor (src/) no lanza procesos.
+//   - Cancelar escribe `cancelled` en la BD; el ejecutor lo comprueba entre pasos (y el trabajador de suites mata a su hijo), de modo
 //     que vale también si la ejecución vive en otra réplica.
 // Los ejecutores están en src/ops/runners/*.js y reciben un contexto (ver makeContext).
 
@@ -19,6 +21,8 @@ const ACTIVE = ['queued', 'running'];
 const MAX_EVENTS_PER_RUN = 5000;
 const MAX_PENDING_EVENTS = 1000; // inserciones en cola en memoria por ejecución: si la BD va lenta, se descartan líneas `output`
 const PAGE = 500;
+const WORKER_ALIVE_SECONDS = 15; // un trabajador cuyo último latido es más viejo que esto se da por desconectado
+const QUEUED_ORPHAN_MINUTES = 2; // una test_suite encolada que nadie reclama en este tiempo se da por huérfana
 const MAX_RUN_MINUTES = 60; // una ejecución «viva» más vieja que esto (y de otro host) se da por muerta
 
 const HOST = `${os.hostname()}:${process.pid}`.slice(0, 64);
@@ -235,6 +239,10 @@ async function start({ kind, target, requestedBy, context = {} }) {
     if (!KINDS.includes(kind)) throw new RunError('INVALID_KIND', 'Tipo de ejecución desconocido', 400);
     const cleanTarget = target === undefined || target === null || target === '' ? null : String(target);
     runners()[kind].validate?.(cleanTarget); // lanza RunError (400/403/409) si el destino no vale o el runner está desactivado
+    if (kind === 'test_suite') {
+        const worker = await testRunnerStatus();
+        if (!worker.online) throw new RunError('TEST_RUNNER_OFFLINE', worker.reason, 409); // sin trabajador no se encola nada
+    }
 
     await purgeOld().catch((error) => console.error('⚠️ Retención de ejecuciones:', error.code || error.message));
 
@@ -251,6 +259,7 @@ async function start({ kind, target, requestedBy, context = {} }) {
     }
     const [rows] = await db.query('SELECT * FROM ops_runs WHERE id = ?', [id]);
     const run = publicRun(rows[0]);
+    if (kind === 'test_suite') return run; // la reclama y ejecuta el trabajador
     stateOf(id);
     // Segundo plano: la petición responde ya (202) y el navegador sondea el avance
     setImmediate(() => { execute(run, { ...context, host: HOST }).catch((error) => console.error('❌ Ejecución:', error.message)); });
@@ -281,6 +290,17 @@ async function cancel(id) {
     const [rows] = await db.query('SELECT status FROM ops_runs WHERE id = ?', [id]);
     if (!rows[0]) throw new RunError('NOT_FOUND', 'Ejecución no encontrada', 404);
     if (!ACTIVE.includes(rows[0].status)) throw new RunError('NOT_ACTIVE', 'La ejecución ya terminó', 409);
+    // Encolada y sin reclamar: nadie la está ejecutando, se cancela y se libera el tipo directamente
+    const [queued] = await db.query(
+        "UPDATE ops_runs SET status = 'cancelled', active_kind = NULL, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'",
+        [id]
+    );
+    if (queued.affectedRows) {
+        await emit(id, { level: 'warn', step: 'cancelar', message: 'Cancelada antes de empezar' });
+        const [done] = await db.query('SELECT * FROM ops_runs WHERE id = ?', [id]);
+        live.delete(id);
+        return publicRun(done[0]);
+    }
     // `active_kind` se CONSERVA: el tipo sigue ocupado (409 al lanzar otra) hasta que el ejecutor termine de verdad (para las suites,
     // cuando el proceso hijo haya cerrado) y `finish` lo libere. Si el ejecutor muere, lo libera recoverStale.
     await db.query(
@@ -301,12 +321,13 @@ const pidAlive = (pid) => {
 // Al arrancar: lo que quedó «vivo» porque el proceso murió pasa a `error`. Por host+pid (no toca lo de otros procesos del cluster
 // que siguen vivos) y, para otras máquinas, por antigüedad.
 async function recoverStale() {
-    const [rows] = await db.query("SELECT id, host, started_at, status FROM ops_runs WHERE status IN ('queued', 'running') OR (status = 'cancelled' AND active_kind IS NOT NULL)");
+    const [rows] = await db.query("SELECT id, kind, host, started_at, status FROM ops_runs WHERE status IN ('queued', 'running') OR (status = 'cancelled' AND active_kind IS NOT NULL)");
     let recovered = 0;
     for (const row of rows) {
         const [machine, pidText] = String(row.host || '').split(/:(?=\d+$)/);
+        const orphanQueued = row.kind === 'test_suite' && row.status === 'queued'; // la lleva el trabajador, no este proceso
         const sameMachine = machine === os.hostname();
-        const dead = sameMachine ? !pidAlive(Number(pidText)) || Number(pidText) === process.pid : Date.now() - new Date(row.started_at).getTime() > MAX_RUN_MINUTES * 60_000;
+        const dead = orphanQueued ? Date.now() - new Date(row.started_at).getTime() > QUEUED_ORPHAN_MINUTES * 60_000 : sameMachine ? !pidAlive(Number(pidText)) || Number(pidText) === process.pid : Date.now() - new Date(row.started_at).getTime() > MAX_RUN_MINUTES * 60_000;
         if (!dead || live.has(Number(row.id))) continue;
         if (row.status === 'cancelled') { // cancelada cuyo ejecutor murió: solo falta liberar el tipo
             await db.query("UPDATE ops_runs SET active_kind = NULL WHERE id = ? AND status = 'cancelled'", [row.id]);
@@ -327,11 +348,9 @@ async function recoverStale() {
     return recovered;
 }
 
-// Apagado del servidor: mata los procesos hijos del runner de suites y marca como `error` («servidor detenido») las ejecuciones que
-// ESTE proceso tenía en marcha, liberando su tipo. No toca las de otras réplicas. Nunca lanza.
+// Apagado del servidor: marca como `error` («servidor detenido») los diagnósticos y simulaciones que ESTE proceso tenía en marcha,
+// liberando su tipo. No toca las de otras réplicas ni las suites (son del trabajador). Nunca lanza.
 async function abortLocal(reason = 'servidor detenido') {
-    let killed = 0;
-    try { killed = require('./runners/test-suite').killAll(); } catch { /* sin runner */ }
     const ids = [...live.keys()];
     for (const id of ids) {
         try {
@@ -345,15 +364,41 @@ async function abortLocal(reason = 'servidor detenido') {
             console.error('⚠️ Cerrando la ejecución al apagar:', error.code || error.message);
         }
     }
-    return { killed, runs: ids.length };
+    return { runs: ids.length };
 }
 
-function catalog() {
-    const all = runners();
+// ¿Hay un trabajador de suites vivo (latido de menos de WORKER_ALIVE_SECONDS)? { online, host, lastSeen, reason }
+async function testRunnerStatus() {
+    let row = null;
+    try {
+        const [rows] = await db.query(
+            "SELECT host, last_seen, TIMESTAMPDIFF(SECOND, last_seen, CURRENT_TIMESTAMP(3)) AS age FROM ops_workers WHERE kind = 'test_suite' ORDER BY last_seen DESC LIMIT 1"
+        );
+        row = rows[0] || null;
+    } catch (error) {
+        console.error('⚠️ Estado del trabajador de suites:', error.code || error.message);
+    }
+    const online = !!row && Number(row.age) < WORKER_ALIVE_SECONDS;
     return {
-        kinds: KINDS.map(kind => ({ kind, ...(all[kind].describe ? all[kind].describe() : {}) })),
+        online,
+        host: row ? row.host : null,
+        lastSeen: row ? toIso(row.last_seen) : null,
+        reason: online ? null : 'No hay trabajador de pruebas conectado: arranca `npm run ops:test-runner` en el servidor (con OPS_TEST_RUNNER=true)'
+    };
+}
+
+async function catalog() {
+    const all = runners();
+    const testRunner = await testRunnerStatus();
+    return {
+        kinds: KINDS.map(kind => {
+            const info = all[kind].describe ? all[kind].describe() : {};
+            // Las suites están disponibles solo si hay trabajador conectado
+            return { kind, ...(kind === 'test_suite' ? { ...info, enabled: testRunner.online, reason: testRunner.reason } : info) };
+        }),
+        testRunner,
         retentionDays: retentionDays()
     };
 }
 
-module.exports = { start, list, get, cancel, emit, finish, recoverStale, abortLocal, catalog, redact, RunError, Cancelled, KINDS, HOST };
+module.exports = { start, list, get, cancel, emit, finish, recoverStale, abortLocal, catalog, testRunnerStatus, makeContext, WORKER_ALIVE_SECONDS, redact, RunError, Cancelled, KINDS, HOST };

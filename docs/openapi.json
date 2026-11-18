@@ -3354,13 +3354,13 @@
     },
     "/api/system/runs/catalog": {
       "get": {
-        "summary": "Catálogo de pruebas en vivo: tipos, suites permitidas y si el runner de suites está habilitado (y por qué no)",
+        "summary": "Catálogo de pruebas en vivo: tipos, suites permitidas y estado del trabajador de suites (testRunner: online, host, lastSeen, reason)",
         "tags": [
           "Administración"
         ],
         "responses": {
           "200": {
-            "description": "Tipos disponibles"
+            "description": "Tipos disponibles y `testRunner` ({ online, host, lastSeen, reason }): el trabajador de suites (npm run ops:test-runner) está conectado si su último latido tiene menos de 15 s"
           },
           "401": {
             "description": "Sin sesión válida"
@@ -3421,7 +3421,7 @@
         ]
       },
       "post": {
-        "summary": "Lanza una ejecución en segundo plano (diagnóstico, simulación de ataques contra este servidor o suite de pruebas); responde 202",
+        "summary": "Lanza una ejecución (diagnóstico, simulación de ataques contra este servidor o suite de pruebas, que se encola para el trabajador); responde 202",
         "tags": [
           "Administración"
         ],
@@ -3436,10 +3436,10 @@
             "description": "Sin sesión válida"
           },
           "403": {
-            "description": "Sin permiso o TEST_RUNNER_DISABLED"
+            "description": "Sin permiso"
           },
           "409": {
-            "description": "RUN_IN_PROGRESS u otro motivo (p. ej. sin dependencias de desarrollo)"
+            "description": "RUN_IN_PROGRESS, TEST_RUNNER_OFFLINE (suite sin trabajador vivo: arranca `npm run ops:test-runner` en el servidor; no se encola nada) u otro motivo de la guarda de BD (TEST_DB_IS_APP_DB, TEST_DB_NOT_TEST, APP_DB_UNKNOWN)"
           },
           "429": {
             "description": "Límite de peticiones"

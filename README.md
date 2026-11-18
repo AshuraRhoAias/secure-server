@@ -124,9 +124,9 @@ Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints
 | Administración | GET | `/api/system/settings` | JWT | Configuración efectiva (sin secretos) agrupada, con origen, límites y quién la cambió |
 | Administración | PUT | `/api/system/settings/{key}` | JWT | Cambia en caliente un ajuste del catálogo (si reduce la seguridad: aprobación de otro administrador) |
 | Administración | DELETE | `/api/system/settings/{key}` | JWT | Vuelve un ajuste al valor del entorno (si eso reduce la seguridad: aprobación de otro administrador) |
-| Administración | GET | `/api/system/runs/catalog` | JWT | Catálogo de pruebas en vivo: tipos, suites permitidas y si el runner de suites está habilitado (y por qué no) |
+| Administración | GET | `/api/system/runs/catalog` | JWT | Catálogo de pruebas en vivo: tipos, suites permitidas y estado del trabajador de suites (testRunner: online, host, lastSeen, reason) |
 | Administración | GET | `/api/system/runs` | JWT | Últimas ejecuciones de pruebas en vivo |
-| Administración | POST | `/api/system/runs` | JWT | Lanza una ejecución en segundo plano (diagnóstico, simulación de ataques contra este servidor o suite de pruebas); responde 202 |
+| Administración | POST | `/api/system/runs` | JWT | Lanza una ejecución (diagnóstico, simulación de ataques contra este servidor o suite de pruebas, que se encola para el trabajador); responde 202 |
 | Administración | GET | `/api/system/runs/{id}` | JWT | Una ejecución y su registro: eventos con seq mayor que afterSeq (máx. 500 por llamada) para sondeo incremental |
 | Administración | POST | `/api/system/runs/{id}/cancel` | JWT | Cancela una ejecución viva (mata el proceso hijo de una suite) |
 | Observabilidad | GET | `/api/metrics` | JWT | Métricas Prometheus (solo admin; opcionalmente un token de servicio METRICS_TOKEN) |

@@ -226,41 +226,95 @@ itDb('simulación de ataques: no admite destino (400)', async () => {
 });
 
 // ============================================================================ suites de npm (solo test_api: NO usa la BD)
+// El servidor solo ENCOLA; las corre el trabajador de scripts/ops-test-runner.js, que aquí se arranca EN EL PROCESO DE LA PRUEBA.
 
 const suiteRunner = () => require('../src/ops/runners/test-suite');
-const withRunner = async (fn) => {
+const workerModule = () => require('../scripts/ops-test-runner');
+const appEnv = (name = 'secure_platform', host = 'localhost:3306') => ({ DB_FRAGMENT_1: 'mysql://u:p@', DB_FRAGMENT_2: host, DB_FRAGMENT_3: `/${name}` });
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Arranca N trabajadores (con la guarda de BD alimentada por un entorno propio: en la prueba la BD de la app ES la de pruebas)
+async function withWorkers(count, fn) {
     const previous = process.env.OPS_TEST_RUNNER;
     process.env.OPS_TEST_RUNNER = 'true';
-    try { await fn(); } finally { if (previous === undefined) delete process.env.OPS_TEST_RUNNER; else process.env.OPS_TEST_RUNNER = previous; }
-};
+    await db.query('DELETE FROM ops_workers');
+    const workers = [];
+    try {
+        for (let i = 0; i < count; i++) workers.push(workerModule().startWorker({ pollMs: 100, heartbeatMs: 500, id: `prueba-${i}:${process.pid}`, guardEnv: appEnv() }));
+        for (let i = 0; i < 100; i++) { // espera al primer latido
+            const [rows] = await db.query('SELECT COUNT(*) AS n FROM ops_workers');
+            if (Number(rows[0].n) >= count) break;
+            await sleep(50);
+        }
+        await fn(workers);
+    } finally {
+        await Promise.all(workers.map(w => w.stop()));
+        await db.query('DELETE FROM ops_workers');
+        if (previous === undefined) delete process.env.OPS_TEST_RUNNER; else process.env.OPS_TEST_RUNNER = previous;
+    }
+}
+const anyChildren = (workers) => workers.reduce((n, w) => n + w.activeChildren(), 0);
 
-itDb('suites: desactivadas por defecto (403 TEST_RUNNER_DISABLED) y el catálogo dice por qué', async () => {
-    delete process.env.OPS_TEST_RUNNER;
+itDb('suites: sin trabajador vivo => 409 TEST_RUNNER_OFFLINE, no queda fila y el catálogo lo cuenta', async () => {
+    await idle();
+    await db.query('DELETE FROM ops_workers');
     const admin = await userWithRole('admin');
     const r = await start(admin, 'test_suite', 'test_api');
-    assert.strictEqual(r.status, 403);
-    assert.strictEqual(r.body.code, 'TEST_RUNNER_DISABLED');
+    assert.strictEqual(r.status, 409, r.text);
+    assert.strictEqual(r.body.code, 'TEST_RUNNER_OFFLINE');
+    assert.match(r.body.message, /npm run ops:test-runner/);
+    const [n] = await db.query("SELECT COUNT(*) AS n FROM ops_runs WHERE kind = 'test_suite'");
+    assert.strictEqual(Number(n[0].n), 0, 'no se crea ninguna ejecución sin trabajador');
     const cat = await call(admin, 'GET', '/api/system/runs/catalog');
+    assert.strictEqual(cat.body.testRunner.online, false);
+    assert.match(cat.body.testRunner.reason, /ops:test-runner/);
     const suites = cat.body.kinds.find(k => k.kind === 'test_suite');
     assert.strictEqual(suites.enabled, false);
-    assert.match(suites.reason, /OPS_TEST_RUNNER/);
-    const [n] = await db.query("SELECT COUNT(*) AS n FROM ops_runs WHERE kind = 'test_suite'");
-    assert.strictEqual(Number(n[0].n), 0, 'no se crea ninguna ejecución si está desactivado');
+    // un latido viejo (> 15 s) tampoco cuenta
+    await db.query("INSERT INTO ops_workers (host, kind, pid, last_seen) VALUES ('viejo:1', 'test_suite', 1, DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 60 SECOND))");
+    try {
+        assert.strictEqual((await start(admin, 'test_suite', 'test_api')).status, 409);
+    } finally { await db.query('DELETE FROM ops_workers'); }
 });
 
-itDb('suites: bloqueadas en producción salvo OPS_TEST_RUNNER_ALLOW_PRODUCTION=true', async () => {
-    await withRunner(async () => {
-        const env = process.env.NODE_ENV;
-        process.env.NODE_ENV = 'production';
-        try {
-            assert.strictEqual(suiteRunner().availability().enabled, false);
-            process.env.OPS_TEST_RUNNER_ALLOW_PRODUCTION = 'true';
-            assert.strictEqual(suiteRunner().availability().enabled, true);
-        } finally {
-            process.env.NODE_ENV = env;
-            delete process.env.OPS_TEST_RUNNER_ALLOW_PRODUCTION;
-        }
+itDb('suites: con latido reciente el catálogo informa del trabajador (online, host, lastSeen)', async () => {
+    await withWorkers(1, async (workers) => {
+        const admin = await userWithRole('admin');
+        const cat = await call(admin, 'GET', '/api/system/runs/catalog');
+        assert.strictEqual(cat.body.testRunner.online, true);
+        assert.strictEqual(cat.body.testRunner.host, workers[0].id);
+        assert.ok(cat.body.testRunner.lastSeen);
+        assert.strictEqual(cat.body.testRunner.reason, null);
+        assert.strictEqual(cat.body.kinds.find(k => k.kind === 'test_suite').enabled, true);
     });
+});
+
+test('trabajador: las salvaguardas impiden arrancarlo (desactivado, producción, BD de pruebas = BD de la app)', () => {
+    const { checkSafeguards, startWorker } = workerModule();
+    assert.strictEqual(checkSafeguards({}).code, 'TEST_RUNNER_DISABLED');
+    assert.strictEqual(checkSafeguards({ OPS_TEST_RUNNER: 'true', NODE_ENV: 'production' }).code, 'TEST_RUNNER_PRODUCTION');
+    // con el permiso explícito deja de bloquear por producción
+    assert.notStrictEqual(checkSafeguards({ OPS_TEST_RUNNER: 'true', NODE_ENV: 'production', OPS_TEST_RUNNER_ALLOW_PRODUCTION: 'true' }, appEnv())?.code, 'TEST_RUNNER_PRODUCTION');
+    // dbGuard: BD de la app indeterminable, igual a la de pruebas, o nombre sin «test»
+    const ok = { OPS_TEST_RUNNER: 'true' };
+    assert.strictEqual(checkSafeguards(ok, {}).code, 'APP_DB_UNKNOWN');
+    assert.strictEqual(checkSafeguards(ok, appEnv('secure_platform_test_app', '127.0.0.1:3306')).code, 'TEST_DB_IS_APP_DB');
+    assert.strictEqual(checkSafeguards(ok, { ...appEnv(), TEST_DB_URL: 'mysql://a:b@localhost/otra' }).code, 'TEST_DB_NOT_TEST');
+    assert.strictEqual(checkSafeguards(ok, appEnv()), null);
+
+    // y startWorker se niega de verdad (lanza con el código), sin dejar timers ni latido
+    const saved = { runner: process.env.OPS_TEST_RUNNER, env: process.env.NODE_ENV };
+    try {
+        delete process.env.OPS_TEST_RUNNER;
+        assert.throws(() => startWorker({ guardEnv: appEnv() }), (e) => e.code === 'TEST_RUNNER_DISABLED');
+        process.env.OPS_TEST_RUNNER = 'true';
+        assert.throws(() => startWorker({ guardEnv: appEnv('secure_platform_test', 'localhost') }), (e) => e.code === 'TEST_DB_IS_APP_DB');
+        process.env.NODE_ENV = 'production';
+        assert.throws(() => startWorker({ guardEnv: appEnv() }), (e) => e.code === 'TEST_RUNNER_PRODUCTION');
+    } finally {
+        if (saved.runner === undefined) delete process.env.OPS_TEST_RUNNER; else process.env.OPS_TEST_RUNNER = saved.runner;
+        process.env.NODE_ENV = saved.env;
+    }
 });
 
 itDb('suites: el entorno del hijo es limpio (sin DB_*, semillas ni secretos de la aplicación)', () => {
@@ -281,26 +335,25 @@ itDb('suites: el entorno del hijo es limpio (sin DB_*, semillas ni secretos de l
 });
 
 itDb('suites: una suite fuera de la lista (o con ruta/argumentos) da 400; sin destino también', async () => {
-    await withRunner(async () => {
-        const admin = await userWithRole('admin');
-        for (const target of ['test_inexistente', 'test_api-js', 'etc', 'all2']) {
-            const r = await start(admin, 'test_suite', target);
-            assert.strictEqual(r.status, 400, `${target}: ${r.text}`);
-        }
-        // caracteres de ruta o de shell ni siquiera pasan la validación de la ruta
-        for (const target of ['../test_api', 'test_api;ls', 'test_api && id', '$(id)']) {
-            assert.strictEqual((await start(admin, 'test_suite', target)).status, 400, target);
-        }
-        assert.strictEqual((await start(admin, 'test_suite')).status, 400);
-    });
+    const admin = await userWithRole('admin');
+    for (const target of ['test_inexistente', 'test_api-js', 'etc', 'all2']) {
+        const r = await start(admin, 'test_suite', target);
+        assert.strictEqual(r.status, 400, `${target}: ${r.text}`);
+    }
+    // caracteres de ruta o de shell ni siquiera pasan la validación de la ruta
+    for (const target of ['../test_api', 'test_api;ls', 'test_api && id', '$(id)']) {
+        assert.strictEqual((await start(admin, 'test_suite', target)).status, 400, target);
+    }
+    assert.strictEqual((await start(admin, 'test_suite')).status, 400);
 });
 
-itDb('suites: ejecuta test_api (sin BD) y emite líneas y resultados en vivo', async () => {
+itDb('suites: se encola (202 queued), el trabajador la reclama, la ejecuta y emite líneas y resultados en vivo', async () => {
     await idle();
-    await withRunner(async () => {
+    await withWorkers(1, async (workers) => {
         const admin = await userWithRole('admin');
         const started = await start(admin, 'test_suite', 'test_api');
         assert.strictEqual(started.status, 202, started.text);
+        assert.strictEqual(started.body.run.status, 'queued');
 
         // dos a la vez: 409
         const second = await start(admin, 'test_suite', 'test_api');
@@ -310,21 +363,25 @@ itDb('suites: ejecuta test_api (sin BD) y emite líneas y resultados en vivo', a
         const { run, events } = await waitDone(admin, started.body.run.id, { timeoutMs: 180_000 });
         const bad = events.filter(e => e.level === 'fail' || e.level === 'error');
         assert.strictEqual(run.status, 'passed', `fallos: ${JSON.stringify(bad.slice(0, 3))}`);
+        assert.strictEqual(run.host, workers[0].id, 'la ejecuta el trabajador, no el servidor');
         assert.strictEqual(run.summary.exitCode, 0);
         assert.ok(run.summary.pass >= 5, JSON.stringify(run.summary));
         assert.ok(events.filter(e => e.level === 'pass' && e.step === 'suite').length >= 5, 'resultados por subprueba');
         assert.ok(events.some(e => e.level === 'output'), 'líneas de salida');
         events.forEach((e, i) => assert.strictEqual(e.seq, i + 1));
-        assert.strictEqual(suiteRunner().activeChildren(), 0);
+        assert.strictEqual(anyChildren(workers), 0);
+        await idle();
     });
 });
 
-itDb('suites: cancelar mata el hijo y el tipo NO se libera hasta que el hijo cierra (409 mientras tanto)', async () => {
+itDb('suites: cancelar una en curso mata el hijo y el tipo NO se libera hasta que el hijo cierra (409 mientras tanto)', async () => {
     await idle();
-    await withRunner(async () => {
+    await withWorkers(1, async (workers) => {
         const admin = await userWithRole('admin');
         const started = await start(admin, 'test_suite', 'test_api');
         assert.strictEqual(started.status, 202, started.text);
+        for (let i = 0; i < 200 && anyChildren(workers) === 0; i++) await sleep(50); // el trabajador la reclamó y lanzó el hijo
+        assert.strictEqual(anyChildren(workers), 1, 'debe haber un hijo en marcha');
         const cancelled = await call(admin, 'POST', `/api/system/runs/${started.body.run.id}/cancel`);
         assert.strictEqual(cancelled.status, 200, cancelled.text);
         assert.strictEqual(cancelled.body.run.status, 'cancelled');
@@ -335,8 +392,8 @@ itDb('suites: cancelar mata el hijo y el tipo NO se libera hasta que el hijo cie
         const [held] = await db.query('SELECT active_kind FROM ops_runs WHERE id = ?', [started.body.run.id]);
         assert.strictEqual(held[0].active_kind, 'test_suite');
         // y el hijo desaparece; entonces `finish` libera el tipo
-        for (let i = 0; i < 100 && suiteRunner().activeChildren() > 0; i++) await new Promise(resolve => setTimeout(resolve, 100));
-        assert.strictEqual(suiteRunner().activeChildren(), 0, 'el proceso hijo debe haber terminado');
+        for (let i = 0; i < 100 && anyChildren(workers) > 0; i++) await sleep(100);
+        assert.strictEqual(anyChildren(workers), 0, 'el proceso hijo debe haber terminado');
         await idle();
         const [freed] = await db.query('SELECT status, active_kind FROM ops_runs WHERE id = ?', [started.body.run.id]);
         assert.strictEqual(freed[0].status, 'cancelled');
@@ -344,27 +401,64 @@ itDb('suites: cancelar mata el hijo y el tipo NO se libera hasta que el hijo cie
     });
 });
 
-itDb('abortLocal: mata los hijos y marca las ejecuciones locales como error «servidor detenido»', async () => {
+itDb('suites: cancelar una encolada (sin reclamar) la marca cancelled y libera el tipo directamente', async () => {
     await idle();
-    await withRunner(async () => {
+    // latido falso: hay «trabajador» pero ninguno reclama
+    await db.query("INSERT INTO ops_workers (host, kind, pid) VALUES ('falso:1', 'test_suite', 1) ON DUPLICATE KEY UPDATE last_seen = CURRENT_TIMESTAMP(3)");
+    try {
         const admin = await userWithRole('admin');
         const started = await start(admin, 'test_suite', 'test_api');
         assert.strictEqual(started.status, 202, started.text);
-        for (let i = 0; i < 100 && suiteRunner().activeChildren() === 0; i++) await new Promise(resolve => setTimeout(resolve, 50));
-        const result = await runsService.abortLocal('servidor detenido');
-        assert.ok(result.runs >= 1);
-        const r = await call(admin, 'GET', `/api/system/runs/${started.body.run.id}`);
-        assert.strictEqual(r.body.run.status, 'error');
-        assert.ok(r.body.events.some(e => e.step === 'apagado' && /servidor detenido/.test(e.message)));
-        for (let i = 0; i < 100 && suiteRunner().activeChildren() > 0; i++) await new Promise(resolve => setTimeout(resolve, 100));
-        assert.strictEqual(suiteRunner().activeChildren(), 0);
+        assert.strictEqual(started.body.run.status, 'queued');
+        const cancelled = await call(admin, 'POST', `/api/system/runs/${started.body.run.id}/cancel`);
+        assert.strictEqual(cancelled.status, 200, cancelled.text);
+        assert.strictEqual(cancelled.body.run.status, 'cancelled');
+        const [row] = await db.query('SELECT status, active_kind FROM ops_runs WHERE id = ?', [started.body.run.id]);
+        assert.strictEqual(row[0].active_kind, null, 'el tipo queda libre al instante');
+        assert.strictEqual((await call(admin, 'POST', `/api/system/runs/${started.body.run.id}/cancel`)).status, 409);
+    } finally {
+        await db.query('DELETE FROM ops_workers');
+        await idle();
+    }
+});
+
+itDb('suites: dos trabajadores no reclaman la misma ejecución', async () => {
+    await idle();
+    await withWorkers(2, async (workers) => {
+        const admin = await userWithRole('admin');
+        const started = await start(admin, 'test_suite', 'test_api');
+        assert.strictEqual(started.status, 202, started.text);
+        const { run, events } = await waitDone(admin, started.body.run.id, { timeoutMs: 180_000 });
+        assert.strictEqual(run.status, 'passed');
+        assert.ok(workers.map(w => w.id).includes(run.host));
+        assert.strictEqual(events.filter(e => e.step === 'inicio').length, 1, 'solo un trabajador la ejecutó');
+        assert.strictEqual(events.filter(e => e.step === 'resultado').length, 1);
         await idle();
     });
 });
 
-// ============================================================================ guarda de BD, redacción y cola (unitarias, sin lanzar suites)
+itDb('suites: al detener el trabajador mata el hijo y marca la ejecución como error «trabajador detenido»', async () => {
+    await idle();
+    let runId;
+    const admin = await userWithRole('admin');
+    await withWorkers(1, async (workers) => {
+        const started = await start(admin, 'test_suite', 'test_api');
+        assert.strictEqual(started.status, 202, started.text);
+        runId = started.body.run.id;
+        for (let i = 0; i < 200 && anyChildren(workers) === 0; i++) await sleep(50);
+        assert.strictEqual(anyChildren(workers), 1);
+        await workers[0].stop();
+        assert.strictEqual(anyChildren(workers), 0);
+    });
+    const r = await call(admin, 'GET', `/api/system/runs/${runId}`);
+    assert.strictEqual(r.body.run.status, 'error');
+    assert.ok(r.body.events.some(e => e.step === 'apagado' && /trabajador detenido/.test(e.message)));
+    await idle();
+    const [row] = await db.query('SELECT active_kind FROM ops_runs WHERE id = ?', [runId]);
+    assert.strictEqual(row[0].active_kind, null);
+});
 
-const appEnv = (name = 'secure_platform', host = 'localhost:3306') => ({ DB_FRAGMENT_1: 'mysql://u:p@', DB_FRAGMENT_2: host, DB_FRAGMENT_3: `/${name}` });
+// ============================================================================ guarda de BD, redacción y cola (unitarias, sin lanzar suites)
 
 test('dbGuard: valores por defecto de las suites con una app distinta => permitido', () => {
     assert.strictEqual(suiteRunner().dbGuard({ ...appEnv() }), null);
@@ -389,10 +483,9 @@ test('dbGuard: nombres de prueba sin «test» => TEST_DB_NOT_TEST', () => {
     assert.strictEqual(g({ ...appEnv(), TEST_DB_URL: 'no es una url' }).code, 'TEST_DB_NOT_TEST');
 });
 test('validate de suites con BD aplica la guarda (409 con el código)', () => {
-    const keys = ['OPS_TEST_RUNNER', 'DB_FRAGMENT_1', 'DB_FRAGMENT_2', 'DB_FRAGMENT_3', 'TEST_DB_URL'];
+    const keys = ['DB_FRAGMENT_1', 'DB_FRAGMENT_2', 'DB_FRAGMENT_3', 'TEST_DB_URL'];
     const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
     try {
-        process.env.OPS_TEST_RUNNER = 'true';
         Object.assign(process.env, appEnv('secure_platform_test', 'localhost'));
         assert.throws(() => suiteRunner().validate('test_security'), (e) => e.status === 409 && e.code === 'TEST_DB_IS_APP_DB');
         suiteRunner().validate('test_api'); // sin BD: no aplica

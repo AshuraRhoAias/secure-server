@@ -20,6 +20,7 @@ interface Catalog {
     kind: Kind; title?: string; description?: string; enabled?: boolean; reason?: string | null; warning?: string;
     targets?: Array<{ value: string; label: string }>; suites?: Array<{ value: string; label: string; db: boolean }>;
   }>;
+  testRunner?: { online: boolean; host: string | null; lastSeen: string | null; reason: string | null };
 }
 
 const POLL_MS = 700;
@@ -198,9 +199,15 @@ export default function TestsPage() {
             </select>
           </label>
           {suiteInfo?.enabled === false
-            ? <Banner tone="warn">{suiteInfo.reason}</Banner>
-            : <p className="muted">{suiteInfo?.warning ?? 'Las suites con BD usan la base de datos de pruebas, no la de la aplicación.'}</p>}
-          <button type="button" className="primary big" disabled={busy !== null || suiteInfo?.enabled === false || activeKinds.has('test_suite')} onClick={() => void start('test_suite', suite)}>
+            ? <Banner tone="warn">{suiteInfo.reason ?? 'Arranca `npm run ops:test-runner` en el servidor'}</Banner>
+            : (
+              <>
+                {catalog.data?.testRunner?.online ? <Banner tone="ok">Trabajador de pruebas conectado{catalog.data.testRunner.host ? ` desde ${catalog.data.testRunner.host}` : ''}</Banner> : null}
+                <p className="muted">{suiteInfo?.warning ?? 'Las suites con BD usan la base de datos de pruebas, no la de la aplicación.'}</p>
+              </>
+            )}
+          <button type="button" className="primary big" disabled={busy !== null || suiteInfo?.enabled === false || activeKinds.has('test_suite')}
+            title={suiteInfo?.enabled === false ? (suiteInfo.reason ?? undefined) : undefined} onClick={() => void start('test_suite', suite)}>
             Ejecutar suite
           </button>
         </section>

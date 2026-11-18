@@ -636,3 +636,13 @@ CREATE TABLE `ops_run_events` (
   KEY `idx_ops_events_run` (`run_id`, `seq`),
   CONSTRAINT `ops_run_events_run_fk` FOREIGN KEY (`run_id`) REFERENCES `ops_runs` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Latido de los trabajadores independientes (npm run ops:test-runner); ver migrations/021_ops_workers.sql
+CREATE TABLE `ops_workers` (
+  `host` varchar(64) NOT NULL,
+  `kind` varchar(32) NOT NULL,
+  `pid` int(11) NOT NULL,
+  `last_seen` timestamp(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`host`),
+  KEY `idx_ops_workers_kind_seen` (`kind`, `last_seen`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

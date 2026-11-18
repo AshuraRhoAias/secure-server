@@ -535,8 +535,8 @@ class SecureServer {
         force.unref();
 
         try {
-            // Pruebas en vivo: se matan los procesos hijos de las suites (no deben sobrevivir al servidor) y sus ejecuciones quedan
-            // marcadas como «servidor detenido». Antes de cerrar la BD; nunca bloquea el cierre más de 3 s.
+            // Pruebas en vivo: los diagnósticos y simulaciones de este proceso quedan marcados como «servidor detenido» (las suites son
+            // del trabajador aparte). Antes de cerrar la BD; nunca bloquea el cierre más de 3 s.
             await Promise.race([
                 require('./ops/runs.service').abortLocal('servidor detenido'),
                 new Promise(resolve => setTimeout(resolve, 3000))

@@ -19,6 +19,7 @@
     "test:api": "node --test test/test_api.js",
     "test:db": "node --test test/test_db.js",
     "test:icmp": "node --test test/test_icmp.js",
+    "ops:test-runner": "node scripts/ops-test-runner.js",
     "icmp-monitor": "node scripts/icmpMonitor.js",
     "icmp-firewall": "bash scripts/icmp-firewall.sh",
     "set-role": "node scripts/setUserRole.js",

@@ -7,7 +7,7 @@
 > base de datos, servidor en marcha o conectividad en el laboratorio), se indica
 > explícitamente y **no** se declara como completado.
 
-- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P, #37–#40)
+- **Fecha de la auditoría inicial:** 2026-10-21 (UTC) · **última actualización:** 2026-11-17 (ver §A, §L, §M, §N, §O y §P, #37–#41)
 - **Commit base auditado:** `b7b1ea1` (rama por defecto `main`)
 - **Rama de trabajo de esta intervención:** `claude/project-thread-qjkfd0`
 - **Entorno de ejecución:** contenedor Ubuntu 24.04, Node 22, sin MySQL ni el servidor
@@ -60,6 +60,10 @@
 - **Interfaz web con fondo 3D 2026-11-17 (#40, §P):** fondo con Three.js (formas que flotan con los colores del tema) tras un velo
   opaco; tarjetas, menú, tablas y diálogos de cristal; entradas escalonadas, gráficas con degradado que crecen, tipografía Inter y
   transiciones de página y de tema. Respeta `prefers-reduced-motion`, la CSP y `axe`: CI en verde (e2e en 3 navegadores).
+- **Operación desde la web 2026-11-18 (#41, §P):** usuarios (alta con contraseña temporal y cambio obligatorio; dar o quitar admin con
+  doble firma), configuración en caliente (8 ajustes en BD; debilitar exige doble firma) y pruebas en vivo con un botón (diagnóstico,
+  simulación de ataques contra el propio servidor y suites de npm protegidas), con registro en tiempo real. Tres revisiones de
+  seguridad con sus hallazgos corregidos; CI por fase.
 
 **Estado general.** API REST (Express 5 + MariaDB/MySQL) para datos sensibles con interfaz web de operación (Next.js) para
 administradores. Cifrado AES-256-GCM por campo y por archivo, estado de seguridad en la base de datos, sesiones cortas con refresh
@@ -273,6 +277,9 @@ evidencia es solo local (Windows, MariaDB 13.1) y el CI de GitHub no se ha compr
 con la ruta `test/`), sin cambiar notas. La media sigue en **≈ 8,1/10**. `Security` (CodeQL, gitleaks, SBOM, DAST) no se ha ejecutado aún:
 solo corre en PR o en push a `main`.
 
+**Actualización 2026-11-18 (#41, operación desde la web):** Interfaz web y Autorización ganan funciones con doble firma y
+pruebas propias (usuarios 13, configuración 16, ejecuciones 23); sin cambio de notas hasta ver el CI de `main`. La media sigue en **≈ 8,1/10**.
+
 **Actualización 2026-11-17 (#40, diseño de la web):** Interfaz web sin cambio de nota (8,4): el diseño nuevo pasa los e2e en
 3 navegadores y `axe`; se añade `three` como dependencia de producción de `web/` (0 vulnerabilidades en producción).
 
@@ -305,6 +312,8 @@ vulnerabilidades (también de desarrollo) y el job `web` vuelve a `ubuntu-latest
 | Media | `Security` (CodeQL, gitleaks, SBOM, DAST) sin ejecutar desde que volvió el CI | Solo corre en PR o en push a `main` (#38) | Análisis de seguridad sin evidencia reciente | Push de `ci/revision` a `main` (`fd6d5f4`) | **Cerrado (#39): los 5 jobs de `Security` en verde en `main`** |
 | Baja | Playwright fijado en 1.56.1 obliga a usar `ubuntu-24.04` en el job `web` | #38 | Al retirar 24.04 de los runners, el job fallaría | Playwright 1.65.1 + axe 4.14.0 y vuelta a `ubuntu-latest` | **Cerrado (#39): `web` en verde en Ubuntu 26** |
 | Media | `picomatch` ≤4.0.7 (alta, GHSA-fc5q-39xc-vjpf) en `web/` vía `vitest`→`vite`→`tinyglobby`/`fdir`: no hay versión corregida | `npm audit` en `web/` (#39) | Solo desarrollo (`web/` en producción: 0); ReDoS solo con patrones glob controlados por un atacante, y aquí son del propio proyecto | Esperar la versión corregida (Dependabot la propondrá); la alternativa de npm es bajar `vitest` a 3.1.4 (versión mayor) | Aceptado (temporal) |
+| Baja | Una prueba unitaria del BFF («admin: cookie httpOnly cifrada…») falló una vez con el equipo cargado y pasó en las 5 repeticiones siguientes | `web` vitest (#41) | Posible falso rojo | Vigilar; si se repite, revisar su temporización | Abierto |
+| Media | El runner de suites no puede usarse en la demo local: la demo usa la BD de pruebas como BD de la app y la protección lo impide (correcto) | #41 | Solo demo | Para usarlo en local, la app debe usar `secure_platform` (pasar el `.env` a `secure_app`) | Abierto (propietario) |
 | Media | `npm run dev` no conecta a la BD en el equipo del propietario: `AUTH_SWITCH_PLUGIN_ERROR` | `.env` local (skip-worktree) aún con el usuario root de MariaDB, que usa un plugin de autenticación que `mysql2` no soporta (#39) | Desarrollo local sin servidor | Ejecutar `database/setup-app-local.sql` con una clave real y pasar el `.env` a `secure_app` (solo el propietario: exige root) | Abierto (propietario) |
 | Baja | `test_sessions.js` «el JWT de acceso caduca solo…» fallaba a veces en el CI (401 en vez de 200) | CI de `2e7158a` (#39) | Falso rojo | Token de 3 s en vez de 1,2 s y espera calculada desde el `exp` real | **Cerrado (#39)** |
 | Baja | `install.sh`, `install.ps1` (atajos que solo redirigen) y `security.config.js` (sin importadores; objeto estático de 2025) siguen en la raíz | Raíz tras #36 | Ruido y código muerto | Borrarlos o mantenerlos | Abierto (decisión del propietario) |
@@ -407,7 +416,17 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
 |---|---|---|---|---|---|
 | #40 · `b0503e4` | `web/src/components/Backdrop3D.tsx` | `web/src/app/layout.tsx` (fondo y fuentes), `web/src/app/globals.css` (sección «Diseño»), `web/src/components/Charts.tsx` (degradados), `web/package*.json` (`three`, `@types/three`) | — | Petición del propietario: animaciones, cristal y fondo 3D según el tema | Local: typecheck, 57/57, build; navegador: login y panel en oscuro y claro. CI: `web` falló por una carrera de tokens en el e2e |
 | #40 · `b42d12a` | — | `Backdrop3D.tsx` (revisión `ecc:react-reviewer`), `globals.css`, `layout.tsx`, `web/e2e/ops.test.cjs` (`freshToken`) | — | Contextos WebGL liberados, limpieza ante fallos, `resize` por fotograma; tokens de 36 s del e2e renovados antes de usarlos | CI: todo en verde (e2e en 3 navegadores + axe) |
-| #40 · (este commit) | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora | — |
+| #40 · `de6a4f9` | — | `docs/ReadmeLogsMejoras.md`, `graphify-out/` | — | Bitácora | — |
+
+### Intervención 15 (17/18-nov, operación desde la web, rama `ops/usuarios-config-pruebas`)
+
+| Entrada / commit | Creado | Modificado | Eliminado | Por qué | Validación |
+|---|---|---|---|---|---|
+| #41 · `75f6bdd` | `src/security/user-admin.service.js`, migración 018, `test/test_users_admin.js`, `web/src/app/session/password/route.ts` | rutas/controladores de sistema y auth, `auth.middleware.js`, `permissions.js`, `admin-actions.js`, `admin-approvals.service.js` (precheck), web usuarios y login, OpenAPI, README | — | Crear usuarios y cambiar roles desde la web | Local: suite completa 625/626; navegador; CI verde |
+| #41 · `0e92f99` | `src/config/runtime-settings.js`, migración 019, `test/test_settings.js`, página Configuración | 6 consumidores, rutas y controlador, allowlist (PUT) | — | Configuración en caliente | Local por suites; CI verde (suite completa con MariaDB 10.11) |
+| #41 · `53649a8` | `src/ops/` (servicio y 3 ejecutores), migración 020, `test/test_runs.js`, página Pruebas | `alerts.service.js`, `index.js`, rutas y controlador, `.env.example` | — | Pruebas en vivo con un botón | Local: `test_runs` 23/23, `test_security`, `test_ops`; navegador |
+| #41 · `7c8db89` | — | `attack-sim.js`, `web/e2e/ops.test.cjs` | — | Subidas desde IP propias; selector e2e no ambiguo | Local: `test_runs` 23/23; navegador |
+| #41 · (este commit) | `scripts/ops-test-runner.js`, migración 021 | `runs.service.js`, `test-suite.js` (sin procesos), `index.js`, controlador, página Pruebas, `test_runs.js`, OpenAPI, `.env.example`, bitácora | — | El servidor no puede lanzar procesos (invariante): las suites las ejecuta un trabajador aparte | Local: `test_icmp` 24/24, `test_runs` 26/26, `test_db` 11/11, lint 0, web 64/64 |
 
 ---
 
@@ -425,7 +444,7 @@ Las rutas de la columna «Modificado» son las de después de cada commit; las e
   cambios de comportamiento; verificada **solo en local** (#36).
 - ✅ Cuelgue de `test_fuzz.js` resuelto: `test:all` termina en local con 614/615 (#37, **solo local**).
 - ✅ CI de GitHub de nuevo en verde (`test`, `web`, `compose`, `pruebaslinux`, `production-install`) tras hacer público el repositorio y
-  fijar `web` a `ubuntu-24.04` (#38). ✅ `Security` en verde en `main` (#39). ✅ 0 vulnerabilidades en la raíz, sin `nodemon` (#39). ✅ Interfaz con fondo 3D, cristal y animaciones ligadas al tema (#40).
+  fijar `web` a `ubuntu-24.04` (#38). ✅ `Security` en verde en `main` (#39). ✅ 0 vulnerabilidades en la raíz, sin `nodemon` (#39). ✅ Interfaz con fondo 3D, cristal y animaciones ligadas al tema (#40). ✅ Usuarios, configuración en caliente y pruebas en vivo desde la web, con doble firma (#41).
 
 ### Propuesto (dependencias · prioridad · criterio de aceptación)
 0. **No arrancar en producción con claves `legacy`** (si el propietario lo aprueba; el `.env` local ya tiene `KEY_EPOCH`) · media · el
@@ -952,7 +971,7 @@ Rama `orden/raiz-limpia` (rama corta por tarea, desde `main`).
 
 ---
 
-## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código, CI de GitHub, dependencias y diseño de la web (#37–#40)
+## P. Intervención 2026-11-17: cuelgue de `test_fuzz.js`, revisión del código, CI de GitHub, dependencias, diseño y operación desde la web (#37–#41)
 
 Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusionado).
 
@@ -1079,3 +1098,38 @@ Rama `fix/fuzz-sse` (rama corta por tarea, desde `main` con el PR #42 ya fusiona
 - **Problemas restantes:** medir FPS/consumo del fondo en equipos modestos (el número de formas baja en pantallas estrechas); el chunk
   de Three.js pesa ~740 KB sin comprimir (se carga aparte, después de la página).
   **Siguiente mejora:** validación del propietario y paso a `main`. *(Media.)*
+
+### #41 — Usuarios, configuración en caliente y pruebas en vivo desde la web (con doble firma)
+- **Estado:** completado en la rama `ops/usuarios-config-pruebas` en tres fases, cada una con revisión de seguridad y CI; pendiente de
+  validación del propietario para `main`.
+- **Archivos y módulos revisados:** autenticación (`auth.middleware.js`, `secure-auth.service.js`, `auth.controller.js`), aprobaciones
+  (`admin-approvals.service.js`, `admin-actions.js`), permisos, controlador y rutas de sistema, consumidores de los ajustes (`storage`,
+  `sanitize`, `role.middleware`, `files.routes`, `security-events.service`, `alerts.service`), `live-stream.js`, BFF (`bff.ts`, allowlist,
+  proxy), páginas de usuarios, login, configuración y pruebas, e2e.
+- **Problema detectado:** el propietario pidió crear usuarios para entrar al sistema, configuración y ejecutar pruebas viendo en
+  tiempo real lo que pasa con un botón. No existía alta por un admin, ni cambio de contraseña, ni configuración en caliente, ni ejecución
+  de pruebas desde la web.
+- **Acciones realizadas:** (1) **Usuarios:** alta con contraseña temporal (24 caracteres, se muestra una vez) y cambio obligatorio en el
+  primer acceso (el API responde 403 `PASSWORD_CHANGE_REQUIRED` a todo lo demás); `POST /api/auth/password`; roles user/auditor/operator
+  directos y **admin (dar o quitar) con aprobación de otro admin**; la aprobación espera a que el titular cambie la temporal (quien la creó
+  la conoce: hallazgo medio de la revisión); `FOR UPDATE` para no quedarse sin admins. (2) **Configuración:** 8 ajustes de un catálogo
+  cerrado en `runtime_settings`, cableados en sus consumidores, caché de 5 s por réplica; si un cambio debilita, aprobación de otro admin
+  decidida con el valor **real** de la BD (hallazgo medio: la caché permitía colarlo) y que falla si quedó obsoleta. (3) **Pruebas en
+  vivo:** `ops_runs`/`ops_run_events`, una activa por tipo en el cluster; diagnóstico de 21 pasos; simulación de ataques contra el propio
+  servidor (IP de documentación solo si se confía en el proxy; cada ataque desde su IP; limpia todo; sus alertas salen marcadas
+  «[Posible simulación]» y **nunca se silencian**); suites de una lista cerrada con entorno limpio, desactivadas salvo `OPS_TEST_RUNNER`,
+  que se niegan si una BD de pruebas coincide con la de la app. **El servidor no lanza procesos** (invariante de `test_icmp.js`, vector
+  para `ping -p`): solo encola; las ejecuta un trabajador aparte, `npm run ops:test-runner` (`scripts/ops-test-runner.js`), con latido
+  en `ops_workers` (migración 021) y reclamo atómico; sin trabajador vivo, 409 `TEST_RUNNER_OFFLINE`; registro en vivo (sondeo 700 ms) con progreso, cancelar e historial.
+- **Pruebas ejecutadas:** local (por suites, el equipo va justo de memoria): usuarios 13/13, configuración 16/16, ejecuciones 23/23,
+  `test_security` 123/123, `test_ops` 25/25, `test_files` 101/101, `test_s3` 5/5, RBAC, sesiones, lint 0, `test:api` 20/20, web typecheck,
+  64/64 y build; suite completa 625/626 tras la fase 1. Navegador: alta de usuario y cambio obligatorio de contraseña; diagnóstico 21/21
+  (19 ✓, 2 avisos: antivirus y KMS no activos en local); simulación 8 de 9 bloqueados (EICAR aceptado porque el antivirus local está
+  apagado: la prueba lo avisa); suite `test_api` 20/20 en vivo. **GitHub:** CI en verde en `75f6bdd` y `0e92f99` (suite completa con
+  MariaDB 10.11); en `53649a8` falló un e2e por un selector ambiguo (`role=alert` del anunciador de Next), corregido en `7c8db89`;
+  en `7c8db89` falló `test` porque el ejecutor de suites usaba `child_process` dentro de `src/` (invariante), corregido sacándolo a
+  un trabajador fuera de `src/` (`test_icmp` 24/24, `test_runs` 26/26 en local).
+- **Puntuación:** 9/10 — funciones completas con doble firma y tres revisiones de seguridad aplicadas; la suite completa local de las
+  fases 2 y 3 la ejecuta el CI (en local se detuvo por memoria).
+- **Problemas restantes:** ver §D (prueba del BFF intermitente, runner de suites en la demo, `.env` a `secure_app`).
+  **Siguiente mejora:** validación del propietario y paso a `main`. *(Alta.)*
