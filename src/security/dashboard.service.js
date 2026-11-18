@@ -80,11 +80,11 @@ async function compute(h) {
             uptimeSeconds: Math.round(process.uptime()),
             node: process.version,
             config: {
-                mfaRequiredForPrivilegedRoles: process.env.MFA_REQUIRED_FOR_ADMINS === 'true',
+                mfaRequiredForPrivilegedRoles: require('../config/runtime-settings').get('auth.mfa_required_privileged'),
                 adminApprovalsRequired: Number(process.env.ADMIN_APPROVALS_REQUIRED) >= 1 ? Number(process.env.ADMIN_APPROVALS_REQUIRED) : 2,
                 fileScan: process.env.FILE_SCAN || 'off',
-                imageSanitize: (process.env.IMAGE_SANITIZE || 'on') !== 'off',
-                pdfActiveContent: process.env.PDF_ACTIVE_CONTENT || 'reject',
+                imageSanitize: require('../config/runtime-settings').get('files.image_sanitize') !== 'off',
+                pdfActiveContent: require('../config/runtime-settings').get('files.pdf_active_content'),
                 kmsProvider: process.env.KMS_PROVIDER || null,
                 alertWebhook: Boolean(process.env.ALERT_WEBHOOK_URL),
                 otlpExport: Boolean(process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT)

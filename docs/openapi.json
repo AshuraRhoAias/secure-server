@@ -3143,6 +3143,161 @@
         }
       }
     },
+    "/api/system/settings": {
+      "get": {
+        "summary": "Configuración efectiva (sin secretos) agrupada, con origen, límites y quién la cambió",
+        "tags": [
+          "Administración"
+        ],
+        "responses": {
+          "200": {
+            "description": "Grupos de ajustes del catálogo cerrado"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/system/settings/{key}": {
+      "put": {
+        "summary": "Cambia en caliente un ajuste del catálogo (si reduce la seguridad: aprobación de otro administrador)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_.]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ajuste aplicado"
+          },
+          "202": {
+            "description": "Reduce la seguridad: pendiente de aprobación de otro administrador"
+          },
+          "400": {
+            "description": "Clave desconocida, valor inválido o fuera de rango"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "409": {
+            "description": "El ajuste ya tiene ese valor"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "value",
+                  "reason"
+                ],
+                "properties": {
+                  "value": {
+                    "description": "Entero, booleano o texto según el ajuste"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 255
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Vuelve un ajuste al valor del entorno (si eso reduce la seguridad: aprobación de otro administrador)",
+        "tags": [
+          "Administración"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_.]*$"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ajuste restablecido"
+          },
+          "202": {
+            "description": "Reduce la seguridad: pendiente de aprobación de otro administrador"
+          },
+          "400": {
+            "description": "Clave desconocida o motivo inválido"
+          },
+          "401": {
+            "description": "Sin sesión válida"
+          },
+          "403": {
+            "description": "Sin permiso"
+          },
+          "409": {
+            "description": "Ya vale el valor del entorno"
+          },
+          "429": {
+            "description": "Límite de peticiones"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/auth/password": {
       "post": {
         "summary": "Cambia la propia contraseña (cierra las demás sesiones; quita el cambio obligatorio)",

@@ -119,6 +119,27 @@ router.post('/users/:id/role',
     systemController.setUserRole
 );
 
+// Configuración en caliente (SOLO admin). Catálogo cerrado en src/config/runtime-settings.js (sin secretos). Los cambios que
+// REDUCEN la seguridad abren una aprobación (acción settings_change) que decide OTRO administrador.
+const settingKey = validate.params({ key: { type: 'string', required: true, min: 1, max: 64, pattern: /^[a-z][a-z0-9_.]*$/ } });
+const keepSettingValue = (req, res, next) => { req.rawSettingValue = req.body?.value; next(); }; // validate.body descartaría `value` (tipo variable)
+router.get('/settings', allow('settings:read'), systemController.listSettings);
+router.put('/settings/:key',
+    allow('settings:write'),
+    protectionMiddleware.highSecurity(),
+    settingKey,
+    keepSettingValue,
+    validate.body({ reason: { type: 'string', required: true, min: 10, max: 255 } }),
+    systemController.updateSetting
+);
+router.delete('/settings/:key',
+    allow('settings:write'),
+    protectionMiddleware.highSecurity(),
+    settingKey,
+    validate.query({ reason: { type: 'string', required: true, min: 10, max: 255 } }),
+    systemController.resetSetting
+);
+
 // Datos personales e incidentes (SOLO admin)
 router.get('/users/:id/export', allow('privacy:export'), protectionMiddleware.highSecurity(), idParam, systemController.exportUserData);
 router.post('/users/:id/erase',

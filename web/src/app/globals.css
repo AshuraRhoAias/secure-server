@@ -283,3 +283,13 @@ dialog::backdrop { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px
 
 /* ---------- login ---------- */
 .login-card { border-radius: 18px; padding: 24px; box-shadow: 0 30px 80px -30px var(--glow); animation: rise 0.6s var(--ease-out) backwards; }
+
+/* ---------- configuración en caliente ---------- */
+.setting { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); }
+.setting:first-of-type { border-top: 0; padding-top: 0; }
+.setting-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.setting-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.setting-controls input[type='number'] { width: 9rem; }
+button.switch { display: inline-flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; border-radius: 999px; }
+button.switch .knob { width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform 0.2s var(--ease-out), background-color 0.2s; }
+button.switch[aria-checked='true'] .knob { background: var(--ok); transform: translateX(4px); }

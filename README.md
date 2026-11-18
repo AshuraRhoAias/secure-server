@@ -121,6 +121,9 @@ Generada desde [`docs/openapi.json`](docs/openapi.json) (`npm run docs:endpoints
 | Administración | GET | `/api/system/users` | JWT | Lista paginada de usuarios (sin hashes ni secretos) |
 | Administración | POST | `/api/system/users` | JWT | Crea un usuario con contraseña temporal (rol admin: aprobación de otro administrador) |
 | Administración | POST | `/api/system/users/{id}/role` | JWT | Cambia el rol de un usuario y cierra sus sesiones (subir a admin: aprobación de otro administrador) |
+| Administración | GET | `/api/system/settings` | JWT | Configuración efectiva (sin secretos) agrupada, con origen, límites y quién la cambió |
+| Administración | PUT | `/api/system/settings/{key}` | JWT | Cambia en caliente un ajuste del catálogo (si reduce la seguridad: aprobación de otro administrador) |
+| Administración | DELETE | `/api/system/settings/{key}` | JWT | Vuelve un ajuste al valor del entorno (si eso reduce la seguridad: aprobación de otro administrador) |
 | Observabilidad | GET | `/api/metrics` | JWT | Métricas Prometheus (solo admin; opcionalmente un token de servicio METRICS_TOKEN) |
 <!-- endpoints:fin -->
 

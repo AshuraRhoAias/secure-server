@@ -53,7 +53,7 @@ export async function proxyData(request: Request, segments: string[], query: str
   if (!session) return noSession([clearSessionCookie()]);
 
   let body: string | undefined;
-  if (method === 'POST') {
+  if (method === 'POST' || method === 'PUT') {
     body = await request.text();
     if (body.length > 64 * 1024) return json(413, { success: false, message: 'Cuerpo demasiado grande' });
     if (body && !parseJson(body)) return json(400, { success: false, message: 'JSON no válido', code: 'VALIDATION_ERROR' });

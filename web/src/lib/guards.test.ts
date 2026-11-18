@@ -15,6 +15,19 @@ describe('allowlist del BFF', () => {
     expect(upstreamPath('PUT', ['api', 'system', 'alerts'])).toBeNull();
   });
 
+  it('configuración en caliente: GET del listado, PUT y DELETE solo sobre una clave con forma de ajuste', () => {
+    expect(upstreamPath('GET', ['api', 'system', 'settings'])).toBe('/api/system/settings');
+    expect(upstreamPath('PUT', ['api', 'system', 'settings', 'files.upload_max_image_mb'])).toBe('/api/system/settings/files.upload_max_image_mb');
+    expect(upstreamPath('DELETE', ['api', 'system', 'settings', 'auth.mfa_required_privileged'])).toBe('/api/system/settings/auth.mfa_required_privileged');
+    expect(upstreamPath('PUT', ['api', 'system', 'settings'])).toBeNull();
+    expect(upstreamPath('POST', ['api', 'system', 'settings', 'files.image_sanitize'])).toBeNull();
+    expect(upstreamPath('GET', ['api', 'system', 'settings', 'files.image_sanitize'])).toBeNull();
+    expect(upstreamPath('PUT', ['api', 'system', 'settings', 'a..b'])).toBeNull();
+    expect(upstreamPath('PUT', ['api', 'system', 'settings', '..'])).toBeNull();
+    expect(upstreamPath('PUT', ['api', 'system', 'settings', 'JWT_SECRET'])).toBeNull();
+    expect(upstreamPath('PUT', ['api', 'system', 'settings', 'x/../y'])).toBeNull();
+  });
+
   it('gestión de usuarios: listar, crear y cambiar rol, solo con su método y con id numérico', () => {
     expect(upstreamPath('GET', ['api', 'system', 'users'])).toBe('/api/system/users');
     expect(upstreamPath('POST', ['api', 'system', 'users'])).toBe('/api/system/users');
@@ -55,6 +68,8 @@ describe('CSRF', () => {
     const good = { 'x-ops-csrf': '1', origin: 'https://ops.example.com' };
     expect(csrfOk('POST', headers(good))).toBe(true);
     expect(csrfOk('DELETE', headers({ ...good, 'sec-fetch-site': 'same-origin' }))).toBe(true);
+    expect(csrfOk('PUT', headers(good))).toBe(true);
+    expect(csrfOk('PUT', headers({ origin: 'https://ops.example.com' }))).toBe(false);
     expect(csrfOk('POST', headers({ origin: 'https://ops.example.com' }))).toBe(false);
     expect(csrfOk('POST', headers({ 'x-ops-csrf': '1' }))).toBe(false);
     expect(csrfOk('POST', headers({ 'x-ops-csrf': '1', origin: 'https://evil.example' }))).toBe(false);

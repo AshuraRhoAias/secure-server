@@ -29,7 +29,9 @@ const PERMISSIONS = Object.freeze({
     'sessions:revoke-any': ['admin'],
     'users:read': ['admin'],                                // listar usuarios
     'users:create': ['admin'],                              // crear cuentas (rol admin: además aprobación de otro admin)
-    'users:manage': ['admin']                               // cambiar rol (subir a admin: además aprobación de otro admin)
+    'users:manage': ['admin'],                              // cambiar rol (subir a admin: además aprobación de otro admin)
+    'settings:read': ['admin'],                             // ver la configuración efectiva (sin secretos)
+    'settings:write': ['admin']                             // cambiar ajustes en caliente (los que reducen seguridad: aprobación de otro admin)
 });
 
 function can(role, permission) {

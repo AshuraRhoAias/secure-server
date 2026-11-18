@@ -3,6 +3,7 @@ const router = express.Router();
 const filesController = require('../controllers/files.controller');
 const protectionMiddleware = require('../../middleware/protection.middleware');
 const validate = require('../utils/validate');
+const runtimeSettings = require('../../config/runtime-settings');
 const { CATEGORIES } = require('../../files/file-types');
 
 // Montada automáticamente en /api/files (ver routes/index.js): el cargador ya exige JWT y la
@@ -14,7 +15,7 @@ const idParam = validate.params({ id: { type: 'integer', required: true, min: 1 
 // Subida: multipart/form-data con UN archivo en el campo "file"
 router.post('/',
     protectionMiddleware.limit({
-        scope: 'upload', limit: () => Number(process.env.UPLOAD_RATE_PER_MIN) || 20, key: perUser,
+        scope: 'upload', limit: () => runtimeSettings.get('files.upload_rate_per_min'), key: perUser,
         code: 'UPLOAD_RATE_LIMITED', message: 'Demasiadas subidas, espera un momento'
     }),
     filesController.upload
@@ -35,7 +36,7 @@ router.get('/:id', idParam, filesController.getOne);
 
 router.get('/:id/download',
     protectionMiddleware.limit({
-        scope: 'download', limit: () => Number(process.env.DOWNLOAD_RATE_PER_MIN) || 600, key: perUser,
+        scope: 'download', limit: () => runtimeSettings.get('files.download_rate_per_min'), key: perUser,
         code: 'DOWNLOAD_RATE_LIMITED', message: 'Demasiadas descargas, espera un momento'
     }),
     idParam,

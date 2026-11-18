@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const permissions = require('../security/permissions');
+const runtimeSettings = require('../config/runtime-settings');
 
 // Control de acceso por rol. Debe usarse DESPUÉS de authMiddleware.verifyJWT.
 //
@@ -42,9 +43,9 @@ class RoleMiddleware {
                     });
                 }
 
-                // Con MFA_REQUIRED_FOR_ADMINS=true cualquier rol con privilegios solo opera si inició sesión con
+                // Con MFA_REQUIRED_FOR_ADMINS=true (o el ajuste en caliente auth.mfa_required_privileged) cualquier rol con privilegios solo opera si inició sesión con
                 // segundo factor (otp/recovery/passkey) o por SSO/SAML (el proveedor de identidad ya lo gestiona)
-                if (permissions.isPrivileged(role) && process.env.MFA_REQUIRED_FOR_ADMINS === 'true') {
+                if (permissions.isPrivileged(role) && runtimeSettings.get('auth.mfa_required_privileged') === true) {
                     const amr = req.user.amr || [];
                     if (!amr.some(method => ['otp', 'recovery', 'hwk', 'sso', 'saml'].includes(method))) {
                         return res.status(403).json({

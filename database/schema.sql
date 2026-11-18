@@ -591,3 +591,15 @@ CREATE TABLE `sso_handoffs` (
   KEY `idx_handoff_user` (`user_id`),
   CONSTRAINT `sso_handoffs_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ajustes operativos cambiables en caliente desde la web (migración 019). Solo claves del catálogo cerrado
+-- de src/config/runtime-settings.js; nunca secretos. Sin fila = vale el .env / el valor por defecto.
+CREATE TABLE `runtime_settings` (
+  `setting_key` varchar(64) NOT NULL,
+  `value_json` text NOT NULL,
+  `updated_by` int(11) DEFAULT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`setting_key`),
+  KEY `idx_runtime_settings_user` (`updated_by`),
+  CONSTRAINT `runtime_settings_user_fk` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

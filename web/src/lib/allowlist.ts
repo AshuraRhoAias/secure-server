@@ -1,6 +1,6 @@
 // Lista CERRADA de rutas del API que el BFF reenvía. No es un proxy abierto: lo que no esté aquí no existe para el navegador
 // (p. ej. rotar claves, o cualquier ruta nueva del API, hasta que se añada a propósito).
-type Method = 'GET' | 'POST' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 const RULES: ReadonlyArray<{ method: Method; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/system\/(status|rotation|blocked-ips|security-events|security-summary|approvals|alerts|dashboard)$/ },
@@ -8,6 +8,9 @@ const RULES: ReadonlyArray<{ method: Method; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/system\/users$/ },
   { method: 'POST', path: /^\/api\/system\/users$/ },
   { method: 'POST', path: /^\/api\/system\/users\/[1-9]\d{0,9}\/role$/ },
+  { method: 'GET', path: /^\/api\/system\/settings$/ },
+  { method: 'PUT', path: /^\/api\/system\/settings\/[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/ },
+  { method: 'DELETE', path: /^\/api\/system\/settings\/[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/ },
   { method: 'GET', path: /^\/api\/metrics$/ },
   { method: 'DELETE', path: /^\/api\/system\/blocked-ips\/[0-9a-fA-F:.]{1,45}$/ },
   { method: 'POST', path: /^\/api\/system\/accounts\/(unlock|mfa-reset)$/ },
@@ -20,7 +23,7 @@ const RULES: ReadonlyArray<{ method: Method; path: RegExp }> = [
   { method: 'POST', path: /^\/api\/system\/(integrity-check|test-communications)$/ }
 ];
 
-export const allowedMethods = (method: string): method is Method => method === 'GET' || method === 'POST' || method === 'DELETE';
+export const allowedMethods = (method: string): method is Method => method === 'GET' || method === 'POST' || method === 'PUT' || method === 'DELETE';
 
 // segments: partes de la ruta ya separadas (params.path). Devuelve la ruta del API o null si no está permitida.
 export function upstreamPath(method: string, segments: string[]): string | null {

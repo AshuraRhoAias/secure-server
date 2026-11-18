@@ -11,6 +11,7 @@ const alerts = require('../../security/alerts.service');
 const dashboard = require('../../security/dashboard.service');
 const privacy = require('../../security/privacy.service');
 const userAdmin = require('../../security/user-admin.service');
+const runtimeSettings = require('../../config/runtime-settings');
 
 class SystemController {
     constructor() {
@@ -526,6 +527,81 @@ class SystemController {
             res.json({ success: true, role: result.to, previousRole: result.from, sessionsClosed: result.sessionsClosed, message: 'Rol cambiado y sesiones cerradas' });
         } catch (error) {
             this.userFailure(res, error, 'Error cambiando el rol');
+        }
+    }
+
+    // ------------------------------------------------------------------ configuración en caliente (SOLO admin)
+
+    settingsFailure(res, error, fallback) {
+        if (error instanceof runtimeSettings.SettingsError || error instanceof approvals.ApprovalError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error(`❌ ${fallback}:`, error.code || error.message);
+        res.status(500).json({ success: false, message: fallback });
+    }
+
+    async listSettings(req, res) {
+        try {
+            const groups = await runtimeSettings.describe();
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, groups });
+        } catch (error) {
+            this.settingsFailure(res, error, 'Error leyendo la configuración');
+        }
+    }
+
+    // Aplica (o pide aprobar) un cambio. `target` es el valor nuevo; reset=true vuelve al entorno.
+    async changeSetting(req, res, { key, reset, target, reason }) {
+        // Valor REAL de la BD, no la caché de esta réplica (puede ir hasta el TTL por detrás): si otra réplica acaba de
+        // endurecerlo, la comparación «¿debilita?» tiene que hacerse frente a ese valor, o un debilitamiento se colaría sin firma
+        const fresh = await runtimeSettings.getFresh(key);
+        const current = fresh.value;
+        if (current === target && !(reset && fresh.source === 'db')) {
+            return res.status(409).json({ success: false, message: 'El ajuste ya tiene ese valor', code: 'SETTING_UNCHANGED' });
+        }
+        const weakens = runtimeSettings.isWeakening(key, current, target);
+        if (weakens) {
+            const text = `Ajuste ${key}: ${current} -> ${target}. ${reason.trim()}`;
+            const outcome = await approvals.request({
+                // `from`: valor de partida; si al aprobar ya no es el actual, la solicitud quedó obsoleta y no se aplica
+                action: 'settings_change', params: reset ? { key, reset: true, from: current } : { key, value: target, from: current }, reason: text, requestedBy: req.user.id
+            });
+            await audit.log('SETTING_CHANGE_REQUESTED', { key, from: current, to: target, reset, approvalId: outcome.id, status: outcome.status, reason: reason.trim() }, { req, severity: 'high', riskScore: 40 });
+            if (outcome.status === 'pending') {
+                return res.status(202).json({
+                    success: true, approvalId: outcome.id, status: 'pending', weakens: true,
+                    message: 'Reduce la seguridad: otro administrador debe aprobarlo en Aprobaciones'
+                });
+            }
+            return res.json({ success: true, approvalId: outcome.id, status: outcome.status, weakens: true, key, value: runtimeSettings.get(key), message: 'Ajuste aplicado' });
+        }
+
+        const result = reset ? await runtimeSettings.reset(key, { actor: req.user.id }) : await runtimeSettings.set(key, target, { actor: req.user.id });
+        await audit.log('SETTING_CHANGED', { key, from: result.previous, to: result.current, reset, reason: reason.trim() }, { req, severity: 'high', riskScore: 30 });
+        await securityEvents.record({
+            type: 'SETTING_CHANGED', severity: 'high', riskScore: 30, req,
+            details: { key, from: result.previous, to: result.current, reset, by: req.user.id, source: 'direct' }
+        });
+        res.json({ success: true, key, value: result.current, previous: result.previous, source: result.source, weakens: false, message: 'Ajuste aplicado' });
+    }
+
+    async updateSetting(req, res) {
+        try {
+            const key = req.validated.params.key;
+            const target = runtimeSettings.validate(key, req.rawSettingValue);
+            await this.changeSetting(req, res, { key, reset: false, target, reason: req.body.reason });
+        } catch (error) {
+            this.settingsFailure(res, error, 'Error cambiando el ajuste');
+        }
+    }
+
+    async resetSetting(req, res) {
+        try {
+            const key = req.validated.params.key;
+            const target = runtimeSettings.envValue(key).value; // lanza 400 si la clave no es del catálogo
+            await this.changeSetting(req, res, { key, reset: true, target, reason: req.validated.query.reason });
+        } catch (error) {
+            this.settingsFailure(res, error, 'Error restableciendo el ajuste');
         }
     }
 

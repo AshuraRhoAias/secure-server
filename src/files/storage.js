@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const runtimeSettings = require('../config/runtime-settings');
 
 // Almacenamiento en disco de los archivos CIFRADOS.
 //
@@ -24,7 +25,7 @@ const mbEnv = (name, fallbackMb) => {
 // Límites (todos configurables por entorno)
 function limits() {
     const perCategory = {
-        image: mbEnv('UPLOAD_MAX_IMAGE_MB', 25),
+        image: runtimeSettings.get('files.upload_max_image_mb') * MB,
         audio: mbEnv('UPLOAD_MAX_AUDIO_MB', 100),
         video: mbEnv('UPLOAD_MAX_VIDEO_MB', 512),
         document: mbEnv('UPLOAD_MAX_DOCUMENT_MB', 50),

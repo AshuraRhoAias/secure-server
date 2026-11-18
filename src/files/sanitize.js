@@ -1,5 +1,6 @@
 const { Transform } = require('stream');
 const zlib = require('zlib');
+const runtimeSettings = require('../config/runtime-settings');
 
 // Saneamiento del contenido, DESPUÉS de saber qué es el archivo y ANTES de antivirus y cifrado:
 //
@@ -51,7 +52,7 @@ const SHARP_FORMAT = {
     'image/avif': 'heif'      // sharp llama "heif" al contenedor AVIF
 };
 
-const imageSanitizing = () => (process.env.IMAGE_SANITIZE || 'on') !== 'off';
+const imageSanitizing = () => runtimeSettings.get('files.image_sanitize') !== 'off';
 const passthrough = () => (process.env.IMAGE_SANITIZE_PASSTHROUGH || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 function planFor(mime, category) {
@@ -62,7 +63,7 @@ function planFor(mime, category) {
         if (passthrough().includes(ext)) return 'pass';
         return 'unsanitizable';
     }
-    if (mime === 'application/pdf' && (process.env.PDF_ACTIVE_CONTENT || 'reject') !== 'allow') return 'pdf';
+    if (mime === 'application/pdf' && runtimeSettings.get('files.pdf_active_content') !== 'allow') return 'pdf';
     return 'pass';
 }
 

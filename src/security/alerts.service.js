@@ -155,7 +155,7 @@ function severityAtLeast(severity, minimum) {
 
 async function notify(alert) {
     const url = process.env.ALERT_WEBHOOK_URL;
-    if (!url || !severityAtLeast(alert.severity, process.env.ALERT_NOTIFY_MIN_SEVERITY || 'high')) return { skipped: true };
+    if (!url || !severityAtLeast(alert.severity, require('../config/runtime-settings').get('alerts.notify_min_severity'))) return { skipped: true };
     if (!require('../maintenance').guard.isOpen()) return { skipped: 'maintenance' }; // en mantenimiento no sale nada
 
     try {

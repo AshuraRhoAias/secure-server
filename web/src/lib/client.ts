@@ -11,7 +11,7 @@ export interface ApiResult<T> { ok: boolean; status: number; data: T | null; mes
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function apiCall<T = unknown>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, options: { text?: boolean } = {}): Promise<ApiResult<T>> {
+export async function apiCall<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, options: { text?: boolean } = {}): Promise<ApiResult<T>> {
   const url = path.startsWith('/session/') ? path : `/bff${path}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     let response: Response;

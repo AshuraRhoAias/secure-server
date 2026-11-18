@@ -52,4 +52,28 @@ approvals.registerAction('user_set_role', {
     }
 });
 
+// Cambio en caliente de un ajuste operativo que REDUCE la seguridad (o vuelta al entorno que la reduce). params: { key, value } o { key, reset: true }
+// (restablecer al entorno). Se vuelve a validar al ejecutar: el catálogo es cerrado y el rango se comprueba
+// otra vez, y si entre la solicitud y la aprobación el valor ya cambió, se aplica igualmente lo aprobado (queda en auditoría).
+approvals.registerAction('settings_change', {
+    async execute({ params, requestedBy, approvedBy }) {
+        const settings = require('../config/runtime-settings');
+        const reset = params.reset === true;
+        // Si el valor cambió desde la solicitud (p. ej. otro admin lo endureció), aplicar lo aprobado revertiría esa mejora:
+        // la solicitud queda obsoleta (falla con STALE_REQUEST) y hay que pedirla de nuevo sobre el valor actual
+        if (Object.prototype.hasOwnProperty.call(params, 'from')) {
+            const now = await settings.getFresh(params.key);
+            if (now.value !== params.from) {
+                throw new approvals.ApprovalError('STALE_REQUEST', `El ajuste cambió desde la solicitud (${params.from} → ${now.value}): vuelve a pedirla`, 409);
+            }
+        }
+        const result = reset ? await settings.reset(params.key, { actor: requestedBy }) : await settings.set(params.key, params.value, { actor: requestedBy });
+        await events.record({
+            type: 'SETTING_CHANGED', severity: 'high', riskScore: 40,
+            details: { key: params.key, from: result.previous, to: result.current, reset, requestedBy, approvedBy, source: 'approval' }
+        });
+        return { key: params.key, previous: result.previous, current: result.current, reset };
+    }
+});
+
 module.exports = approvals;

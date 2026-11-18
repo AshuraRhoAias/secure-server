@@ -184,6 +184,8 @@ class SecureServer {
                 throw new Error('No se pudo establecer conexión con la base de datos');
             }
 
+            // Ajustes operativos en caliente (runtime_settings): con la BD ya conectada; sin la tabla se usa el .env
+            await require('./config/runtime-settings').start();
             console.log('✅ Configuración validada');
         } catch (error) {
             console.error('❌ Error en validación de configuración:', error);

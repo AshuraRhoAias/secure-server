@@ -35,7 +35,7 @@
     "health-check": "node scripts/healthCheck.js",
     "test:security": "node --test test/test_security.js",
     "test:files": "node --test test/test_files.js",
-    "test:all": "node --test --test-concurrency=1 test/test_api.js test/test_db.js test/test_icmp.js test/test_rotation.js test/test_security.js test/test_mfa.js test/test_sessions.js test/test_rbac.js test/test_users_admin.js test/test_webauthn.js test/test_sso.js test/test_saml.js test/test_kms.js test/test_kms_files.js test/test_files.js test/test_sanitize.js test/test_ops.js test/test_scale.js test/test_av.js test/test_files_backup.js test/test_s3.js test/test_files_s3.js test/test_partitions.js test/test_fuzz.js",
+    "test:all": "node --test --test-concurrency=1 test/test_api.js test/test_db.js test/test_icmp.js test/test_rotation.js test/test_security.js test/test_mfa.js test/test_sessions.js test/test_rbac.js test/test_users_admin.js test/test_settings.js test/test_webauthn.js test/test_sso.js test/test_saml.js test/test_kms.js test/test_kms_files.js test/test_files.js test/test_sanitize.js test/test_ops.js test/test_scale.js test/test_av.js test/test_files_backup.js test/test_s3.js test/test_files_s3.js test/test_partitions.js test/test_fuzz.js",
     "test:mfa": "node --test test/test_mfa.js",
     "test:sessions": "node --test test/test_sessions.js",
     "test:rbac": "node --test test/test_rbac.js",

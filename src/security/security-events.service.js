@@ -19,7 +19,7 @@ const ACTIONS = ['logged', 'rate_limited', 'rejected', 'blocked_ip', 'locked_acc
 
 // Tope de eventos por (IP, tipo) y minuto: sin él, quien inunda la API de ataques inundaría también esta
 // tabla. Lo que excede se descarta y queda UNA fila EVENTS_THROTTLED que lo señala.
-const eventCap = () => Number(process.env.SECURITY_EVENTS_MAX_PER_MINUTE) || 30;
+const eventCap = () => require('../config/runtime-settings').get('security.events_max_per_minute');
 const NEVER_THROTTLED = new Set(['IP_BLOCKED', 'FILE_INTEGRITY_FAILURE', 'EVENTS_THROTTLED']);
 
 function sanitize(value, depth = 0) {
