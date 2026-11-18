@@ -31,6 +31,8 @@ const PERMISSIONS = Object.freeze({
     'users:create': ['admin'],                              // crear cuentas (rol admin: además aprobación de otro admin)
     'users:manage': ['admin'],                              // cambiar rol (subir a admin: además aprobación de otro admin)
     'settings:read': ['admin'],                             // ver la configuración efectiva (sin secretos)
+    'ops:read': ['admin'],                                  // ver el catálogo, el historial y el registro de las pruebas en vivo
+    'ops:run': ['admin'],                                   // lanzar y cancelar diagnóstico, simulación de ataques y suites de pruebas
     'settings:write': ['admin']                             // cambiar ajustes en caliente (los que reducen seguridad: aprobación de otro admin)
 });
 

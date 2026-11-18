@@ -140,6 +140,31 @@ router.delete('/settings/:key',
     systemController.resetSetting
 );
 
+// Pruebas en vivo (SOLO admin): diagnóstico, simulación de ataques contra este mismo servidor y suites de npm. El progreso se
+// guarda en la BD (ops_runs / ops_run_events) y el navegador lo sondea con afterSeq. Ver src/ops/runs.service.js.
+router.get('/runs/catalog', allow('ops:read'), systemController.runsCatalog);
+router.get('/runs',
+    allow('ops:read'),
+    validate.query({ limit: { type: 'integer', min: 1, max: 100, default: 30 } }),
+    systemController.listRuns
+);
+router.get('/runs/:id',
+    allow('ops:read'),
+    idParam,
+    validate.query({ afterSeq: { type: 'integer', min: 0, default: 0 } }),
+    systemController.getRun
+);
+router.post('/runs',
+    allow('ops:run'),
+    protectionMiddleware.highSecurity(),
+    validate.body({
+        kind: { type: 'enum', values: ['diagnostic', 'attack_sim', 'test_suite'], required: true },
+        target: { type: 'string', max: 64, pattern: /^[a-z0-9_-]*$/ }
+    }),
+    systemController.startRun
+);
+router.post('/runs/:id/cancel', allow('ops:run'), protectionMiddleware.highSecurity(), idParam, systemController.cancelRun);
+
 // Datos personales e incidentes (SOLO admin)
 router.get('/users/:id/export', allow('privacy:export'), protectionMiddleware.highSecurity(), idParam, systemController.exportUserData);
 router.post('/users/:id/erase',

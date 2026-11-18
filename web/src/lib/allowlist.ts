@@ -11,6 +11,11 @@ const RULES: ReadonlyArray<{ method: Method; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/system\/settings$/ },
   { method: 'PUT', path: /^\/api\/system\/settings\/[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/ },
   { method: 'DELETE', path: /^\/api\/system\/settings\/[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/ },
+  // Pruebas en vivo (diagnóstico, simulación de ataques, suites): catálogo, historial, sondeo del registro, lanzar y cancelar
+  { method: 'GET', path: /^\/api\/system\/runs(\/catalog)?$/ },
+  { method: 'GET', path: /^\/api\/system\/runs\/[1-9]\d{0,9}$/ },
+  { method: 'POST', path: /^\/api\/system\/runs$/ },
+  { method: 'POST', path: /^\/api\/system\/runs\/[1-9]\d{0,9}\/cancel$/ },
   { method: 'GET', path: /^\/api\/metrics$/ },
   { method: 'DELETE', path: /^\/api\/system\/blocked-ips\/[0-9a-fA-F:.]{1,45}$/ },
   { method: 'POST', path: /^\/api\/system\/accounts\/(unlock|mfa-reset)$/ },

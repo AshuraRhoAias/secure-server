@@ -186,6 +186,8 @@ class SecureServer {
 
             // Ajustes operativos en caliente (runtime_settings): con la BD ya conectada; sin la tabla se usa el .env
             await require('./config/runtime-settings').start();
+            // Pruebas en vivo: lo que dejó «en curso» un proceso que murió pasa a error (sin tocar lo de otros procesos vivos)
+            await require('./ops/runs.service').recoverStale().catch((error) => console.warn('⚠️ Ejecuciones de pruebas pendientes:', error.code || error.message));
             console.log('✅ Configuración validada');
         } catch (error) {
             console.error('❌ Error en validación de configuración:', error);
@@ -533,6 +535,13 @@ class SecureServer {
         force.unref();
 
         try {
+            // Pruebas en vivo: se matan los procesos hijos de las suites (no deben sobrevivir al servidor) y sus ejecuciones quedan
+            // marcadas como «servidor detenido». Antes de cerrar la BD; nunca bloquea el cierre más de 3 s.
+            await Promise.race([
+                require('./ops/runs.service').abortLocal('servidor detenido'),
+                new Promise(resolve => setTimeout(resolve, 3000))
+            ]).catch(() => {});
+
             if (this.isNotifier()) {
                 const commStats = secureCommunications.getStats();
                 if (commStats.availableChannels > 0) {

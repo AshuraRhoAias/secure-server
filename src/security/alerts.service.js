@@ -183,8 +183,28 @@ async function notify(alert) {
 // ------------------------------------------------------------------ evaluador
 let evaluating = false;
 
+// Reglas que la simulación de ataques de la web (src/ops/runners/attack-sim.js) puede disparar a propósito
+const SIMULATION_RULES = ['EVENT_CRITICAL', 'LOGIN_FAILURES_DISTRIBUTED', 'ACCOUNT_UNDER_ATTACK', 'INJECTION_WAVE', 'IP_BLOCK_SPIKE'];
+
+// ¿Hay (o hubo hace poco, dentro de la ventana de las reglas) una simulación de ataques? Se decide por la tabla ops_runs, NO por la
+// IP de los eventos: un atacante no puede ocultarse mandando X-Forwarded-For 203.0.113.x. Sin la tabla (migración sin aplicar) = no.
+async function simulationRecent(windowMinutes) {
+    try {
+        const [rows] = await db.query(
+            `SELECT 1 FROM ops_runs WHERE kind = 'attack_sim' AND (active_kind IS NOT NULL OR finished_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)) LIMIT 1`,
+            [windowMinutes]
+        );
+        return rows.length > 0;
+    } catch { return false; }
+}
+
 async function raise(rule, finding) {
     const dedupeKey = `${rule.id}|${finding.subject}`.slice(0, 190);
+    // Si pudo provocarla la simulación, la alerta se marca details.simulation, pero el aviso externo SALE IGUAL (con la marca):
+    // silenciarlo permitiría tapar un ataque real lanzando simulaciones en bucle (p. ej. con una cuenta de admin comprometida).
+    // Quien recibe el aviso ve «posible simulación» y decide; nunca se oculta nada.
+    const simulated = SIMULATION_RULES.includes(rule.id) && await simulationRecent(cfg().window);
+    if (simulated) finding = { ...finding, title: `[Posible simulación] ${finding.title}`.slice(0, 200), details: { ...(finding.details || {}), simulation: true } };
     const details = JSON.stringify(finding.details || {});
     const [existing] = await db.query('SELECT id, severity FROM security_alerts WHERE active_key = ?', [dedupeKey]);
 
@@ -203,7 +223,7 @@ async function raise(rule, finding) {
         const alert = { id: inserted.insertId, rule: rule.id, subject: finding.subject, severity: finding.severity, title: finding.title, count: finding.count, details: finding.details };
         metrics.alertsRaised.inc({ rule: rule.id, severity: finding.severity });
 
-        const sent = await notify(alert);
+        const sent = await notify(alert); // también con simulación: el aviso lleva details.simulation = true
         if (sent.sent) await db.query('UPDATE security_alerts SET notified_at = NOW() WHERE id = ?', [alert.id]);
         else if (sent.error) await db.query('UPDATE security_alerts SET notify_error = ? WHERE id = ?', [sent.error, alert.id]);
         return { created: true, id: alert.id };

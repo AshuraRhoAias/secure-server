@@ -28,6 +28,20 @@ describe('allowlist del BFF', () => {
     expect(upstreamPath('PUT', ['api', 'system', 'settings', 'x/../y'])).toBeNull();
   });
 
+  it('pruebas en vivo: catálogo, historial, sondeo por id, lanzar y cancelar, solo con su método e id numérico', () => {
+    expect(upstreamPath('GET', ['api', 'system', 'runs', 'catalog'])).toBe('/api/system/runs/catalog');
+    expect(upstreamPath('GET', ['api', 'system', 'runs'])).toBe('/api/system/runs');
+    expect(upstreamPath('GET', ['api', 'system', 'runs', '42'])).toBe('/api/system/runs/42');
+    expect(upstreamPath('POST', ['api', 'system', 'runs'])).toBe('/api/system/runs');
+    expect(upstreamPath('POST', ['api', 'system', 'runs', '42', 'cancel'])).toBe('/api/system/runs/42/cancel');
+    expect(upstreamPath('GET', ['api', 'system', 'runs', '42', 'cancel'])).toBeNull();
+    expect(upstreamPath('POST', ['api', 'system', 'runs', 'catalog'])).toBeNull();
+    expect(upstreamPath('POST', ['api', 'system', 'runs', '0', 'cancel'])).toBeNull();
+    expect(upstreamPath('DELETE', ['api', 'system', 'runs', '42'])).toBeNull();
+    expect(upstreamPath('PUT', ['api', 'system', 'runs'])).toBeNull();
+    expect(upstreamPath('GET', ['api', 'system', 'runs', '4x'])).toBeNull();
+  });
+
   it('gestión de usuarios: listar, crear y cambiar rol, solo con su método y con id numérico', () => {
     expect(upstreamPath('GET', ['api', 'system', 'users'])).toBe('/api/system/users');
     expect(upstreamPath('POST', ['api', 'system', 'users'])).toBe('/api/system/users');

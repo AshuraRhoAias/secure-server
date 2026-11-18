@@ -603,3 +603,36 @@ CREATE TABLE `runtime_settings` (
   KEY `idx_runtime_settings_user` (`updated_by`),
   CONSTRAINT `runtime_settings_user_fk` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pruebas en vivo desde la web (migración 020): ejecuciones y su registro. Ver src/ops/runs.service.js.
+CREATE TABLE `ops_runs` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `kind` enum('diagnostic','attack_sim','test_suite') NOT NULL,
+  `target` varchar(64) DEFAULT NULL,
+  `status` enum('queued','running','passed','failed','cancelled','error') NOT NULL DEFAULT 'queued',
+  `active_kind` varchar(16) DEFAULT NULL,
+  `requested_by` int(11) DEFAULT NULL,
+  `started_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `finished_at` timestamp NULL DEFAULT NULL,
+  `summary_json` text DEFAULT NULL,
+  `host` varchar(64) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ops_runs_active` (`active_kind`),
+  KEY `idx_ops_runs_started` (`started_at`),
+  KEY `idx_ops_runs_user` (`requested_by`),
+  CONSTRAINT `ops_runs_user_fk` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `ops_run_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `run_id` int(11) NOT NULL,
+  `seq` int(11) NOT NULL,
+  `level` enum('info','pass','fail','warn','error','output') NOT NULL DEFAULT 'info',
+  `step` varchar(80) NOT NULL DEFAULT '',
+  `message` varchar(500) NOT NULL DEFAULT '',
+  `data_json` text DEFAULT NULL,
+  `created_at` timestamp(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_ops_events_run` (`run_id`, `seq`),
+  CONSTRAINT `ops_run_events_run_fk` FOREIGN KEY (`run_id`) REFERENCES `ops_runs` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

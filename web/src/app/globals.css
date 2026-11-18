@@ -293,3 +293,24 @@ dialog::backdrop { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px
 button.switch { display: inline-flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; border-radius: 999px; }
 button.switch .knob { width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform 0.2s var(--ease-out), background-color 0.2s; }
 button.switch[aria-checked='true'] .knob { background: var(--ok); transform: translateX(4px); }
+
+/* ---------- pruebas en vivo ---------- */
+button.big { padding: 12px 18px; font-size: 16px; font-weight: 650; }
+.check-row { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; }
+.check-row input { margin-top: 3px; }
+.run-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.run-progress { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.run-progress progress { flex: 1 1 220px; height: 12px; accent-color: var(--accent); }
+.run-counts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.badge[data-live='on'] { animation: run-pulse 1.4s ease-in-out infinite; }
+@keyframes run-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--glow); } 50% { box-shadow: 0 0 0 6px transparent; } }
+.runlog { max-height: 26rem; min-height: 8rem; overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+.runlog:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.runlog .ln { display: flex; gap: 8px; align-items: baseline; white-space: pre-wrap; overflow-wrap: anywhere; }
+.runlog .ln .t { color: var(--muted); flex: none; }
+.runlog .ln .m { flex: none; width: 1ch; text-align: center; font-weight: 700; }
+.runlog .ln[data-level='pass'] { color: var(--ok); }
+.runlog .ln[data-level='fail'], .runlog .ln[data-level='error'] { color: var(--critical); font-weight: 600; }
+.runlog .ln[data-level='warn'] { color: var(--medium); }
+.runlog .ln[data-level='info'] { color: var(--text); }
+.runlog .ln[data-level='output'] { color: var(--muted); }

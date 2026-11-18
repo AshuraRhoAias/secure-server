@@ -30,6 +30,7 @@ const NAV = [
   { href: '/users', label: 'Usuarios y sesiones', icon: '☺' },
   { href: '/metrics', label: 'Métricas', icon: '∿' },
   { href: '/settings', label: 'Configuración', icon: '☷' },
+  { href: '/tests', label: 'Pruebas', icon: '▶' },
   { href: '/system', label: 'Sistema', icon: '⚙' }
 ] as const;
 

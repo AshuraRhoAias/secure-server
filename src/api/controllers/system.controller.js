@@ -12,6 +12,7 @@ const dashboard = require('../../security/dashboard.service');
 const privacy = require('../../security/privacy.service');
 const userAdmin = require('../../security/user-admin.service');
 const runtimeSettings = require('../../config/runtime-settings');
+const opsRuns = require('../../ops/runs.service');
 
 class SystemController {
     constructor() {
@@ -602,6 +603,80 @@ class SystemController {
             await this.changeSetting(req, res, { key, reset: true, target, reason: req.validated.query.reason });
         } catch (error) {
             this.settingsFailure(res, error, 'Error restableciendo el ajuste');
+        }
+    }
+
+    // ------------------------------------------------------------------ pruebas en vivo (SOLO admin): src/ops/runs.service.js
+
+    runsFailure(res, error, fallback) {
+        if (error instanceof opsRuns.RunError) {
+            return res.status(error.status).json({ success: false, message: error.message, code: error.code });
+        }
+        console.error(`❌ ${fallback}:`, error.code || error.message);
+        res.status(500).json({ success: false, message: fallback });
+    }
+
+    async runsCatalog(req, res) {
+        try {
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, ...opsRuns.catalog() });
+        } catch (error) {
+            this.runsFailure(res, error, 'Error leyendo el catálogo de pruebas');
+        }
+    }
+
+    async listRuns(req, res) {
+        try {
+            const runs = await opsRuns.list({ limit: req.validated.query.limit });
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, runs });
+        } catch (error) {
+            this.runsFailure(res, error, 'Error listando las ejecuciones');
+        }
+    }
+
+    async getRun(req, res) {
+        try {
+            const result = await opsRuns.get(req.validated.params.id, { afterSeq: req.validated.query.afterSeq });
+            res.set('Cache-Control', 'no-store');
+            res.json({ success: true, ...result });
+        } catch (error) {
+            this.runsFailure(res, error, 'Error leyendo la ejecución');
+        }
+    }
+
+    async startRun(req, res) {
+        try {
+            const { kind, target } = req.body;
+            // El destino de la simulación de ataques es SIEMPRE este mismo servidor (el socket de esta petición): no viene del cliente
+            const trustFn = req.app.get('trust proxy fn');
+            const context = {
+                port: req.socket.localPort, tls: Boolean(req.socket.encrypted),
+                trustsForwardedFor: typeof trustFn === 'function' ? Boolean(trustFn('127.0.0.1', 0)) : false
+            };
+            const run = await opsRuns.start({ kind, target, requestedBy: req.user.id, context });
+            await audit.log('OPS_RUN_STARTED', { runId: run.id, kind, target: target || null }, { req, severity: 'medium', riskScore: 15 });
+            await securityEvents.record({
+                type: 'OPS_RUN_STARTED', severity: 'medium', riskScore: 15, req,
+                details: { runId: run.id, kind, target: target || null, by: req.user.id }
+            });
+            res.status(202).json({ success: true, run });
+        } catch (error) {
+            this.runsFailure(res, error, 'Error lanzando la ejecución');
+        }
+    }
+
+    async cancelRun(req, res) {
+        try {
+            const run = await opsRuns.cancel(req.validated.params.id);
+            await audit.log('OPS_RUN_CANCELLED', { runId: run.id, kind: run.kind }, { req, severity: 'medium', riskScore: 10 });
+            await securityEvents.record({
+                type: 'OPS_RUN_CANCELLED', severity: 'medium', riskScore: 10, req,
+                details: { runId: run.id, kind: run.kind, by: req.user.id }
+            });
+            res.json({ success: true, run });
+        } catch (error) {
+            this.runsFailure(res, error, 'Error cancelando la ejecución');
         }
     }
 
