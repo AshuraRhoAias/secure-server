@@ -13,3 +13,9 @@
 # historia. (Regla y líneas deducidas del commit; si gitleaks informa otro fingerprint, copiar el de su resumen.)
 600be887ea4f0e6344ac691913a3576d8fb00ce0:web/e2e-support/harness.cjs:generic-api-key:60
 600be887ea4f0e6344ac691913a3576d8fb00ce0:.github/workflows/ci.yml:generic-api-key:119
+#
+# src/ops/runners/attack-sim.js (commit 53649a8): constante PASSWORD_CHARS = alfabeto con el que la simulación de ataques genera la
+# contraseña de su usuario temporal. No es un secreto (son las letras y cifras sin ambiguos). El commit siguiente lo construye por
+# rangos; se ignora el commit antiguo en vez de reescribir historia. (Línea deducida del commit; si gitleaks informa otro
+# fingerprint, copiar el de su resumen.)
+53649a8d76ec6a70937addfe6922571fe29cc050:src/ops/runners/attack-sim.js:generic-api-key:24
